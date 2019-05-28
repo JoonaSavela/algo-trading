@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# TODO: do something if there are too many zeros
 def is_valid_interval(data, left = 0, right = None):
     right = len(data) if right is None else right
     return not np.any(data[left:right] == 0)
 
+# TODO: do something if there are too many zeros
 def fill_zeros(data):
     new_data = data
     n = len(data)
@@ -38,7 +40,7 @@ def fill_zeros(data):
 
 def normalize_values(opens, highs, lows, closes, volumes):
     i = 0
-    while opens[i] == 0 and i < opens.size:
+    while i < opens.size and opens[i] == 0:
         i += 1
     divider = opens[i] if i < opens.size else 1
     return opens / divider, highs / divider, lows / divider, closes / divider, volumes / 100000
@@ -46,6 +48,8 @@ def normalize_values(opens, highs, lows, closes, volumes):
 def calculate_y(closes):
     close_min = closes.min()
     close_max = closes.max()
+    if close_max == close_min:
+        print(closes)
     current = closes[0]
     peak = 2 * (current - close_min) / (close_max - close_min) - 1
     percent_gain = close_max / current - 1
@@ -53,8 +57,12 @@ def calculate_y(closes):
     return np.array([peak, percent_gain, percent_loss])
 
 def transform_data(opens, highs, lows, closes, volumes, input_length, y_length = 3):
-    X = np.empty(shape=[0, input_length * 5]) # 5 = number of types of input variables
-    Y = np.empty(shape=[0, y_length])
+    n = len(opens) - 2 * input_length + 2 # number of rows
+    if n <= 0 or np.all(closes == closes[0]):
+        return np.empty(shape=[0, input_length * 5]), np.empty(shape=[0, y_length])
+    X = np.zeros(shape=[n, input_length * 5]) # 5 = number of types of input variables
+    Y = np.zeros(shape=[n, y_length])
+    li = np.ones(n, dtype=bool) # hotfix for the only one value bug
 
     i = input_length - 1
 
@@ -65,12 +73,14 @@ def transform_data(opens, highs, lows, closes, volumes, input_length, y_length =
         d = c + input_length
 
         x = np.concatenate([opens[a:b], highs[a:b], lows[a:b], closes[a:b], volumes[a:b]])
-        X = np.append(X, [x], axis = 0)
-        Y = np.append(Y, np.reshape(calculate_y(closes[c:d]), [1, 3]), axis = 0)
+        X[a,:] = x
+        Y[a,:] = np.reshape(calculate_y(closes[c:d]), [1, y_length])
+        if np.all(closes[c:d] == closes[c]):
+            li[a] = False
 
         i += 1
 
-    return X, Y
+    return X[li,:], Y[li,:]
 
 def plot_y(X, Y, X_col):
     tmp = X[:,X_col]

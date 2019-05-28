@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 def build_model(input_length, alpha = 0.001):
     model = tf.keras.Sequential([
         tf.keras.layers.Dense(input_length * 2, activation='relu', input_dim=input_length),
-        tf.keras.layers.Dense(input_length // 2, activation='relu'),
+        tf.keras.layers.Dense(input_length * 4, activation='relu'),
+        tf.keras.layers.Dense(input_length * 2, activation='relu'),
         tf.keras.layers.Dense(3, activation='tanh')
     ])
 
@@ -34,7 +35,7 @@ def plot_history(history):
            label='Train Error')
     plt.plot(hist['epoch'], hist['val_mean_absolute_error'],
            label = 'Val Error')
-    plt.ylim([0,5])
+    # plt.ylim([0,5])
     plt.legend()
 
     plt.figure()
@@ -44,6 +45,6 @@ def plot_history(history):
            label='Train Error')
     plt.plot(hist['epoch'], hist['val_mean_squared_error'],
            label = 'Val Error')
-    plt.ylim([0,20])
+    # plt.ylim([0,20])
     plt.legend()
     plt.show()

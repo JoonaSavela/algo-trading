@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from utils import plot_y
 from model import build_model, train_model, plot_history
-from data import get_and_save_data_from_period
+from data import get_and_save_data_from_period, load_and_transform_data
 import numpy as np
 import json
 
@@ -9,18 +9,21 @@ def main():
 
     input_length = 4 * 14
 
-    get_and_save_data_from_period()
+    X, Y = load_and_transform_data()
 
-    # a = np.arange(10).reshape(2,5) # a 2 by 5 array
-    # b = a.tolist() # nested lists with same data, indices
-    # print(b)
-    # print(np.array(b))
+    # get_and_save_data_from_period(days = 30)
 
-    # with open('data/test.json', 'w') as testfile:
-    #     json.dump({'test': 3}, testfile)
+    # obj = load_data()
+    # # print(obj.keys())
+    # for v in obj.values():
+    #     print(v.keys())
+    #     for vv in v.values():
+    #         print(vv.keys())
+    #         break
+    #     break
 
-    # print(X.shape)
-    # print(Y.shape[1])
+    print(X.shape)
+    print(Y.shape)
 
     # plt.plot(range(len(closes)), closes)
     # plt.show()
@@ -30,10 +33,10 @@ def main():
     # plt.hist(Y)
     # plt.show()
 
-    # model = build_model(input_length * 5, 0.001)
-    # # model.summary()
-    # history = train_model(model, X, Y, 10)
-    # plot_history(history)
+    model = build_model(input_length * 5, 0.001)
+    # model.summary()
+    history = train_model(model, X, Y, 3)
+    plot_history(history)
 
     # i = 10
     # tmp = model.predict(X_tmp[0:(i+1),])

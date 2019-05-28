@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import date, timedelta
 import os
 import requests
+import glob
 from utils import is_valid_interval, fill_zeros, normalize_values, transform_data
 
 
@@ -68,9 +69,11 @@ def get_and_save_data(date_str = date.today().strftime('%Y%m%d')):
             }
 
             obj[stock] = stock_data
+
+            print("Appended " + stock)
         except KeyError:
             pass
-        break
+        # break
 
     with open('data/' + date_str + '.json', 'w') as file:
         json.dump(obj, file)
@@ -91,16 +94,42 @@ def get_and_save_data_from_period(days = 30, replace = False):
         current_day += timedelta(days=1)
 
 def load_data():
-    pass
+    obj = {}
 
-def load_and_transform_data():
-    # opens, highs, lows, closes, volumes = normalize_values(opens, highs, lows, closes, volumes)
-    #
-    # X, Y = transform_data(opens, highs, lows, closes, volumes, input_length)
-    #
-    #
-    # print("Appended " + stock + " (" + str(Y.shape[0]) + " rows)" + ".")
-    pass
+    for filename in glob.glob('data/*.json'):
+        with open(filename, 'r') as file:
+            obj[filename] = json.load(file)
+
+    return obj
+
+def load_and_transform_data(input_length = 4 * 14, test_split = 0):
+    obj = load_data()
+
+    X = np.empty(shape=[0, input_length * 5])
+    Y = np.empty(shape=[0, 3])
+
+    for day, day_data in obj.items():
+        for stock_data in day_data.values():
+            opens, highs, lows, closes, volumes = np.array(stock_data['opens']), \
+                                                  np.array(stock_data['highs']), \
+                                                  np.array(stock_data['lows']), \
+                                                  np.array(stock_data['closes']), \
+                                                  np.array(stock_data['volumes'])
+
+            opens, highs, lows, closes, volumes = normalize_values(opens, highs, lows, closes, volumes)
+
+            newX, newY = transform_data(opens, highs, lows, closes, volumes, input_length)
+
+            X = np.append(X, newX, axis = 0)
+            Y = np.append(Y, newY, axis = 0)
+
+        print("Appended day " + day)
+        print(X.shape)
+        print(Y.shape)
+        if (Y.shape[0] > 0):
+            break
+
+    return X, Y
 
 if __name__ == "__main__":
     get_and_save_data()
