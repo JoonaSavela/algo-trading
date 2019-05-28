@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from utils import get_data, normalize_values, transform_data
+from utils import get_data, normalize_values, transform_data, plot_y
 from model import build_model, train_model, plot_history
 import numpy as np
 import pandas as pd
@@ -32,10 +32,12 @@ def main():
 
 
     print(X.shape)
-    print(Y.shape)
+    print(Y.shape[1])
 
     # plt.plot(range(len(closes)), closes)
     # plt.show()
+
+    plot_y(X, Y, input_length * 4 - 1) # last of closes
 
     # plt.hist(Y)
     # plt.show()
@@ -46,8 +48,8 @@ def main():
     # plot_history(history)
 
     # i = 10
-    # test = model.predict(X_test[0:(i+1),])
-    # print(test)
+    # tmp = model.predict(X_tmp[0:(i+1),])
+    # print(tmp)
 
     # i = 0
     # print(X.shape)

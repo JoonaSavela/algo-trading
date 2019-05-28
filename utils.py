@@ -1,6 +1,7 @@
 import numpy as np
 import requests
 import json
+import matplotlib.pyplot as plt
 
 def is_valid_interval(data, left = 0, right = None):
     right = len(data) if right is None else right
@@ -114,3 +115,16 @@ def transform_data(opens, highs, lows, closes, volumes, input_length):
         i += 1
 
     return X, Y
+
+def plot_y(X, Y, X_col):
+    tmp = X[:,X_col]
+    size = 8
+
+    fig, axes = plt.subplots(figsize=(16, 4), ncols=Y.shape[1])
+
+    for i in range(len(axes)):
+        axis = axes[i]
+        plot = axis.scatter(range(len(tmp)), tmp, c=Y[:,i], cmap=plt.get_cmap('viridis'), s=size)
+        fig.colorbar(plot, ax=axis)
+
+    plt.show()
