@@ -10,7 +10,7 @@ def main():
 
     input_length = 4 * 14
     X = np.empty(shape=[0, input_length * 5]) # 5 = number of types of input variables
-    Y = np.empty(shape=[0, 1])
+    Y = np.empty(shape=[0, 3])
 
     for stock in stocks['Symbol']:
         try:
@@ -28,10 +28,14 @@ def main():
             print("Appended " + stock + " (" + str(newY.shape[0]) + " rows)" + ".")
         except KeyError:
             pass
+        break
 
 
     print(X.shape)
     print(Y.shape)
+
+    # plt.plot(range(len(closes)), closes)
+    # plt.show()
 
     # plt.hist(Y)
     # plt.show()

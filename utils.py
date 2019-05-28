@@ -2,6 +2,41 @@ import numpy as np
 import requests
 import json
 
+def is_valid_interval(data, left = 0, right = None):
+    right = len(data) if right is None else right
+    return not np.any(data[left:right] == 0)
+
+def fill_zeros(data):
+    new_data = data
+    n = len(data)
+    for i in range(n):
+        if data[i] == 0:
+            if i == 0:
+                k = i + 1
+                while k < n and data[k] == 0:
+                    k += 1
+                if k < n:
+                    new_data[i] = data[k]
+            elif i == n - 1:
+                j = i - 1
+                while j >= 0 and data[j] == 0:
+                    j -= 1
+                if j >= 0:
+                    new_data[i] = data[j]
+            else:
+                k = i + 1
+                while k < n and data[k] == 0:
+                    k += 1
+                j = i - 1
+                while j >= 0 and data[j] == 0:
+                    j -= 1
+                if k < n and j >= 0:
+                    w1 = k - i
+                    w2 = i - j
+                    new_data[i] = (w1 * data[k] + w2 * data[j]) / (w1 + w2)
+
+    return new_data
+
 def get_data(url):
     # get the data in json format
     request = requests.get(url)
@@ -26,6 +61,22 @@ def get_data(url):
         except TypeError:
             pass
 
+    # fill in the zeros
+    if not is_valid_interval(opens):
+        opens = fill_zeros(opens)
+
+    if not is_valid_interval(highs):
+        highs = fill_zeros(highs)
+
+    if not is_valid_interval(lows):
+        lows = fill_zeros(lows)
+
+    if not is_valid_interval(closes):
+        closes = fill_zeros(closes)
+
+    if not is_valid_interval(volumes):
+        volumes = fill_zeros(volumes)
+
     return opens, highs, lows, closes, volumes
 
 def normalize_values(opens, highs, lows, closes, volumes):
@@ -34,9 +85,6 @@ def normalize_values(opens, highs, lows, closes, volumes):
         i += 1
     divider = opens[i] if i < opens.size else 1
     return opens / divider, highs / divider, lows / divider, closes / divider, volumes / 100000
-
-def is_valid_interval(data, left, right):
-    return not np.any(data[left:right] == 0)
 
 def calculate_y(closes):
     close_min = closes.min()
@@ -59,12 +107,9 @@ def transform_data(opens, highs, lows, closes, volumes, input_length):
         c = i
         d = c + input_length
 
-        if is_valid_interval(opens, a, d) and is_valid_interval(highs, a, d) and \
-            is_valid_interval(lows, a, d) and is_valid_interval(closes, a, d) and \
-            is_valid_interval(volumes, a, d):
-            x = np.concatenate([opens[a:b], highs[a:b], lows[a:b], closes[a:b], volumes[a:b]])
-            X = np.append(X, [x], axis = 0)
-            Y = np.append(Y, np.reshape(calculate_y(closes[c:d]), [1, 3]), axis = 0)
+        x = np.concatenate([opens[a:b], highs[a:b], lows[a:b], closes[a:b], volumes[a:b]])
+        X = np.append(X, [x], axis = 0)
+        Y = np.append(Y, np.reshape(calculate_y(closes[c:d]), [1, 3]), axis = 0)
 
         i += 1
 
