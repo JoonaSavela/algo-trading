@@ -1,51 +1,71 @@
 import numpy as np
 import requests
 import json
-from datetime import datetime, timedelta
 
 def get_data(url):
     # get the data in json format
     request = requests.get(url)
     content = json.loads(request._content)
-    time_series = content["Time Series (1min)"]
 
     # initialize outputs
-    times = np.array([])
-    opens = np.array([])
-    highs = np.array([])
-    lows = np.array([])
-    closes = np.array([])
-    volumes = np.array([])
-
-    # reverse output ordering (starts from oldest, ends in newest)
-    tmp = list(time_series.items())
-    tmp.reverse()
+    opens = np.zeros(len(content))
+    highs = np.zeros(len(content))
+    lows = np.zeros(len(content))
+    closes = np.zeros(len(content))
+    volumes = np.zeros(len(content))
 
     # insert the data into the outputs
-    for key, item in dict(tmp).items():
-        datetime_object = datetime.strptime(key, '%Y-%m-%d %H:%M:%S')
-        times = np.append(times, datetime_object)
-        opens = np.append(opens, float(item["1. open"]))
-        highs = np.append(highs, float(item["2. high"]))
-        lows = np.append(lows, float(item["3. low"]))
-        closes = np.append(closes, float(item["4. close"]))
-        volumes = np.append(volumes, float(item["5. volume"]))
+    for i in range(len(content)):
+        item = content[i]
+        try:
+            opens[i] = float(item["open"])
+            highs[i] = float(item["high"])
+            lows[i] = float(item["low"])
+            closes[i] = float(item["close"])
+            volumes[i] = float(item["volume"])
+        except TypeError:
+            pass
 
-    return times, opens, highs, lows, closes, volumes
+    return opens, highs, lows, closes, volumes
 
-def normalize_prices(opens, highs, lows, closes):
-    divider = opens[0]
-    return opens / divider, highs / divider, lows / divider, closes / divider
+def normalize_values(opens, highs, lows, closes, volumes):
+    i = 0
+    while opens[i] == 0 and i < opens.size:
+        i += 1
+    divider = opens[i] if i < opens.size else 1
+    return opens / divider, highs / divider, lows / divider, closes / divider, volumes / 100000
 
-def is_same_day(datetime1, datetime2):
-    return datetime1.date() == datetime2.date()
+def is_valid_interval(data, left, right):
+    return not np.any(data[left:right] == 0)
 
-def times_min_max(times):
-    times_without_dates = list(map(lambda x: x.time(), list(times)))
-    return min(times_without_dates), max(times_without_dates)
+def calculate_y(closes):
+    close_min = closes.min()
+    close_max = closes.max()
+    current = closes[0]
+    peak = 2 * (current - close_min) / (close_max - close_min) - 1
+    percent_gain = close_max / current - 1
+    percent_loss = close_min / current - 1
+    return np.array([peak, percent_gain, percent_loss])
 
-def is_valid_interval(dt, left, right, time_min, time_max, minutes = 1):
-    datetime1 = dt - timedelta(minutes = left * minutes)
-    datetime2 = dt + timedelta(minutes = right * minutes)
-    return is_same_day(dt, datetime1) and is_same_day(dt, datetime2) and \
-        datetime1.time() >= time_min and datetime2.time() <= time_max
+def transform_data(opens, highs, lows, closes, volumes, input_length):
+    X = np.empty(shape=[0, input_length * 5]) # 5 = number of types of input variables
+    Y = np.empty(shape=[0, 3])
+
+    i = input_length - 1
+
+    while i <= len(opens) - input_length:
+        b = i + 1
+        a = b - input_length
+        c = i
+        d = c + input_length
+
+        if is_valid_interval(opens, a, d) and is_valid_interval(highs, a, d) and \
+            is_valid_interval(lows, a, d) and is_valid_interval(closes, a, d) and \
+            is_valid_interval(volumes, a, d):
+            x = np.concatenate([opens[a:b], highs[a:b], lows[a:b], closes[a:b], volumes[a:b]])
+            X = np.append(X, [x], axis = 0)
+            Y = np.append(Y, np.reshape(calculate_y(closes[c:d]), [1, 3]), axis = 0)
+
+        i += 1
+
+    return X, Y

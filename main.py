@@ -1,18 +1,55 @@
 import matplotlib.pyplot as plt
-from utils import get_data, normalize_prices, times_min_max, is_valid_interval
+from utils import get_data, normalize_values, transform_data
+from model import build_model, train_model, plot_history
+import numpy as np
+import pandas as pd
 
 def main():
-    url = "https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=MSFT&interval=1min&apikey=CV8VMYTJCQBBSKXP&outputsize=full"
-    times, opens, highs, lows, closes, volumes = get_data(url)
-    opens, highs, lows, closes = normalize_prices(opens, highs, lows, closes)
+    # TODO: move this into a function; save the result into a file
+    stocks = pd.read_csv('stocks.csv')
 
-    time_min, time_max = times_min_max(times)
+    input_length = 4 * 14
+    X = np.empty(shape=[0, input_length * 5]) # 5 = number of types of input variables
+    Y = np.empty(shape=[0, 1])
 
-    # print(is_valid_interval(times[0], 0, 5, time_min, time_max, 1))
-    # print(is_valid_interval(times[0], 0, 5, time_min, time_max, 5))
-    # print(is_valid_interval(times[0], 0, 10000, time_min, time_max, 5))
-    # print(is_valid_interval(times[100], 100, 100, time_min, time_max))
-    # print(is_valid_interval(times[0], 1, 100, time_min, time_max))
+    for stock in stocks['Symbol']:
+        try:
+            # TODO: all dates from 30 days ago
+            url = 'https://api.iextrading.com/1.0/stock/'+stock+'/chart/date/20190523'
+            opens, highs, lows, closes, volumes = get_data(url)
+
+            opens, highs, lows, closes, volumes = normalize_values(opens, highs, lows, closes, volumes)
+
+            newX, newY = transform_data(opens, highs, lows, closes, volumes, input_length)
+
+            X = np.append(X, newX, axis = 0)
+            Y = np.append(Y, newY, axis = 0)
+
+            print("Appended " + stock + " (" + str(newY.shape[0]) + " rows)" + ".")
+        except KeyError:
+            pass
+
+
+    print(X.shape)
+    print(Y.shape)
+
+    # plt.hist(Y)
+    # plt.show()
+
+    # model = build_model(input_length * 5, 0.001)
+    # # model.summary()
+    # history = train_model(model, X, Y, 10)
+    # plot_history(history)
+
+    # i = 10
+    # test = model.predict(X_test[0:(i+1),])
+    # print(test)
+
+    # i = 0
+    # print(X.shape)
+    # print(Y.shape)
+    # print(X[i,(input_length * 4):(input_length * 5)])
+    # print(Y[i])
 
     # print(len(times))
     # plt.plot(times, closes)
