@@ -1,6 +1,4 @@
 import numpy as np
-import requests
-import json
 import matplotlib.pyplot as plt
 
 def is_valid_interval(data, left = 0, right = None):
@@ -38,48 +36,6 @@ def fill_zeros(data):
 
     return new_data
 
-def get_data(url):
-    # get the data in json format
-    request = requests.get(url)
-    content = json.loads(request._content)
-
-    # initialize outputs
-    opens = np.zeros(len(content))
-    highs = np.zeros(len(content))
-    lows = np.zeros(len(content))
-    closes = np.zeros(len(content))
-    volumes = np.zeros(len(content))
-
-    # insert the data into the outputs
-    for i in range(len(content)):
-        item = content[i]
-        try:
-            opens[i] = float(item["open"])
-            highs[i] = float(item["high"])
-            lows[i] = float(item["low"])
-            closes[i] = float(item["close"])
-            volumes[i] = float(item["volume"])
-        except TypeError:
-            pass
-
-    # fill in the zeros
-    if not is_valid_interval(opens):
-        opens = fill_zeros(opens)
-
-    if not is_valid_interval(highs):
-        highs = fill_zeros(highs)
-
-    if not is_valid_interval(lows):
-        lows = fill_zeros(lows)
-
-    if not is_valid_interval(closes):
-        closes = fill_zeros(closes)
-
-    if not is_valid_interval(volumes):
-        volumes = fill_zeros(volumes)
-
-    return opens, highs, lows, closes, volumes
-
 def normalize_values(opens, highs, lows, closes, volumes):
     i = 0
     while opens[i] == 0 and i < opens.size:
@@ -96,9 +52,9 @@ def calculate_y(closes):
     percent_loss = close_min / current - 1
     return np.array([peak, percent_gain, percent_loss])
 
-def transform_data(opens, highs, lows, closes, volumes, input_length):
+def transform_data(opens, highs, lows, closes, volumes, input_length, y_length = 3):
     X = np.empty(shape=[0, input_length * 5]) # 5 = number of types of input variables
-    Y = np.empty(shape=[0, 3])
+    Y = np.empty(shape=[0, y_length])
 
     i = input_length - 1
 
