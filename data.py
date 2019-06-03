@@ -33,30 +33,31 @@ def get_data(url):
             pass
 
     # fill in the zeros
-    if not is_valid_interval(opens):
-        opens = fill_zeros(opens)
-
-    if not is_valid_interval(highs):
-        highs = fill_zeros(highs)
-
-    if not is_valid_interval(lows):
-        lows = fill_zeros(lows)
-
-    if not is_valid_interval(closes):
-        closes = fill_zeros(closes)
-
-    if not is_valid_interval(volumes):
-        volumes = fill_zeros(volumes)
+    # if not is_valid_interval(opens):
+    #     opens = fill_zeros(opens)
+    #
+    # if not is_valid_interval(highs):
+    #     highs = fill_zeros(highs)
+    #
+    # if not is_valid_interval(lows):
+    #     lows = fill_zeros(lows)
+    #
+    # if not is_valid_interval(closes):
+    #     closes = fill_zeros(closes)
+    #
+    # if not is_valid_interval(volumes):
+    #     volumes = fill_zeros(volumes)
 
     return opens, highs, lows, closes, volumes
 
 def get_and_save_data(date_str = date.today().strftime('%Y%m%d')):
-    stocks = pd.read_csv('stocks.csv')
+    # stocks = pd.read_csv('stocks.csv')
+    coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
 
     obj = {}
 
-    for stock in stocks['Symbol']:
-        url = 'https://api.iextrading.com/1.0/stock/' + stock + '/chart/date/' + date_str
+    for coin in coins:
+        url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
         try:
             opens, highs, lows, closes, volumes = get_data(url)
 
