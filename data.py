@@ -7,92 +7,60 @@ import requests
 import glob
 from utils import is_valid_interval, fill_zeros, normalize_values, transform_data
 
-
-def get_data(url):
-    # get the data in json format
+def get_and_save_data(coin, time_str):
+    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
     request = requests.get(url)
     content = json.loads(request._content)
+    print(len(content['Data']))
+    for key, item in content.items():
+        if key != 'Data':
+            print(key, item)
 
-    # initialize outputs
-    opens = np.zeros(len(content))
-    highs = np.zeros(len(content))
-    lows = np.zeros(len(content))
-    closes = np.zeros(len(content))
-    volumes = np.zeros(len(content))
+    if content['Response'] == 'Success' and len(content['Data']) > 2000:
+        with open('data/' + coin + '/' + time_str + '.json', 'w') as file:
+            json.dump(content, file)
+    elif len(content['Data']) < 2000:
+        print('Data length is under 2000')
 
-    # insert the data into the outputs
-    for i in range(len(content)):
-        item = content[i]
-        try:
-            opens[i] = float(item["open"])
-            highs[i] = float(item["high"])
-            lows[i] = float(item["low"])
-            closes[i] = float(item["close"])
-            volumes[i] = float(item["volume"])
-        except TypeError:
-            pass
+    print()
 
-    # fill in the zeros
-    # if not is_valid_interval(opens):
-    #     opens = fill_zeros(opens)
-    #
-    # if not is_valid_interval(highs):
-    #     highs = fill_zeros(highs)
-    #
-    # if not is_valid_interval(lows):
-    #     lows = fill_zeros(lows)
-    #
-    # if not is_valid_interval(closes):
-    #     closes = fill_zeros(closes)
-    #
-    # if not is_valid_interval(volumes):
-    #     volumes = fill_zeros(volumes)
+    return content['TimeTo']
 
-    return opens, highs, lows, closes, volumes
-
-def get_and_save_data(date_str = date.today().strftime('%Y%m%d')):
-    # stocks = pd.read_csv('stocks.csv')
-    coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
-
-    obj = {}
+def get_and_save_data_from_period():
+    # coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
+    coins = ['BTC', 'ETH']
 
     for coin in coins:
-        url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
-        try:
-            opens, highs, lows, closes, volumes = get_data(url)
+        if not os.path.exists('data/' + coin):
+            os.mkdir('data/' + coin)
+        time_max = -1
+        for filename in glob.glob('data/' + coin + '/*.json'):
+            split1 = filename.split('/')
+            split2 = split1[2].split('.')
+            if int(split2[0]) > time_max:
+                time_max = int(split2[0])
 
-            stock_data = {
-                'opens': opens.tolist(),
-                'highs': highs.tolist(),
-                'lows': lows.tolist(),
-                'closes': closes.tolist(),
-                'volumes': volumes.tolist()
-            }
-
-            obj[stock] = stock_data
-
-            print("Appended " + stock)
-        except KeyError:
-            pass
-        # break
-
-    with open('data/' + date_str + '.json', 'w') as file:
-        json.dump(obj, file)
-
-def get_and_save_data_from_period(days = 30, replace = False):
-    current_day = date.today() - timedelta(days=days)
-
-    while current_day < date.today():
-        date_str = current_day.strftime('%Y%m%d')
-        filename = 'data/' + date_str + '.json'
-        if not ( replace == False and os.path.isfile(filename) ):
-            get_and_save_data(date_str)
-            print('Day ' + date_str + ' processed.')
+        if time_max != -1:
+            time = time_max + 2000 * 60
         else:
-            print('File ' + filename + ' already exists.')
+            url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+            request = requests.get(url)
+            content = json.loads(request._content)
+            time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
+            print(coin + ': No previous files found')
 
+        new_time = time - 2000 * 60
+        old_time = new_time - 1
 
-        current_day += timedelta(days=1)
+        while old_time < new_time:
+            old_time = new_time
+            new_time = get_and_save_data(coin, str(time))
+            print('Period ' + str(time) + ' processed')
+            time += 2000 * 60
+
+        print('Coin', coin, 'processed')
+        print()
+
 
 def load_data():
     obj = {}

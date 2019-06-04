@@ -5,6 +5,7 @@ from data import get_and_save_data_from_period, load_and_transform_data
 import numpy as np
 import json
 import requests
+import glob
 
 def main():
 
@@ -15,35 +16,99 @@ def main():
         2000 minutes apart
     '''
 
-    input_length = 4 * 14
-
-    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&limit=2000&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
-
-    request = requests.get(url)
-    timeFrom = 0
-
-    for i in range(3):
-        content = json.loads(request._content)
-        # print(content)
-        print(len(content['Data']))
-        print(content.keys())
-
-        for key, item in content.items():
-            if key != 'Data':
-                print(key, item)
-
-        print(timeFrom - content['TimeTo'])
-        print()
-
-        timeFrom = content['TimeFrom']
-        url = 'https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&limit=2000&toTs=' + str(timeFrom) + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
-
-        print(timeFrom - content['TimeTo']) # time difference of 2000 minutes in seconds: 120000
-        print()
-
-        request = requests.get(url)
+    get_and_save_data_from_period()
 
 
+    # coin = 'BTC'
+    # time_max = -1
+    # for filename in glob.glob('data/' + coin + '/*.json'):
+    #     split1 = filename.split('/')
+    #     split2 = split1[2].split('.')
+    #     if int(split2[0]) > time_max:
+    #         time_max = int(split2[0])
+    #
+    # if time_max != -1:
+    #     time = time_max + 2000 * 60
+    # else:
+    #     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    #     request = requests.get(url)
+    #     content = json.loads(request._content)
+    #     newest = content['TimeTo']
+    #     time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
+    #
+    # print(content['TimeTo'], len(content['Data']))
+    # for key, item in content.items():
+    #     if key != 'Data':
+    #         print(key, item)
+    #
+    # print()
+    # time = newest + 1000 * 60
+    # print(time)
+    #
+    # url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + str(time) + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    # request = requests.get(url)
+    #
+    # content = json.loads(request._content)
+    # print(content['TimeTo'], len(content['Data']))
+    # for key, item in content.items():
+    #     if key != 'Data':
+    #         print(key, item)
+
+
+    # input_length = 4 * 14
+    #
+    # url = 'https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&limit=2000&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    # request = requests.get(url)
+    #
+    # content = json.loads(request._content)
+    #
+    # print(content['TimeTo'], len(content['Data']))
+    #
+    # time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
+    # print(time)
+    #
+    # url = 'https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&limit=2000&toTs=' + str(time) + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    # request = requests.get(url)
+    #
+    # content = json.loads(request._content)
+    #
+    # print(content['TimeTo'], len(content['Data']))
+
+
+    # timeFrom = 0
+
+    # for i in range(3):
+    #     content = json.loads(request._content)
+    #     # print(content)
+    #     print(len(content['Data']))
+    #     print(content.keys())
+    #
+    #     for key, item in content.items():
+    #         if key != 'Data':
+    #             print(key, item)
+    #
+    #     print(timeFrom - content['TimeTo'])
+    #     print()
+    #
+    #     timeFrom = content['TimeFrom']
+    #     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&limit=2000&toTs=' + str(timeFrom) + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    #
+    #     print(timeFrom - content['TimeTo']) # time difference of 2000 minutes in seconds: 120000
+    #     print()
+    #
+    #     request = requests.get(url)
+
+    # coin = 'BTC'
+    # time_max = -1
+    # for filename in glob.glob('data/' + coin + '/*.json'):
+    #     split1 = filename.split('/')
+    #     print(split1)
+    #     split2 = split1[2].split('.')
+    #     print(split2)
+    #     if int(split2[0]) > time_max:
+    #         time_max = int(split2[0])
+    #
+    # print(time_max)
 
     # closes = np.zeros(len(content['Data']))
     # times = np.zeros(len(content['Data']))
