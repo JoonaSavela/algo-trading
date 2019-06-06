@@ -4,10 +4,12 @@ import numpy as np
 import time
 from datetime import timedelta
 import pandas as pd
+import json
+import glob
 from es import EvolutionStrategy
 
 from keras.models import Model, Input, Sequential
-from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
+from keras.layers import Dense
 from keras.optimizers import Adam # not important as there's no training here, but required by Keras.
 import tensorflow as tf
 from keras import backend as K
@@ -15,8 +17,8 @@ from keras import backend as K
 start_time = time.time()
 
 # data load
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets("../MNIST_data/", one_hot=True)
+# from tensorflow.examples.tutorials.mnist import input_data
+# mnist = input_data.read_data_sets("../MNIST_data/", one_hot=True)
 
 # to run model evluation on 1 core
 # config = tf.ConfigProto(intra_op_parallelism_threads=1,
@@ -27,43 +29,53 @@ mnist = input_data.read_data_sets("../MNIST_data/", one_hot=True)
 
 
 # data params
-batch_size = 128
-num_classes = 10
+batch_size = 60*8
+input_length = 4 * 14
+# num_classes = 10
 
 # loading data into memory
-x_train = mnist.train.images
-x_val = mnist.validation.images
-x_test = mnist.test.images
-y_train = mnist.train.labels
-y_val = mnist.validation.labels
-y_test = mnist.test.labels
+# x_train = mnist.train.images
+# x_val = mnist.validation.images
+# x_test = mnist.test.images
+# y_train = mnist.train.labels
+# y_val = mnist.validation.labels
+# y_test = mnist.test.labels
 
 
 # NN model definition
-input_layer = Input(shape=(784,))
-layer_1 = Dense(784)(input_layer)
-layer_2 = Dense(784)(layer_1)
-layer_3 = Dense(784)(layer_2)
-output_layer = Dense(num_classes, activation='softmax')(layer_3)
+input_layer = Input(shape=(input_length * 6,)) # 6 fields in json
+layer_1 = Dense(input_length * 3)(input_layer)
+layer_2 = Dense(input_length * 3 // 2)(layer_1)
+layer_3 = Dense(input_length * 3 // 4)(layer_2)
+output_layer = Dense(4, activation='softmax')(layer_3)
 model = Model(input_layer, output_layer)
 model.compile(Adam(), 'mse', metrics=['accuracy'])
 
 # reward function definition
 def get_reward(weights, calc_metrics = False):
+    filename = np.random.choice(glob.glob('data/*/*.json'))
+    print(filename)
+    with open(filename, 'r') as file:
+        obj = json.load(file)
+
+
     start_index = np.random.choice(y_train.shape[0]-batch_size-1,1)[0]
     solution = y_train[start_index:start_index+batch_size]
     inp = x_train[start_index:start_index+batch_size]
 
     model.set_weights(weights)
-    prediction = model.predict(inp)
+
+
+
+    # prediction = model.predict(inp)
 
     metrics = {}
     if calc_metrics:
-        metrics['accuracy_test'] = np.mean(np.equal(np.argmax(model.predict(x_test),1), np.argmax(y_test,1)))
-        metrics['accuracy_val'] = np.mean(np.equal(np.argmax(model.predict(x_val),1), np.argmax(y_val,1)))
-        metrics['accuracy_train'] = np.mean(np.equal(np.argmax(model.predict(inp),1), np.argmax(solution,1)))
+        # metrics['accuracy_test'] = np.mean(np.equal(np.argmax(model.predict(x_test),1), np.argmax(y_test,1)))
+        # metrics['accuracy_val'] = np.mean(np.equal(np.argmax(model.predict(x_val),1), np.argmax(y_val,1)))
+        # metrics['accuracy_train'] = np.mean(np.equal(np.argmax(model.predict(inp),1), np.argmax(solution,1)))
 
-    reward = -np.sum(np.square(solution - prediction))
+    # reward = -np.sum(np.square(solution - prediction))
     return reward, metrics
 
 
@@ -113,7 +125,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 es.run_dist(num_iterations, print_steps, num_workers)
 
             if output_results:
-                RUN_SUMMARY_LOC = '../run_summaries/'
+                RUN_SUMMARY_LOC = './run_summaries/'
                 print('saving results to loc:', RUN_SUMMARY_LOC )
                 results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), 6),
                                        columns=list(['run_name',
@@ -133,11 +145,10 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    metrics = run(start_run=0, tot_runs=1, num_iterations=100, print_steps=10,
-     output_results=False, num_workers=1)
+    run(start_run=0, tot_runs=1, num_iterations=100, print_steps=10,
+     output_results=True, num_workers=1)
 
-    print()
-    print(metrics)
+    # get_reward(0)
 
     ### multi worker run
     # run(start_run=0, tot_runs=1, num_iterations=100, print_steps=3,
