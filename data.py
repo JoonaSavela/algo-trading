@@ -7,28 +7,38 @@ import requests
 import glob
 from utils import is_valid_interval, fill_zeros, normalize_values, transform_data
 
+# TODO: rename functions
+
+
 def get_and_save_data(coin, time_str):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
     request = requests.get(url)
     content = json.loads(request._content)
-    print(len(content['Data']))
-    for key, item in content.items():
-        if key != 'Data':
-            print(key, item)
+    # print(len(content['Data']))
+    # for key, item in content.items():
+    #     if key != 'Data':
+    #         print(key, item)
 
-    if content['Response'] == 'Success' and len(content['Data']) > 2000:
+    is_same_time = content['TimeTo'] == int(time_str)
+
+    if content['Response'] == 'Success' and len(content['Data']) > 2000 and is_same_time:
         with open('data/' + coin + '/' + time_str + '.json', 'w') as file:
             json.dump(content, file)
-    elif len(content['Data']) < 2000:
-        print('Data length is under 2000')
+    elif not is_same_time:
+        print('The "To" time was different than expected')
+    elif len(content['Data']) <= 2000:
+        print('Data length is under 2001')
+    else:
+        print('An error occurred')
+        for key, item in content.items():
+            print(key, item)
+        print()
 
-    print()
-
-    return content['TimeTo']
+    return is_same_time
 
 def get_and_save_data_from_period():
     # coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
-    coins = ['BTC', 'ETH']
+    coins = ['BTC', 'ETH', 'XRP', 'BCH']
 
     for coin in coins:
         if not os.path.exists('data/' + coin):
@@ -49,13 +59,7 @@ def get_and_save_data_from_period():
             time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
             print(coin + ': No previous files found')
 
-        new_time = time - 2000 * 60
-        old_time = new_time - 1
-
-        while old_time < new_time:
-            old_time = new_time
-            new_time = get_and_save_data(coin, str(time))
-            print('Period ' + str(time) + ' processed')
+        while get_and_save_data(coin, str(time)):
             time += 2000 * 60
 
         print('Coin', coin, 'processed')
