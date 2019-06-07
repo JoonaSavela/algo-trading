@@ -7,9 +7,10 @@ import pandas as pd
 import json
 import glob
 from es import EvolutionStrategy
+import matplotlib.pyplot as plt
 
 from keras.models import Model, Input, Sequential
-from keras.layers import Dense
+from keras.layers import Dense, Flatten
 from keras.optimizers import Adam # not important as there's no training here, but required by Keras.
 import tensorflow as tf
 from keras import backend as K
@@ -43,8 +44,9 @@ input_length = 4 * 14
 
 
 # NN model definition
-input_layer = Input(shape=(input_length * 6,)) # 6 fields in json
-layer_1 = Dense(input_length * 3)(input_layer)
+input_layer = Input(shape=(input_length,6)) # 6 fields in json
+flatten = Flatten()(input_layer)
+layer_1 = Dense(input_length * 3)(flatten)
 layer_2 = Dense(input_length * 3 // 2)(layer_1)
 layer_3 = Dense(input_length * 3 // 4)(layer_2)
 output_layer = Dense(4, activation='softmax')(layer_3)
@@ -52,30 +54,80 @@ model = Model(input_layer, output_layer)
 model.compile(Adam(), 'mse', metrics=['accuracy'])
 
 # reward function definition
-def get_reward(weights, calc_metrics = False):
+def get_reward(weights, calc_metrics = False, latency = 1, random_actions = False):
     filename = np.random.choice(glob.glob('data/*/*.json'))
-    print(filename)
+    # print(filename)
     with open(filename, 'r') as file:
         obj = json.load(file)
 
+    start_index = np.random.choice(len(obj['Data']) - batch_size - input_length - latency)
 
-    start_index = np.random.choice(y_train.shape[0]-batch_size-1,1)[0]
-    solution = y_train[start_index:start_index+batch_size]
-    inp = x_train[start_index:start_index+batch_size]
+    data = obj['Data'][start_index:start_index + batch_size + input_length + latency]
+
+    X = np.zeros(shape=(len(data), 6))
+    for i in range(len(data)):
+        item = data[i]
+        tmp = []
+        for key, value in item.items():
+            if key != 'time':
+                tmp.append(value)
+        X[i, :] = tmp
 
     model.set_weights(weights)
 
+    means = np.reshape(np.mean(X, axis=0), (1,6))
+    stds = np.reshape(np.std(X, axis=0), (1,6))
 
+    initial_capital = 1000
+    capital_usd = initial_capital
+    capital_coin = 0
 
-    # prediction = model.predict(inp)
+    wealths = [initial_capital]
+    capital_usds = [capital_usd]
+    capital_coins = [capital_coin]
+
+    for i in range(batch_size):
+        inp = np.reshape((X[i:i+input_length, :] - means) / stds, (1, input_length, 6))
+        BUY, SELL, DO_NOTHING, amount = tuple(np.reshape(model.predict(inp), (4,)))
+        price = X[i + input_length + latency - 1, 0]
+
+        if BUY > SELL and BUY > DO_NOTHING:
+            # print('BUY:', amount, price)
+            capital_coin += amount * capital_usd / price
+            capital_usd *= 1 - amount
+        elif SELL > BUY and SELL > DO_NOTHING:
+            # print('SELL:', amount, price)
+            capital_usd += amount * capital_coin * price
+            capital_coin *= 1 - amount
+
+        wealths.append(capital_usd + capital_coin * price)
+        capital_usds.append(capital_usd)
+        capital_coins.append(capital_coin)
+
+    price = X[-1, 0]
+    # print('SELL:', 1.0, price)
+    capital_usd += capital_coin * price
+    capital_coin = 0
+
+    wealths.append(capital_usd + capital_coin * price)
+    capital_usds.append(capital_usd)
+    capital_coins.append(capital_coin)
+
+    wealths = np.array(wealths) / wealths[0] - 1
+    # plt.plot(range(batch_size + 2), wealths)
+    # plt.show()
+    reward = wealths[-1] / np.std(wealths)
+    # print(reward)
 
     metrics = {}
     if calc_metrics:
-        # metrics['accuracy_test'] = np.mean(np.equal(np.argmax(model.predict(x_test),1), np.argmax(y_test,1)))
-        # metrics['accuracy_val'] = np.mean(np.equal(np.argmax(model.predict(x_val),1), np.argmax(y_val,1)))
+        metrics['reward'] = reward
+        metrics['profit'] = wealths[-1]
+        metrics['std'] = np.std(wealths)
         # metrics['accuracy_train'] = np.mean(np.equal(np.argmax(model.predict(inp),1), np.argmax(solution,1)))
 
-    # reward = -np.sum(np.square(solution - prediction))
+    # print(metrics)
+
     return reward, metrics
 
 
@@ -131,9 +183,9 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                        columns=list(['run_name',
                                                      'iteration',
                                                      'timestamp',
-                                                     'accuracy_test',
-                                                     'accuracy_val',
-                                                     'accuracy_train']))
+                                                     'reward',
+                                                     'profit',
+                                                     'std']))
 
                 filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + '.csv')
                 results.to_csv(filename, sep=',')
@@ -145,10 +197,10 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=100, print_steps=10,
+    run(start_run=0, tot_runs=1, num_iterations=5, print_steps=1,
      output_results=True, num_workers=1)
 
-    # get_reward(0)
+    # get_reward(model.get_weights(), calc_metrics=True)
 
     ### multi worker run
     # run(start_run=0, tot_runs=1, num_iterations=100, print_steps=3,

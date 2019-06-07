@@ -37,8 +37,8 @@ def get_and_save_data(coin, time_str):
     return is_same_time
 
 def get_and_save_data_from_period():
-    # coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
-    coins = ['BTC', 'ETH', 'XRP', 'BCH']
+    coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BSV']
+    # coins = ['BTC', 'ETH', 'XRP', 'BCH']
 
     for coin in coins:
         if not os.path.exists('data/' + coin):
@@ -105,4 +105,4 @@ def load_and_transform_data(input_length = 4 * 14, test_split = 0):
     return X, Y
 
 if __name__ == "__main__":
-    get_and_save_data()
+    get_and_save_data_from_period()

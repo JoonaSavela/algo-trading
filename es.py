@@ -38,9 +38,9 @@ class EvolutionStrategy(object):
                 _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
                 metrics.append([run_name, iteration, time.time(),
-                                return_metrics['accuracy_test'],
-                                return_metrics['accuracy_val'],
-                                return_metrics['accuracy_train']])
+                                return_metrics['reward'],
+                                return_metrics['profit'],
+                                return_metrics['std']])
 
             population = []
             rewards = np.zeros(self.POPULATION_SIZE)
@@ -101,9 +101,9 @@ class EvolutionStrategy(object):
                 _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
                 metrics.append([run_name, iteration, time.time(),
-                                return_metrics['accuracy_test'],
-                                return_metrics['accuracy_val'],
-                                return_metrics['accuracy_train']])
+                                return_metrics['reward'],
+                                return_metrics['profit'],
+                                return_metrics['std']])
 
             return_queue = deque()
             jobs = []
