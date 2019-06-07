@@ -6,6 +6,7 @@ import numpy as np
 import json
 import requests
 import glob
+import pandas as pd
 
 def main():
 
@@ -16,8 +17,47 @@ def main():
         2000 minutes apart
     '''
 
-    get_and_save_data_from_period()
+    # get_and_save_data_from_period()
 
+    table = pd.read_csv('run_summaries/npop=50_sigma=0.1_alpha=0.001_iters=150_type=run.csv')
+    n = table.shape[0]
+    print(n)
+
+    print(np.prod(table['profit'] + 1))
+    print(np.power(np.prod(table['profit'] + 1), 1/n))
+    print(np.prod(table['max_profit'] + 1))
+    print(np.power(np.prod(table['max_profit'] + 1), 1/n))
+    print(np.prod(table['min_profit'] + 1))
+    print(np.power(np.prod(table['min_profit'] + 1), 1/n))
+
+    plt.plot(table['iteration'], table['profit'])
+    plt.plot(table['iteration'], table['max_profit'])
+    plt.plot(table['iteration'], table['min_profit'])
+    plt.show()
+
+    plt.plot(table['iteration'], table['std'])
+    plt.show()
+
+    plt.plot(table['iteration'], table['reward'])
+    plt.show()
+
+    # for filename in glob.glob('data/*/*.json'):
+    #     with open(filename, 'r') as file:
+    #         obj = json.load(file)
+    #     data = obj['Data']
+    #
+    #     X = np.zeros(shape=(len(data), 6))
+    #     for i in range(len(data)):
+    #         item = data[i]
+    #         tmp = []
+    #         for key, value in item.items():
+    #             if key != 'time':
+    #                 tmp.append(value)
+    #         X[i, :] = tmp
+    #
+    #     plt.plot(range(len(data)), X[:, 0] / X[0, 0])
+    #     plt.title(filename)
+    #     plt.show()
 
     # coin = 'BTC'
     # time_max = -1

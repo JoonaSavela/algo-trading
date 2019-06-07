@@ -40,6 +40,8 @@ class EvolutionStrategy(object):
                 metrics.append([run_name, iteration, time.time(),
                                 return_metrics['reward'],
                                 return_metrics['profit'],
+                                return_metrics['max_profit'],
+                                return_metrics['min_profit'],
                                 return_metrics['std']])
 
             population = []
@@ -103,6 +105,8 @@ class EvolutionStrategy(object):
                 metrics.append([run_name, iteration, time.time(),
                                 return_metrics['reward'],
                                 return_metrics['profit'],
+                                return_metrics['max_profit'],
+                                return_metrics['min_profit'],
                                 return_metrics['std']])
 
             return_queue = deque()

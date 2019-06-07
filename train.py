@@ -30,7 +30,7 @@ start_time = time.time()
 
 
 # data params
-batch_size = 60*8
+batch_size = 60*4
 input_length = 4 * 14
 # num_classes = 10
 
@@ -116,13 +116,16 @@ def get_reward(weights, calc_metrics = False, latency = 1, random_actions = Fals
     wealths = np.array(wealths) / wealths[0] - 1
     # plt.plot(range(batch_size + 2), wealths)
     # plt.show()
-    reward = wealths[-1] / np.std(wealths)
+    std = np.std(wealths)
+    reward = wealths[-1] / (std if std > 0 else 1)
     # print(reward)
 
     metrics = {}
     if calc_metrics:
         metrics['reward'] = reward
         metrics['profit'] = wealths[-1]
+        metrics['max_profit'] = np.max(wealths)
+        metrics['min_profit'] = np.min(wealths)
         metrics['std'] = np.std(wealths)
         # metrics['accuracy_train'] = np.mean(np.equal(np.argmax(model.predict(inp),1), np.argmax(solution,1)))
 
@@ -131,7 +134,7 @@ def get_reward(weights, calc_metrics = False, latency = 1, random_actions = Fals
     return reward, metrics
 
 
-def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_workers):
+def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_workers, save_weights):
     runs = {}
 
     hyperparam_search = False
@@ -179,16 +182,24 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
                 print('saving results to loc:', RUN_SUMMARY_LOC )
-                results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), 6),
+                results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), 8),
                                        columns=list(['run_name',
                                                      'iteration',
                                                      'timestamp',
                                                      'reward',
                                                      'profit',
+                                                     'max_profit',
+                                                     'min_profit',
                                                      'std']))
 
                 filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + '.csv')
                 results.to_csv(filename, sep=',')
+
+            if save_weights:
+                filename = 'models/model_weights.h5'
+                print('Saving weights to', filename)
+                model.set_weights(es.weights)
+                model.save_weights(filename)
 
     print("Total Time usage: " + str(timedelta(seconds=int(round(time.time() - start_time)))))
 
@@ -197,8 +208,8 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=5, print_steps=1,
-     output_results=True, num_workers=1)
+    run(start_run=0, tot_runs=1, num_iterations=200, print_steps=5,
+     output_results=True, num_workers=1, save_weights=True)
 
     # get_reward(model.get_weights(), calc_metrics=True)
 
