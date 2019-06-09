@@ -8,6 +8,7 @@ import json
 import glob
 from es import EvolutionStrategy
 import matplotlib.pyplot as plt
+from model import build_model
 
 from keras.models import Model, Input, Sequential
 from keras.layers import Dense, Flatten
@@ -34,24 +35,16 @@ batch_size = 60*4
 input_length = 4 * 14
 # num_classes = 10
 
-# loading data into memory
-# x_train = mnist.train.images
-# x_val = mnist.validation.images
-# x_test = mnist.test.images
-# y_train = mnist.train.labels
-# y_val = mnist.validation.labels
-# y_test = mnist.test.labels
-
-
 # NN model definition
-input_layer = Input(shape=(input_length,6)) # 6 fields in json
-flatten = Flatten()(input_layer)
-layer_1 = Dense(input_length * 3)(flatten)
-layer_2 = Dense(input_length * 3 // 2)(layer_1)
-layer_3 = Dense(input_length * 3 // 4)(layer_2)
-output_layer = Dense(4, activation='softmax')(layer_3)
-model = Model(input_layer, output_layer)
-model.compile(Adam(), 'mse', metrics=['accuracy'])
+# input_layer = Input(shape=(input_length,6)) # 6 fields in json
+# flatten = Flatten()(input_layer)
+# layer_1 = Dense(input_length * 3)(flatten)
+# layer_2 = Dense(input_length * 3 // 2)(layer_1)
+# layer_3 = Dense(input_length * 3 // 4)(layer_2)
+# output_layer = Dense(4, activation='softmax')(layer_3)
+# model = Model(input_layer, output_layer)
+# model.compile(Adam(), 'mse', metrics=['accuracy'])
+model = build_model()
 
 # reward function definition
 def get_reward(weights, calc_metrics = False, latency = 1, random_actions = False):
