@@ -9,6 +9,7 @@ import glob
 from es import EvolutionStrategy
 import matplotlib.pyplot as plt
 from model import build_model
+from data import load_data
 
 from keras.models import Model, Input, Sequential
 from keras.layers import Dense, Flatten
@@ -18,55 +19,18 @@ from keras import backend as K
 
 start_time = time.time()
 
-# data load
-# from tensorflow.examples.tutorials.mnist import input_data
-# mnist = input_data.read_data_sets("../MNIST_data/", one_hot=True)
-
-# to run model evluation on 1 core
-# config = tf.ConfigProto(intra_op_parallelism_threads=1,
-#                         inter_op_parallelism_threads=1,
-#                         allow_soft_placement=True, device_count = {'CPU': 1, 'GPU':0})
-# session = tf.Session(config=config)
-# K.set_session(session)
-
-
 # data params
 batch_size = 60*4
 input_length = 4 * 14
 # num_classes = 10
 
 # NN model definition
-# input_layer = Input(shape=(input_length,6)) # 6 fields in json
-# flatten = Flatten()(input_layer)
-# layer_1 = Dense(input_length * 3)(flatten)
-# layer_2 = Dense(input_length * 3 // 2)(layer_1)
-# layer_3 = Dense(input_length * 3 // 4)(layer_2)
-# output_layer = Dense(4, activation='softmax')(layer_3)
-# model = Model(input_layer, output_layer)
-# model.compile(Adam(), 'mse', metrics=['accuracy'])
 model = build_model()
 
 # reward function definition
-def get_reward(weights, calc_metrics = False, latency = 1, random_actions = False):
+def get_reward(weights, calc_metrics = False, latency = 1, random_actions = False, commissions = 0.00075):
     filename = np.random.choice(glob.glob('data/*/*.json'))
-    # print(filename)
-    with open(filename, 'r') as file:
-        obj = json.load(file)
-
-    start_index = np.random.choice(len(obj['Data']) - batch_size - input_length - latency)
-
-    data = obj['Data'][start_index:start_index + batch_size + input_length + latency]
-
-    X = np.zeros(shape=(len(data), 6))
-    for i in range(len(data)):
-        item = data[i]
-        tmp = []
-        for key, value in item.items():
-            if key != 'time':
-                tmp.append(value)
-        X[i, :] = tmp
-
-    model.set_weights(weights)
+    X = load_data(filename, batch_size, input_length, latency)
 
     means = np.reshape(np.mean(X, axis=0), (1,6))
     stds = np.reshape(np.std(X, axis=0), (1,6))
@@ -78,6 +42,8 @@ def get_reward(weights, calc_metrics = False, latency = 1, random_actions = Fals
     wealths = [initial_capital]
     capital_usds = [capital_usd]
     capital_coins = [capital_coin]
+    buy_amounts = []
+    sell_amounts = []
 
     for i in range(batch_size):
         inp = np.reshape((X[i:i+input_length, :] - means) / stds, (1, input_length, 6))
@@ -85,33 +51,33 @@ def get_reward(weights, calc_metrics = False, latency = 1, random_actions = Fals
         price = X[i + input_length + latency - 1, 0]
 
         if BUY > SELL and BUY > DO_NOTHING:
-            # print('BUY:', amount, price)
-            capital_coin += amount * capital_usd / price
+            amount_coin = amount * capital_usd / price * (1 - commissions)
+            capital_coin += amount_coin
             capital_usd *= 1 - amount
+            buy_amounts.append(amount_coin * price)
         elif SELL > BUY and SELL > DO_NOTHING:
-            # print('SELL:', amount, price)
-            capital_usd += amount * capital_coin * price
+            amount_usd = amount * capital_coin * price * (1 - commissions)
+            capital_usd += amount_usd
             capital_coin *= 1 - amount
+            sell_amounts.append(amount_usd)
 
         wealths.append(capital_usd + capital_coin * price)
         capital_usds.append(capital_usd)
         capital_coins.append(capital_coin)
 
     price = X[-1, 0]
-    # print('SELL:', 1.0, price)
     capital_usd += capital_coin * price
     capital_coin = 0
 
     wealths.append(capital_usd + capital_coin * price)
     capital_usds.append(capital_usd)
     capital_coins.append(capital_coin)
+    sell_amounts.append(1)
 
     wealths = np.array(wealths) / wealths[0] - 1
-    # plt.plot(range(batch_size + 2), wealths)
-    # plt.show()
     std = np.std(wealths)
     reward = wealths[-1] / (std if std > 0 else 1)
-    # print(reward)
+    # reward = wealths[-1] / (np.sum(buy_amounts) + np.sum(sell_amounts)) * initial_capital
 
     metrics = {}
     if calc_metrics:
@@ -119,10 +85,9 @@ def get_reward(weights, calc_metrics = False, latency = 1, random_actions = Fals
         metrics['profit'] = wealths[-1]
         metrics['max_profit'] = np.max(wealths)
         metrics['min_profit'] = np.min(wealths)
+        metrics['buys'] = np.sum(buy_amounts) / initial_capital
+        metrics['sells'] = np.sum(sell_amounts) / initial_capital
         metrics['std'] = np.std(wealths)
-        # metrics['accuracy_train'] = np.mean(np.equal(np.argmax(model.predict(inp),1), np.argmax(solution,1)))
-
-    # print(metrics)
 
     return reward, metrics
 
@@ -175,7 +140,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
                 print('saving results to loc:', RUN_SUMMARY_LOC )
-                results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), 8),
+                results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), len(metrics[0])),
                                        columns=list(['run_name',
                                                      'iteration',
                                                      'timestamp',
@@ -183,13 +148,15 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                                      'profit',
                                                      'max_profit',
                                                      'min_profit',
+                                                     'buys',
+                                                     'sells',
                                                      'std']))
 
-                filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + '.csv')
+                filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + str(time.time()) + '.csv')
                 results.to_csv(filename, sep=',')
 
             if save_weights:
-                filename = 'models/model_weights.h5'
+                filename = 'models/model_weights_' + str(time.time()) + '.h5'
                 print('Saving weights to', filename)
                 model.set_weights(es.weights)
                 model.save_weights(filename)
@@ -201,7 +168,7 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=200, print_steps=5,
+    run(start_run=0, tot_runs=1, num_iterations=250, print_steps=5,
      output_results=True, num_workers=1, save_weights=True)
 
     # get_reward(model.get_weights(), calc_metrics=True)

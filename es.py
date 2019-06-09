@@ -37,12 +37,10 @@ class EvolutionStrategy(object):
             if iteration % print_step == 0:
                 _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
-                metrics.append([run_name, iteration, time.time(),
-                                return_metrics['reward'],
-                                return_metrics['profit'],
-                                return_metrics['max_profit'],
-                                return_metrics['min_profit'],
-                                return_metrics['std']])
+                tmp = [run_name, iteration, time.time()]
+                for v in return_metrics.values():
+                    tmp.append(v)
+                metrics.append(tmp)
 
             population = []
             rewards = np.zeros(self.POPULATION_SIZE)
@@ -102,12 +100,10 @@ class EvolutionStrategy(object):
             if iteration % print_step == 0:
                 _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
-                metrics.append([run_name, iteration, time.time(),
-                                return_metrics['reward'],
-                                return_metrics['profit'],
-                                return_metrics['max_profit'],
-                                return_metrics['min_profit'],
-                                return_metrics['std']])
+                tmp = [run_name, iteration, time.time()]
+                for v in return_metrics.values():
+                    tmp.append(v)
+                metrics.append(tmp)
 
             return_queue = deque()
             jobs = []

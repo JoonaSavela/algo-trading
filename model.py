@@ -16,34 +16,3 @@ def build_model(input_length = 4 * 14, alpha = 0.001):
     model.compile(Adam(), 'mse', metrics=['accuracy'])
 
     return model
-
-
-def train_model(model, X, Y, epochs):
-    return model.fit(X, Y, epochs = epochs, validation_split = 0.2)
-
-def plot_history(history):
-    hist = pd.DataFrame(history.history)
-    hist['epoch'] = history.epoch
-
-    # print(hist.columns)
-
-    plt.figure()
-    plt.xlabel('Epoch')
-    plt.ylabel('Mean Abs Error [MPG]')
-    plt.plot(hist['epoch'], hist['mean_absolute_error'],
-           label='Train Error')
-    plt.plot(hist['epoch'], hist['val_mean_absolute_error'],
-           label = 'Val Error')
-    # plt.ylim([0,5])
-    plt.legend()
-
-    plt.figure()
-    plt.xlabel('Epoch')
-    plt.ylabel('Mean Square Error [$MPG^2$]')
-    plt.plot(hist['epoch'], hist['mean_squared_error'],
-           label='Train Error')
-    plt.plot(hist['epoch'], hist['val_mean_squared_error'],
-           label = 'Val Error')
-    # plt.ylim([0,20])
-    plt.legend()
-    plt.show()
