@@ -9,7 +9,6 @@ from utils import is_valid_interval, fill_zeros, normalize_values, transform_dat
 
 # TODO: rename functions
 
-
 def get_and_save_data(coin, time_str):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
     request = requests.get(url)
@@ -25,7 +24,8 @@ def get_and_save_data(coin, time_str):
         with open('data/' + coin + '/' + time_str + '.json', 'w') as file:
             json.dump(content, file)
     elif not is_same_time:
-        print('The "To" time was different than expected')
+        # print('The "To" time was different than expected')
+        pass
     elif len(content['Data']) <= 2000:
         print('Data length is under 2001')
     else:
@@ -59,10 +59,13 @@ def get_and_save_data_from_period():
             time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
             print(coin + ': No previous files found')
 
+        count = 0
+
         while get_and_save_data(coin, str(time)):
             time += 2000 * 60
+            count += 1
 
-        print('Coin', coin, 'processed')
+        print('Coin', coin, 'processed,', count, 'intervals added')
         print()
 
 
