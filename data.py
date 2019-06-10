@@ -57,7 +57,7 @@ def get_and_save_all():
             time += 2000 * 60
             count += 1
 
-        print('Coin', coin, 'processed,', count, 'intervals added')
+        print('Coin', coin, 'processed,', count, 'interval(s) added')
         print()
 
 

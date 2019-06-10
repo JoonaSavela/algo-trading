@@ -35,7 +35,7 @@ class EvolutionStrategy(object):
 
             # checking fitness
             if iteration % print_step == 0:
-                _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
+                _, return_metrics = self.get_reward(self.weights, flag_calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
                 tmp = [run_name, iteration, time.time()]
                 for v in return_metrics.values():
@@ -98,7 +98,7 @@ class EvolutionStrategy(object):
 
             # checking fitness
             if iteration % print_step == 0:
-                _, return_metrics = self.get_reward(self.weights, calc_metrics=True)
+                _, return_metrics = self.get_reward(self.weights, flag_calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
                 tmp = [run_name, iteration, time.time()]
                 for v in return_metrics.values():

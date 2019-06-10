@@ -7,6 +7,7 @@ import json
 import requests
 import glob
 import pandas as pd
+import time
 
 def main():
     for filename in glob.glob('run_summaries/*.csv'):

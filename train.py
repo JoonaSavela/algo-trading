@@ -10,6 +10,7 @@ from es import EvolutionStrategy
 import matplotlib.pyplot as plt
 from model import build_model
 from data import load_data
+from utils import calc_actions, calc_reward, calc_metrics
 
 from keras.models import Model, Input, Sequential
 from keras.layers import Dense, Flatten
@@ -28,66 +29,20 @@ input_length = 4 * 14
 model = build_model()
 
 # reward function definition
-def get_reward(weights, calc_metrics = False, latency = 1, random_actions = False, commissions = 0.00075):
+def get_reward(weights, flag_calc_metrics = False, latency = 1, random_actions = False, commissions = 0.00075):
     filename = np.random.choice(glob.glob('data/*/*.json'))
     X = load_data(filename, batch_size, input_length, latency)
-
-    means = np.reshape(np.mean(X, axis=0), (1,6))
-    stds = np.reshape(np.std(X, axis=0), (1,6))
+    price_max = np.max(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
+    price_min = np.min(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
 
     initial_capital = 1000
-    capital_usd = initial_capital
-    capital_coin = 0
+    wealths, buy_amounts, sell_amounts = calc_actions(model, X, batch_size, input_length, latency, initial_capital, commissions)
 
-    wealths = [initial_capital]
-    capital_usds = [capital_usd]
-    capital_coins = [capital_coin]
-    buy_amounts = []
-    sell_amounts = []
-
-    for i in range(batch_size):
-        inp = np.reshape((X[i:i+input_length, :] - means) / stds, (1, input_length, 6))
-        BUY, SELL, DO_NOTHING, amount = tuple(np.reshape(model.predict(inp), (4,)))
-        price = X[i + input_length + latency - 1, 0]
-
-        if BUY > SELL and BUY > DO_NOTHING:
-            amount_coin = amount * capital_usd / price * (1 - commissions)
-            capital_coin += amount_coin
-            capital_usd *= 1 - amount
-            buy_amounts.append(amount_coin * price)
-        elif SELL > BUY and SELL > DO_NOTHING:
-            amount_usd = amount * capital_coin * price * (1 - commissions)
-            capital_usd += amount_usd
-            capital_coin *= 1 - amount
-            sell_amounts.append(amount_usd)
-
-        wealths.append(capital_usd + capital_coin * price)
-        capital_usds.append(capital_usd)
-        capital_coins.append(capital_coin)
-
-    price = X[-1, 0]
-    capital_usd += capital_coin * price
-    capital_coin = 0
-
-    wealths.append(capital_usd + capital_coin * price)
-    capital_usds.append(capital_usd)
-    capital_coins.append(capital_coin)
-    sell_amounts.append(1)
-
-    wealths = np.array(wealths) / wealths[0] - 1
-    std = np.std(wealths)
-    reward = wealths[-1] / (std if std > 0 else 1)
-    # reward = wealths[-1] / (np.sum(buy_amounts) + np.sum(sell_amounts)) * initial_capital
+    reward = calc_reward(wealths, X, price_max, price_min, input_length)
 
     metrics = {}
-    if calc_metrics:
-        metrics['reward'] = reward
-        metrics['profit'] = wealths[-1]
-        metrics['max_profit'] = np.max(wealths)
-        metrics['min_profit'] = np.min(wealths)
-        metrics['buys'] = np.sum(buy_amounts) / initial_capital
-        metrics['sells'] = np.sum(sell_amounts) / initial_capital
-        metrics['std'] = np.std(wealths)
+    if flag_calc_metrics:
+        metrics = calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital)
 
     return reward, metrics
 
@@ -116,7 +71,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                     print('skipping run, as hyperparams [{}] have been chosen before'.format(hyperparams))
 
         else: #default - best hyperparams
-            npop = 50
+            npop = 75
             sigma = 0.1
             alpha = 0.001
 
@@ -140,6 +95,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
                 print('saving results to loc:', RUN_SUMMARY_LOC )
+                # TODO: make reshaping better
                 results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), len(metrics[0])),
                                        columns=list(['run_name',
                                                      'iteration',
@@ -168,10 +124,8 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=250, print_steps=5,
+    run(start_run=0, tot_runs=1, num_iterations=150, print_steps=5,
      output_results=True, num_workers=1, save_weights=True)
-
-    # get_reward(model.get_weights(), calc_metrics=True)
 
     ### multi worker run
     # run(start_run=0, tot_runs=1, num_iterations=100, print_steps=3,
