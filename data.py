@@ -67,7 +67,10 @@ def load_data(filename, batch_size, input_length, latency):
     with open(filename, 'r') as file:
         obj = json.load(file)
 
-    start_index = np.random.choice(len(obj['Data']) - batch_size - input_length - latency)
+    try:
+        start_index = np.random.choice(len(obj['Data']) - batch_size - input_length - latency)
+    except ValueError:
+        start_index = 0
 
     data = obj['Data'][start_index:start_index + batch_size + input_length + latency]
 
@@ -81,7 +84,6 @@ def load_data(filename, batch_size, input_length, latency):
         X[i, :] = tmp
 
     return X
-
 
 if __name__ == "__main__":
     get_and_save_all()

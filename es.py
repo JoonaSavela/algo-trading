@@ -4,7 +4,6 @@ import threading
 import time
 from collections import deque
 import glob
-from sklearn.model_selection import train_test_split
 from data import load_data
 
 # main class for implimenting Evolution Strategies
@@ -26,15 +25,13 @@ class EvolutionStrategy(object):
         return weights_try
 
     # implimention of Algorithm 1: Evolution Strategies by Salimans et al., OpenAI [1], p.2/12
-    def run(self, iterations, print_step=10, batch_size=4*60, input_length=4*14, latency=1):
+    def run(self, iterations, train_files, print_step=10, batch_size=4*60, input_length=4*14, latency=1):
         metrics = []
         run_name = ('npop={0:}_sigma={1:}_alpha={2:}_iters={3:}_type={4:}').format(self.POPULATION_SIZE ,
                                                                                    self.SIGMA ,
                                                                                    self.LEARNING_RATE,
                                                                                    iterations,
                                                                                    'run')
-
-        train_files, test_files = train_test_split(glob.glob('data/*/*.json'))
 
         for iteration in range(iterations):
 
@@ -95,6 +92,7 @@ class EvolutionStrategy(object):
         self.weights[index] += self.LEARNING_RATE/(self.POPULATION_SIZE*self.SIGMA) * np.dot(A.T, rewards).T
 
     # Algorithm 2: Parallelized Evolution Strategies by Salimans et al., OpenAI [1], p.3/12
+    # TODO: update like the single thread version
     def run_dist(self, iterations, print_step=10, num_workers=1):
         metrics = []
         run_name = ('npop={0:}_sigma={1:}_alpha={2:}_iters={3:}_type={4:}').format(self.POPULATION_SIZE ,

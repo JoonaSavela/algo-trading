@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 from model import build_model
 from data import load_data
 from utils import calc_actions, calc_reward, calc_metrics
+from sklearn.model_selection import train_test_split
+from evaluate import evaluate
 
 from keras.models import Model, Input, Sequential
 from keras.layers import Dense, Flatten
@@ -50,7 +52,7 @@ def get_reward(weights, X, flag_calc_metrics = False, random_actions = False, co
     return reward, metrics
 
 
-def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_workers, save_weights):
+def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_workers, save_weights, run_evaluation):
     runs = {}
 
     hyperparam_search = False
@@ -88,9 +90,11 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                    sigma=sigma,
                                    learning_rate=alpha)
 
+            train_files, test_files = train_test_split(glob.glob('data/*/*.json'))
+
             if num_workers == 1:
                 # single thread version
-                metrics = es.run(num_iterations, print_steps, batch_size, input_length, latency)
+                metrics = es.run(num_iterations, train_files, print_steps, batch_size, input_length, latency)
             else:
                 # distributed version
                 es.run_dist(num_iterations, print_steps, num_workers)
@@ -120,6 +124,9 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 model.set_weights(es.weights)
                 model.save_weights(filename)
 
+                if run_evaluation:
+                    evaluate(test_files, filename)
+
     print("Total Time usage: " + str(timedelta(seconds=int(round(time.time() - start_time)))))
 
 
@@ -128,7 +135,7 @@ if __name__ == '__main__':
 
     ## single thread run
     run(start_run=0, tot_runs=1, num_iterations=150, print_steps=5,
-     output_results=True, num_workers=1, save_weights=True)
+     output_results=True, num_workers=1, save_weights=True, run_evaluation=True)
 
     ### multi worker run
     # run(start_run=0, tot_runs=1, num_iterations=100, print_steps=3,
