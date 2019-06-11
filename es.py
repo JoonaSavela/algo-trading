@@ -3,6 +3,9 @@ import numpy as np
 import threading
 import time
 from collections import deque
+import glob
+from sklearn.model_selection import train_test_split
+from data import load_data
 
 # main class for implimenting Evolution Strategies
 class EvolutionStrategy(object):
@@ -23,7 +26,7 @@ class EvolutionStrategy(object):
         return weights_try
 
     # implimention of Algorithm 1: Evolution Strategies by Salimans et al., OpenAI [1], p.2/12
-    def run(self, iterations, print_step=10):
+    def run(self, iterations, print_step=10, batch_size=4*60, input_length=4*14, latency=1):
         metrics = []
         run_name = ('npop={0:}_sigma={1:}_alpha={2:}_iters={3:}_type={4:}').format(self.POPULATION_SIZE ,
                                                                                    self.SIGMA ,
@@ -31,11 +34,16 @@ class EvolutionStrategy(object):
                                                                                    iterations,
                                                                                    'run')
 
+        train_files, test_files = train_test_split(glob.glob('data/*/*.json'))
+
         for iteration in range(iterations):
+
+            filename = np.random.choice(train_files)
+            X = load_data(filename, batch_size, input_length, latency)
 
             # checking fitness
             if iteration % print_step == 0:
-                _, return_metrics = self.get_reward(self.weights, flag_calc_metrics=True)
+                _, return_metrics = self.get_reward(self.weights, X, flag_calc_metrics=True)
                 print('iteration({}) -> reward: {}'.format(iteration, return_metrics))
                 tmp = [run_name, iteration, time.time()]
                 for v in return_metrics.values():
@@ -52,7 +60,7 @@ class EvolutionStrategy(object):
 
             for i in range(self.POPULATION_SIZE):
                 weights_try = self.get_model_weights(self.weights, population[i])
-                rewards[i], _  = self.get_reward(weights_try)
+                rewards[i], _  = self.get_reward(weights_try, X)
 
             rewards = (rewards - np.mean(rewards)) / np.std(rewards)
 

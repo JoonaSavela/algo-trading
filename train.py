@@ -23,22 +23,25 @@ start_time = time.time()
 # data params
 batch_size = 60*4
 input_length = 4 * 14
+latency = 1
 # num_classes = 10
 
 # NN model definition
 model = build_model()
 
 # reward function definition
-def get_reward(weights, flag_calc_metrics = False, latency = 1, random_actions = False, commissions = 0.00075):
-    filename = np.random.choice(glob.glob('data/*/*.json'))
-    X = load_data(filename, batch_size, input_length, latency)
+def get_reward(weights, X, flag_calc_metrics = False, random_actions = False, commissions = 0.00075):
+    # filename = np.random.choice(glob.glob('data/*/*.json'))
+    # X = load_data(filename, batch_size, input_length, latency)
     price_max = np.max(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
     price_min = np.min(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
+
+    model.set_weights(weights)
 
     initial_capital = 1000
     wealths, buy_amounts, sell_amounts = calc_actions(model, X, batch_size, input_length, latency, initial_capital, commissions)
 
-    reward = calc_reward(wealths, X, price_max, price_min, input_length)
+    reward = calc_reward(wealths)
 
     metrics = {}
     if flag_calc_metrics:
@@ -71,7 +74,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                     print('skipping run, as hyperparams [{}] have been chosen before'.format(hyperparams))
 
         else: #default - best hyperparams
-            npop = 75
+            npop = 50
             sigma = 0.1
             alpha = 0.001
 
@@ -87,7 +90,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
 
             if num_workers == 1:
                 # single thread version
-                metrics = es.run(num_iterations, print_steps)
+                metrics = es.run(num_iterations, print_steps, batch_size, input_length, latency)
             else:
                 # distributed version
                 es.run_dist(num_iterations, print_steps, num_workers)

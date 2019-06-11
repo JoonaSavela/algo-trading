@@ -48,11 +48,11 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
 
     return wealths, buy_amounts, sell_amounts
 
-def calc_reward(wealths, X, price_max, price_min, input_length):
-    price = X[-1, 0]
+def calc_reward(wealths):
+    # price = X[-1, 0]
     std = np.std(wealths)
-    # reward = wealths[-1] / (std if std > 0 else 1)
-    reward = (wealths[-1] - (price / X[input_length, 0] - 1)) / (std * (price_max - price_min))
+    reward = wealths[-1] / (std if std > 0 else 1)
+    # reward = (wealths[-1] - (price / X[input_length, 0] - 1)) / (std * (price_max - price_min))
     return reward
 
 def round_to_n(x, n = 2):
