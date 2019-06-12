@@ -103,7 +103,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 RUN_SUMMARY_LOC = './run_summaries/'
                 print('saving results to loc:', RUN_SUMMARY_LOC )
                 # TODO: make reshaping better
-                results = pd.DataFrame(np.array(metrics).reshape(int((num_iterations//print_steps)), len(metrics[0])),
+                results = pd.DataFrame(np.array(metrics).reshape(-1, len(metrics[0])),
                                        columns=list(['run_name',
                                                      'iteration',
                                                      'timestamp',
@@ -134,7 +134,7 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=150, print_steps=5,
+    run(start_run=0, tot_runs=1, num_iterations=250, print_steps=10,
      output_results=True, num_workers=1, save_weights=True, run_evaluation=True)
 
     ### multi worker run

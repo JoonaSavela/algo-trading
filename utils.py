@@ -36,13 +36,14 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
         capital_coins.append(capital_coin)
 
     price = X[-1, 0]
-    capital_usd += capital_coin * price
+    amount_usd = capital_coin * price * (1 - commissions)
+    capital_usd += amount_usd
+    sell_amounts.append(amount_usd)
     capital_coin = 0
 
-    wealths.append(capital_usd + capital_coin * price)
+    wealths.append(capital_usd)
     capital_usds.append(capital_usd)
     capital_coins.append(capital_coin)
-    sell_amounts.append(1)
 
     wealths = np.array(wealths) / wealths[0] - 1
 

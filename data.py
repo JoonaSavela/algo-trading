@@ -5,9 +5,28 @@ from datetime import date, timedelta
 import os
 import requests
 import glob
+from keys import cryptocompare_key
+
+def get_recent_data(coin, size = 4 * 14):
+    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=' + str(size - 1) + '&api_key=' + cryptocompare_key
+    request = requests.get(url)
+    content = json.loads(request._content)
+
+    data = content['Data']
+
+    X = np.zeros(shape=(len(data), 6))
+    for i in range(len(data)):
+        item = data[i]
+        tmp = []
+        for key, value in item.items():
+            if key != 'time':
+                tmp.append(value)
+        X[i, :] = tmp
+
+    return X, content['TimeTo']
 
 def get_and_save(coin, time_str):
-    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=' + cryptocompare_key
     request = requests.get(url)
     content = json.loads(request._content)
 
@@ -45,7 +64,7 @@ def get_and_save_all():
         if time_max != -1:
             time = time_max + 2000 * 60
         else:
-            url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&api_key=7038987dbc91dc65168c7d8868c69c742acc11e682ba67d6c669e236dbd85deb'
+            url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&api_key=' + cryptocompare_key
             request = requests.get(url)
             content = json.loads(request._content)
             time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
