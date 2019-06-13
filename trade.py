@@ -2,19 +2,64 @@ from keys import binance_api_key, binance_secret_key
 from model import build_model
 import binance
 from binance.client import Client
+from binance.enums import *
 import time
-from data import get_recent_data
+from data import coins, get_recent_data
 import numpy as np
+from utils import round_to_n
+from math import floor, log10
+import json
 
 weights_filename = 'models/model_weights.h5'
 input_length = 14 * 4
 
-def order(client):
-    pass
+def asset_balance(client, symbol):
+    return float(client.get_asset_balance(asset=symbol)['free'])
 
-def cancel_orders(client):
-    pass
+def check_bnb(client):
+    balance_bnb = asset_balance(client, 'BNB')
+    if balance_bnb < 0.2:
+        try:
+            client.order_market_buy(symbol='BNBUSDT', quantity=1)
+            time.sleep(0.1)
+        except:
+            pass
 
+def snippet(amount, precision):
+    return "{:0.0{}f}".format(amount, precision)
+
+def cancel_orders(client, symbol, side = None):
+    open_orders = client.get_open_orders(symbol=symbol)
+    count = 0
+    for order in open_orders:
+        if order['side'] is None or order['side'] == side:
+            result = client.cancel_order(symbol=symbol, orderId=order['orderId'])
+            time.sleep(0.1)
+            count += 1
+    if count > 0:
+        print('Cancelled', count, 'orders')
+
+def sell_assets(client, symbol, balance_symbol, amount = 1):
+    quantity = round_to_n(balance_symbol * amount, 4)
+    try:
+        order = client.order_market_sell(
+            symbol=symbol,
+            quantity=quantity)
+        print('Sold:', order)
+        time.sleep(0.1)
+    except:
+        pass
+
+def buy_assets(client, symbol, prev_close, balance_usdt, amount):
+    quantity = round_to_n(balance_usdt / prev_close * amount, 4)
+    try:
+        order = client.order_market_buy(
+            symbol=symbol,
+            quantity=quantity)
+        print('Bought:', order)
+        time.sleep(0.1)
+    except:
+        pass
 
 
 def trading_pipeline():
@@ -22,29 +67,78 @@ def trading_pipeline():
     model.load_weights(weights_filename)
 
     client = Client(binance_api_key, binance_secret_key)
+    symbol = 'BTCUSDT'
+    symbol1 = symbol[:3]
 
     try:
         print()
         print('Starting trading pipeline...')
-        # print(client.get_all_orders(symbol='BTCUSDT'))
-        # print(X.shape)
+
+        check_bnb(client)
+        _, initial_time = get_recent_data(symbol1)
+        initial_capital = asset_balance(client, 'USDT')
+        time_diff = time.time() - initial_time
+        waiting_time = 60 - time_diff
+        print('waiting', waiting_time, 'seconds')
+        time.sleep(waiting_time)
+
         while True:
-            print('Fetching data')
-            X, timeTo = get_recent_data('BTC')
-            print(timeTo, model.predict( np.reshape(X, (1, input_length, 6)) ))
+            X, timeTo = get_recent_data(symbol1)
+            balance_symbol = asset_balance(client, symbol1)
+            balance_usdt = asset_balance(client, 'USDT')
+
+            means = np.reshape(np.mean(X, axis=0), (1,6))
+            stds = np.reshape(np.std(X, axis=0), (1,6))
+            inp = np.reshape((X - means) / stds, (1, input_length, 6))
+            BUY, SELL, DO_NOTHING, amount = tuple(np.reshape(model.predict(inp), (4,)))
+
+            if BUY > SELL and BUY > DO_NOTHING:
+                cancel_orders(client, symbol, 'SELL')
+                buy_assets(client, symbol, X[-1, 0], balance_usdt, amount)
+                print('BUY', amount)
+            elif SELL > BUY and SELL > DO_NOTHING:
+                cancel_orders(client, symbol, 'BUY')
+                sell_assets(client, symbol, balance_symbol, amount)
+                print('SELL', amount)
+            else:
+                print()
+
+            print(timeTo, X[-1, 0], balance_symbol, balance_usdt)
+
+            time.sleep(20)
+            check_bnb(client)
+            open_orders = client.get_open_orders(symbol=symbol)
+            balance_symbol = asset_balance(client, symbol1)
+            balance_usdt = asset_balance(client, 'USDT')
+            print(balance_symbol, balance_usdt, len(open_orders))
+
             time_diff = time.time() - timeTo
             waiting_time = 60 - time_diff
-            print('waiting', waiting_time, 'seconds')
             time.sleep(waiting_time)
-            print()
     except KeyboardInterrupt:
+        pass
+    finally:
         print()
         print('Exiting trading pipeline...')
-    finally:
-        cancel_orders(client)
 
+        cancel_orders(client, symbol)
+        balance_symbol = asset_balance(client, symbol1)
+        sell_assets(client, symbol, balance_symbol)
+        time.sleep(0.5)
 
-    return
+        _, final_time = get_recent_data(symbol1)
+        final_capital = asset_balance(client, 'USDT')
+        obj = {
+            'symbol': symbol,
+            'initial_time': initial_time,
+            'final_time': final_time,
+            'initial_capital': initial_capital,
+            'final_capital': final_capital
+        }
+        filename = 'trading_logs/' + initial_time + '-' + final_time + '.json'
+
+        with open(filename, 'w') as file:
+            json.dump(obj, file)
 
 
 if __name__ == '__main__':

@@ -48,9 +48,9 @@ def get_and_save(coin, time_str):
 
     return is_same_time
 
-def get_and_save_all():
-    coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BSV']
+coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BSV']
 
+def get_and_save_all():
     for coin in coins:
         if not os.path.exists('data/' + coin):
             os.mkdir('data/' + coin)

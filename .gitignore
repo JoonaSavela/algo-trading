@@ -3,3 +3,4 @@ __pycache__/
 run_summaries/
 models/
 keys.py
+trading_logs/
