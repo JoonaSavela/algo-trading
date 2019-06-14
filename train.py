@@ -25,7 +25,7 @@ start_time = time.time()
 # data params
 batch_size = 60*4
 input_length = 4 * 14
-latency = 1
+latency = 0
 # num_classes = 10
 
 # NN model definition
@@ -134,7 +134,7 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=250, print_steps=10,
+    run(start_run=0, tot_runs=1, num_iterations=350, print_steps=10,
      output_results=True, num_workers=1, save_weights=True, run_evaluation=True)
 
     ### multi worker run

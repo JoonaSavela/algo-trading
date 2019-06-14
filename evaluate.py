@@ -9,12 +9,14 @@ from sklearn.model_selection import train_test_split
 
 # TODO: make these function parameters
 input_length = 4 * 14
-latency = 1
+latency = 0
 batch_size = 2001 - input_length - latency
 commissions = 0.00075
 initial_capital = 1000
 
-def evaluate(filenames, weights_filename = None):
+def evaluate(filenames, weights_filename = None, dirname = None):
+    if dirname is not None:
+        print(dirname)
 
     if weights_filename is None:
         weights_filenames = glob.glob('models/*.h5')
@@ -59,5 +61,7 @@ def evaluate(filenames, weights_filename = None):
 
 
 if __name__ == '__main__':
-    train_files, test_files = train_test_split(glob.glob('data/*/*.json'))
-    evaluate(test_files)
+    for dir in glob.glob('data/*/'):
+        files = glob.glob(dir + '*.json')
+        print(len(files))
+        evaluate(files, dirname = dir)

@@ -48,7 +48,7 @@ def get_and_save(coin, time_str):
 
     return is_same_time
 
-coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BSV']
+coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'EOS']
 
 def get_and_save_all():
     for coin in coins:
