@@ -8,13 +8,12 @@ from utils import get_time, calc_actions, calc_reward, calc_metrics
 from sklearn.model_selection import train_test_split
 
 # TODO: make these function parameters
-input_length = 4 * 14
 latency = 0
-batch_size = 2001 - input_length - latency
 commissions = 0.00075
 initial_capital = 1000
 
-def evaluate(filenames, weights_filename = None, dirname = None):
+def evaluate(filenames, weights_filename = None, dirname = None, input_length = 4 * 14):
+    batch_size = 2001 - input_length - latency
     if dirname is not None:
         print(dirname)
 

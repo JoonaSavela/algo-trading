@@ -28,9 +28,6 @@ def main():
         plt.plot(table['iteration'], table['min_profit'])
         plt.show()
 
-        plt.plot(table['iteration'], table['std'])
-        plt.show()
-
         plt.plot(table['iteration'], table['reward'])
         plt.show()
 

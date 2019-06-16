@@ -3,9 +3,6 @@ import matplotlib.pyplot as plt
 from math import log10, floor
 
 def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 1000, commissions = 0.00075):
-    means = np.reshape(np.mean(X, axis=0), (1,6))
-    stds = np.reshape(np.std(X, axis=0), (1,6))
-
     capital_usd = initial_capital
     capital_coin = 0
 
@@ -16,6 +13,8 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
     sell_amounts = []
 
     for i in range(batch_size):
+        means = np.reshape(np.mean(X[i:i+input_length, :], axis=0), (1,6))
+        stds = np.reshape(np.std(X[i:i+input_length, :], axis=0), (1,6))
         inp = np.reshape((X[i:i+input_length, :] - means) / stds, (1, input_length, 6))
         BUY, SELL, DO_NOTHING, amount = tuple(np.reshape(model.predict(inp), (4,)))
         price = X[i + input_length + latency - 1, 0]
@@ -52,7 +51,7 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
 def calc_reward(wealths):
     # price = X[-1, 0]
     # std = np.std(wealths)
-    reward = wealths[-1] #/ (std if std > 0 else 1)
+    reward = np.mean(wealths) #/ (std if std > 0 else 1)
     # reward = (wealths[-1] - (price / X[input_length, 0] - 1)) / (std * (price_max - price_min))
     return reward
 
@@ -75,7 +74,6 @@ def calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital):
     metrics['min_profit'] = np.min(wealths)
     metrics['buys'] = np.sum(buy_amounts) / initial_capital
     metrics['sells'] = np.sum(sell_amounts) / initial_capital
-    metrics['std'] = np.std(wealths)
     for key, value in metrics.items():
         metrics[key] = round_to_n(value)
     return metrics

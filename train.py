@@ -29,15 +29,10 @@ latency = 0
 # num_classes = 10
 
 # NN model definition
-model = build_model()
+model = build_model(input_length)
 
 # reward function definition
-def get_reward(weights, X, flag_calc_metrics = False, random_actions = False, commissions = 0.00075):
-    # filename = np.random.choice(glob.glob('data/*/*.json'))
-    # X = load_data(filename, batch_size, input_length, latency)
-    price_max = np.max(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
-    price_min = np.min(X[input_length:input_length+batch_size,0]) / X[input_length, 0]
-
+def get_reward(weights, X, flag_calc_metrics = False, commissions = 0.00075):
     model.set_weights(weights)
 
     initial_capital = 1000
@@ -58,16 +53,18 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
     hyperparam_search = False
     if (start_run>0 and tot_runs>1): hyperparam_search = True
 
-
+    # TODO: reset model weights
     for i in range(start_run, tot_runs):
 
         chosen_before = False
         if hyperparam_search:
-            npop = np.random.random_integers(1, 150, 1)[0]
+            npop = np.random.random_integers(num_workers, (160 // num_workers) * num_workers, 1)[0]
             sample = np.random.rand(np.maximum(0,npop))
             sample_std = np.std(sample)
             sigma = np.round(np.sqrt(np.random.chisquare(sample_std,1)),2)[0]
-            learning_rate_selection = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
+            while sigma == 0:
+                sigma = np.round(np.sqrt(np.random.chisquare(sample_std,1)),2)[0]
+            learning_rate_selection = [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005]
             alpha = np.random.choice(learning_rate_selection)
 
             for key in runs.keys():
@@ -76,9 +73,9 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                     print('skipping run, as hyperparams [{}] have been chosen before'.format(hyperparams))
 
         else: #default - best hyperparams
-            npop = 50
+            npop = 52
             sigma = 0.1
-            alpha = 0.001
+            alpha = 0.0001
 
         # will only run if hyperparams are not chosen before
         if not chosen_before:
@@ -86,7 +83,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
 
             print('hyperparams chosen -> npop:{}  sigma:{} alpha:{}'.format(npop, sigma, alpha))
 
-            es = EvolutionStrategy(model.get_weights(), get_reward, population_size=npop,
+            es = EvolutionStrategy(model.get_weights(), get_reward, population_size=npop // num_workers,
                                    sigma=sigma,
                                    learning_rate=alpha)
 
@@ -97,7 +94,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 metrics = es.run(num_iterations, train_files, print_steps, batch_size, input_length, latency)
             else:
                 # distributed version
-                es.run_dist(num_iterations, print_steps, num_workers)
+                metrics = es.run_dist(num_iterations, train_files, print_steps, num_workers, batch_size, input_length, latency)
 
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
@@ -112,8 +109,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                                      'max_profit',
                                                      'min_profit',
                                                      'buys',
-                                                     'sells',
-                                                     'std']))
+                                                     'sells']))
 
                 filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + str(time.time()) + '.csv')
                 results.to_csv(filename, sep=',')
@@ -125,7 +121,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 model.save_weights(filename)
 
                 if run_evaluation:
-                    evaluate(test_files, filename)
+                    evaluate(test_files, filename, input_length=input_length)
 
     print("Total Time usage: " + str(timedelta(seconds=int(round(time.time() - start_time)))))
 
@@ -134,13 +130,13 @@ if __name__ == '__main__':
     # TODO: Impliment functionality to pass the params via terminal and/or read from config file
 
     ## single thread run
-    run(start_run=0, tot_runs=1, num_iterations=350, print_steps=10,
-     output_results=True, num_workers=1, save_weights=True, run_evaluation=True)
+    # run(start_run=0, tot_runs=1, num_iterations=350, print_steps=10,
+    #  output_results=True, num_workers=1, save_weights=True, run_evaluation=True)
 
     ### multi worker run
-    # run(start_run=0, tot_runs=1, num_iterations=100, print_steps=3,
-    #    output_results=False, num_workers=4)
+    # run(start_run=0, tot_runs=1, num_iterations=450, print_steps=20,
+    #    output_results=True, num_workers=8, save_weights=True, run_evaluation=True)
 
     ### hyperparam search
-    #run(start_run=1, tot_runs=100, num_iterations=10000, print_steps=10,
-    #    output_results=True, num_workers=1)
+    run(start_run=1, tot_runs=10, num_iterations=200, print_steps=10,
+       output_results=True, num_workers=4, save_weights=False, run_evaluation=False)
