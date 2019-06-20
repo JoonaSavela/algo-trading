@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from math import log10, floor
+import torch
 
-def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 1000, commissions = 0.00075):
+def calc_actions(model, X, sequence_length, latency, initial_capital = 1000, commissions = 0.00075):
     capital_usd = initial_capital
     capital_coin = 0
 
@@ -12,12 +13,13 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
     buy_amounts = []
     sell_amounts = []
 
-    for i in range(batch_size):
-        means = np.reshape(np.mean(X[i:i+input_length, :], axis=0), (1,6))
-        stds = np.reshape(np.std(X[i:i+input_length, :], axis=0), (1,6))
-        inp = np.reshape((X[i:i+input_length, :] - means) / stds, (1, input_length, 6))
-        BUY, SELL, DO_NOTHING, amount = tuple(np.reshape(model.predict(inp), (4,)))
-        price = X[i + input_length + latency - 1, 0]
+    model_memory = model.initial_state(batch_size=1)
+
+    for i in range(sequence_length):
+        inp = torch.from_numpy((X[i, :] / X[0, :] - 1).astype(np.float32)).view(1, 1, -1)
+        logit, _, model_memory = model(inp, model_memory)
+        BUY, SELL, DO_NOTHING, amount = tuple(logit.view(4).data.numpy())
+        price = X[i + latency, 0]
 
         if BUY > SELL and BUY > DO_NOTHING:
             amount_coin = amount * capital_usd / price * (1 - commissions)
@@ -49,10 +51,7 @@ def calc_actions(model, X, batch_size, input_length, latency, initial_capital = 
     return wealths, buy_amounts, sell_amounts
 
 def calc_reward(wealths):
-    # price = X[-1, 0]
-    # std = np.std(wealths)
-    reward = np.mean(wealths) #/ (std if std > 0 else 1)
-    # reward = (wealths[-1] - (price / X[input_length, 0] - 1)) / (std * (price_max - price_min))
+    reward = np.mean(wealths)
     return reward
 
 def round_to_n(x, n = 2):
@@ -66,7 +65,7 @@ def floor_to_n(x, n = 2):
     res = int(res) if abs(res) >= 10**(n - 1) else res
     return res
 
-def calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital):
+def calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital, first_price, last_price):
     metrics = {}
     metrics['reward'] = reward
     metrics['profit'] = wealths[-1]
@@ -74,6 +73,7 @@ def calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital):
     metrics['min_profit'] = np.min(wealths)
     metrics['buys'] = np.sum(buy_amounts) / initial_capital
     metrics['sells'] = np.sum(sell_amounts) / initial_capital
+    metrics['benchmark_profit'] = last_price / first_price - 1
     for key, value in metrics.items():
         metrics[key] = round_to_n(value)
     return metrics

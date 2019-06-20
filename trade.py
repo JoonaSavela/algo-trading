@@ -10,7 +10,7 @@ from utils import floor_to_n
 from math import floor, log10
 import json
 
-weights_filename = 'models/model_weights.h5'
+weights_filename = 'models/model_weights.pt'
 input_length = 14 * 4
 
 def asset_balance(client, symbol):

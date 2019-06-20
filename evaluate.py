@@ -1,4 +1,4 @@
-from model import build_model, build_model_old
+from model import RelationalMemory
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
@@ -6,50 +6,58 @@ import json
 from data import load_data
 from utils import get_time, calc_actions, calc_reward, calc_metrics
 from sklearn.model_selection import train_test_split
+import torch
 
 # TODO: make these function parameters
 latency = 0
 commissions = 0.00075
 initial_capital = 1000
 
-def evaluate(filenames, weights_filename = None, dirname = None, input_length = 4 * 14):
-    batch_size = 2001 - input_length - latency
+# FIXME: transform to use relational memory
+
+def evaluate(filenames, state_dict_filename = None, dirname = None):
+    sequence_length = 2001 - latency
     if dirname is not None:
         print(dirname)
 
-    if weights_filename is None:
-        weights_filenames = glob.glob('models/*.h5')
+    if state_dict_filename is None:
+        state_dict_filenames = glob.glob('models/*.pt')
     else:
-        weights_filenames = [weights_filename]
+        state_dict_filenames = [state_dict_filename]
 
-    for fname in weights_filenames:
-        try:
-            model = build_model()
-            model.load_weights(fname)
-        except ValueError:
-            model = build_model_old()
-            model.load_weights(fname)
+    # TODO: make these function parameters
+    input_size = 6
+    seq_length = 1
 
-        closes = np.zeros(shape=batch_size * len(filenames))
-        wealths = np.zeros(shape=(batch_size + 2) * len(filenames))
+    mem_slots = 4
+    num_heads = 2
+
+    # NN model definition
+    model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
+
+    for fname in state_dict_filenames:
+        model.load_state_dict(torch.load(fname))
+
+        closes = np.zeros(shape=sequence_length * len(filenames))
+        wealths = np.zeros(shape=(sequence_length + 2) * len(filenames))
         buy_amounts = []
         sell_amounts = []
 
         for i, filename in enumerate(filenames):
-            X = load_data(filename, batch_size, input_length, latency)
-            closes[i*batch_size:(i+1)*batch_size] = X[input_length:input_length+batch_size,0] / X[input_length,0]
+            X = load_data(filename, sequence_length, latency)
+            closes[i*sequence_length:(i+1)*sequence_length] = X[:sequence_length,0] / X[0, 0]
 
-            ws, bs, ss = calc_actions(model, X, batch_size, input_length, latency, initial_capital, commissions)
-            wealths[i*(batch_size + 2):(i+1)*(batch_size + 2)] = ws + 1
+            ws, bs, ss = calc_actions(model, X, sequence_length, latency, initial_capital, commissions)
+            wealths[i*(sequence_length + 2):(i+1)*(sequence_length + 2)] = ws + 1
             buy_amounts.extend(bs)
             sell_amounts.extend(ss)
 
             if i > 0:
-                closes[i*batch_size:(i+1)*batch_size] *= closes[i*batch_size - 1]
-                wealths[i*(batch_size + 2):(i+1)*(batch_size + 2)] *= wealths[i*(batch_size + 2) - 1]
+                closes[i*sequence_length:(i+1)*sequence_length] *= closes[i*sequence_length - 1]
+                wealths[i*(sequence_length + 2):(i+1)*(sequence_length + 2)] *= wealths[i*(sequence_length + 2) - 1]
 
         reward = calc_reward(wealths - 1)
-        metrics = calc_metrics(reward, wealths - 1, buy_amounts, sell_amounts, initial_capital)
+        metrics = calc_metrics(reward, wealths - 1, buy_amounts, sell_amounts, initial_capital, closes[0], closes[-1])
 
         print(fname)
         print(metrics)

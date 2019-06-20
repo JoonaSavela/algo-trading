@@ -48,7 +48,7 @@ def get_and_save(coin, time_str):
 
     return is_same_time
 
-coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
+coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BNB']
 
 def get_and_save_all():
     for coin in coins:
@@ -80,18 +80,18 @@ def get_and_save_all():
         print()
 
 
-def load_data(filename, batch_size, input_length, latency):
+def load_data(filename, sequence_length, latency):
     obj = {}
 
     with open(filename, 'r') as file:
         obj = json.load(file)
 
     try:
-        start_index = np.random.choice(len(obj['Data']) - batch_size - input_length - latency)
+        start_index = np.random.choice(len(obj['Data']) - sequence_length - latency)
     except ValueError:
         start_index = 0
 
-    data = obj['Data'][start_index:start_index + batch_size + input_length + latency]
+    data = obj['Data'][start_index:start_index + sequence_length + latency]
 
     X = np.zeros(shape=(len(data), 6))
     for i in range(len(data)):
