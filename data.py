@@ -80,18 +80,19 @@ def get_and_save_all():
         print()
 
 
-def load_data(filename, sequence_length, latency):
+def load_data(filename, sequence_length, latency, window_size, k = 1):
     obj = {}
 
     with open(filename, 'r') as file:
         obj = json.load(file)
 
     try:
-        start_index = np.random.choice(len(obj['Data']) - sequence_length - latency)
+        # start_index = np.random.choice(len(obj['Data']) - sequence_length - latency - window_size + 1 - k + 1)
+        start_index = 0
     except ValueError:
         start_index = 0
 
-    data = obj['Data'][start_index:start_index + sequence_length + latency]
+    data = obj['Data'][start_index:start_index + sequence_length + latency + window_size - 1 + k - 1]
 
     X = np.zeros(shape=(len(data), 6))
     for i in range(len(data)):

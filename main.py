@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
-from utils import plot_y
+from utils import plot_y, stochastic_oscillator
 from model import RelationalMemory
-from data import get_and_save_all
+from data import get_and_save_all, load_data
 import numpy as np
 import json
 import requests
@@ -12,86 +12,65 @@ import torch
 import copy
 
 def main():
-    A = torch.randn((52))
-    r = torch.randn((52))
 
-    permute_indices = list(range(len(A.shape)))[::-1]
-
-    delta = 1 * \
-        torch.tensordot(A.permute(*permute_indices), r, dims=1)
-
-    print(delta.shape)
-
-    try:
-        delta = delta.permute(*permute_indices[1:])
-    except TypeError:
-        pass
-
-    print(delta.shape)
-
-    print(*permute_indices[1:])
-
-    # AT = A.permute(*permute_indices)
-
-    # print(AT.shape)
-    # print(torch.tensordot(AT, r, dims=1).permute(*permute_indices[1:]).shape)
-    # print(A[0, :, :] * r[0] ==
-
-    # input_size = 6
-    # seq_length = 1
+    # test_files = glob.glob('data/*/*.json')[:1]
+    # sequence_length = 4*60
+    # window_size = 3 * 14
+    # latency = 0
     #
-    # mem_slots = 4
-    # num_heads = 2
+    # for file in test_files:
+    #     fig, axes = plt.subplots(figsize=(18, 8), ncols=3, nrows=2)
+    #     for i, k in enumerate(range(3, 8, 2)):
+    #         X = load_data(file, sequence_length, latency, window_size, k)
+    #         print(X.shape)
+    #         stoch = stochastic_oscillator(X, window_size, k)
     #
-    # model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
-    # model_memory = model.initial_state(batch_size=1)
+    #         print(stoch.shape)
     #
+    #         axes[0][i].plot(range(stoch.shape[0]), X[window_size - 1 + k - 1:, 0] / X[window_size - 1 + k - 1, 0])
+    #         axes[1][i].plot(range(stoch.shape[0]), stoch)
     #
-    # noise = []
-    # for i in range(5):
-    #     x = {}
-    #     for k, w in model.state_dict().items():
-    #         x[k] = torch.randn(w.shape)
-    #     noise.append(x)
-    #
-    # state_dict_try = copy.deepcopy(model.state_dict())
-    # for k, i in noise[0].items():
-    #     jittered = 1*i
-    #     state_dict_try[k] += jittered
-    #
-    # print(state_dict_try)
-    # print()
-    # print(model.state_dict())
-    #
-    # model.load_state_dict(state_dict_try)
-    #
-    # print()
-    # print(state_dict_try)
-    # print()
-    # print(model.state_dict())
-
-
-
-    # for filename in glob.glob('run_summaries/*.csv'):
-    #     print(filename)
-    #     table = pd.read_csv(filename)
-    #     n = table.shape[0]
-    #     print(n)
-    #
-    #     print(np.prod(table['profit'] + 1))
-    #     print(np.power(np.prod(table['profit'] + 1), 1/n))
-    #     print(np.prod(table['max_profit'] + 1))
-    #     print(np.power(np.prod(table['max_profit'] + 1), 1/n))
-    #     print(np.prod(table['min_profit'] + 1))
-    #     print(np.power(np.prod(table['min_profit'] + 1), 1/n))
-    #
-    #     plt.plot(table['iteration'], table['profit'])
-    #     plt.plot(table['iteration'], table['max_profit'])
-    #     plt.plot(table['iteration'], table['min_profit'])
     #     plt.show()
+
+
+    # test_files = [glob.glob('data/*/*.json')[0]]
+    # sequence_length = 4*60
+    # window_size = 3 * 14
+    # latency = 0
     #
-    #     plt.plot(table['iteration'], table['reward'])
+    # for file in test_files:
+    #     X = load_data(file, sequence_length, latency, window_size)
+    #     print(X.shape)
+    #     stoch = stochastic_oscillator(X, window_size)
+    #
+    #     print(stoch.shape)
+    #
+    #     fig, axes = plt.subplots(figsize=(6, 8), ncols=1, nrows=2)
+    #
+    #     axes[0].plot(range(stoch.shape[0]), X[window_size - 1:, 0] / X[window_size - 1, 0])
+    #     axes[1].plot(range(stoch.shape[0]), stoch)
     #     plt.show()
+
+    for filename in glob.glob('run_summaries/*.csv'):
+        print(filename)
+        table = pd.read_csv(filename)
+        n = table.shape[0]
+        print(n)
+
+        print(np.prod(table['profit'] + 1))
+        print(np.power(np.prod(table['profit'] + 1), 1/n))
+        print(np.prod(table['max_profit'] + 1))
+        print(np.power(np.prod(table['max_profit'] + 1), 1/n))
+        print(np.prod(table['min_profit'] + 1))
+        print(np.power(np.prod(table['min_profit'] + 1), 1/n))
+
+        plt.plot(table['iteration'], table['profit'])
+        plt.plot(table['iteration'], table['max_profit'])
+        plt.plot(table['iteration'], table['min_profit'])
+        plt.show()
+
+        plt.plot(table['iteration'], table['reward'])
+        plt.show()
 
     # for filename in glob.glob('data/*/*.json'):
     #     with open(filename, 'r') as file:

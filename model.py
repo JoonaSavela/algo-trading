@@ -89,6 +89,11 @@ class RelationalMemory(nn.Module):
         ########## parameters for initial embedded input projection ##########
         self.input_size = input_size
         self.input_projector = nn.Linear(self.input_size, self.mem_size)
+        # if not self.input_size == self.mem_size:
+        #     raise ValueError(
+        #         'self.mem_size ({}) must be equal to self.input_size ({}). self.head_size = {}, self.num_heads = {}'.format(
+        #             self.mem_size, self.input_size, self.head_size, self.num_heads
+        #         ))
 
         ########## parameters for gating ##########
         self.num_gates = 2 * self.calculate_gate_size()
@@ -98,9 +103,12 @@ class RelationalMemory(nn.Module):
         self.forget_bias = nn.Parameter(torch.tensor([[forget_bias]], dtype=torch.float32))
         self.input_bias = nn.Parameter(torch.tensor([[input_bias]], dtype=torch.float32))
 
+        # hidden layers
+        self.hidden = nn.Linear(self.mem_slots * self.mem_size, self.mem_slots * self.mem_size // 2)
+
         # output layers
-        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size, 3) # BUY, SELL, DO NOTHING
-        self.amount_layer = nn.Linear(self.mem_slots * self.mem_size, 1) # Amount
+        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size // 2, 3) # BUY, SELL, DO NOTHING
+        self.amount_layer = nn.Linear(self.mem_slots * self.mem_size // 2, 1) # Amount
 
         # needs 2 linear layers for tying weights for embedding layers
         # first match the "output" of the RMC to input_size, which is the embed dim
@@ -330,10 +338,13 @@ class RelationalMemory(nn.Module):
 
         output = next_memory.view(next_memory.shape[0], -1)
 
-        decision = self.decision_layer(output)
+        hidden = self.hidden(output)
+        hidden = F.relu(hidden)
+
+        decision = self.decision_layer(hidden)
         decision = F.softmax(decision, dim=1)
 
-        amount = self.amount_layer(output)
+        amount = self.amount_layer(hidden)
         amount = torch.sigmoid(amount)
 
         logit = torch.cat([decision, amount], dim=1)

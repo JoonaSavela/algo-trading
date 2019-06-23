@@ -20,25 +20,27 @@ start_time = time.time()
 
 # data params
 sequence_length = 60*4
+# sequence_length = 2001
 latency = 0
+window_size = 3 * 14
 
-input_size = 6
+input_size = 2
 seq_length = 1
 
-mem_slots = 4
+mem_slots = 8
 num_heads = 2
 
 # NN model definition
 model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
 
 # reward function definition
-def get_reward(state_dict, X, flag_calc_metrics = False, commissions = 0.00075):
+def get_reward(model, state_dict, X, flag_calc_metrics = False, commissions = 0.00075):
     model.load_state_dict(state_dict)
 
     initial_capital = 1000
-    wealths, buy_amounts, sell_amounts = calc_actions(model, X, sequence_length, latency, initial_capital, commissions)
+    wealths, buy_amounts, sell_amounts, capital_usds, capital_coins = calc_actions(model, X, sequence_length, latency, window_size, initial_capital, commissions)
 
-    reward = calc_reward(wealths)
+    reward = calc_reward(wealths, X[window_size - 1:, :], capital_usds, capital_coins)
 
     metrics = {}
     if flag_calc_metrics:
@@ -70,12 +72,12 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
             for key in runs.keys():
                 if runs[key] == [npop, sigma, alpha]:
                     chosen_before = True
-                    print('skipping run, as hyperparams [{}] have been chosen before'.format(hyperparams))
+                    print('skipping run, as hyperparams [{}] have been chosen before'.format(runs[key]))
 
         else: #default - best hyperparams
-            npop = 52
+            npop = 100
             sigma = 1
-            alpha = 0.001
+            alpha = 1
 
         # will only run if hyperparams are not chosen before
         if not chosen_before:
@@ -85,7 +87,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
 
             if flag_load_state_dict:
                 try:
-                    model.load_state_dict(torch.load('models/model_state_dict_1560759195.567413.pt'))
+                    model.load_state_dict(torch.load('models/model_state_dict1.pt'))
                 except:
                     pass
 
@@ -94,13 +96,18 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                    learning_rate=alpha)
 
             train_files, test_files = train_test_split(glob.glob('data/*/*.json'), random_state=1)
+            # train_files = test_files = [glob.glob('data/*/*.json')[0]]
+            # print(train_files, test_files)
 
             if num_workers == 1:
                 # single thread version
-                metrics = es.run(num_iterations, train_files, print_steps, sequence_length, latency)
+                metrics = es.run(num_iterations, train_files, model, print_steps, sequence_length, latency, window_size)
             else:
+                models = []
+                for i in range(num_workers):
+                    models.append(RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.))
                 # distributed version
-                metrics = es.run_dist(num_iterations, train_files, print_steps, num_workers, sequence_length, latency)
+                metrics = es.run_dist(num_iterations, train_files, models, print_steps, num_workers, sequence_length, latency, window_size)
 
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
@@ -121,23 +128,26 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                 filename = os.path.join(RUN_SUMMARY_LOC, results['run_name'][0] + str(time.time()) + '.csv')
                 results.to_csv(filename, sep=',')
 
-            if save_state_dict:
-                filename = 'models/model_state_dict_' + str(time.time()) + '.pt'
-                print('Saving state_dict to', filename)
-                model.load_state_dict(es.state_dict)
-                torch.save(model.state_dict(), filename)
-
-                if run_evaluation:
-                    evaluate(test_files, filename)
-
     print("Total Time usage: " + str(timedelta(seconds=int(round(time.time() - start_time)))))
+
+    if save_state_dict:
+        # filename = 'models/model_state_dict_' + str(time.time()) + '.pt'
+        filename = 'models/model_state_dict.pt'
+        print('Saving state_dict to', filename)
+        model.load_state_dict(es.state_dict)
+        torch.save(model.state_dict(), filename)
+
+        if run_evaluation:
+            evaluate(test_files, filename, None, input_size, seq_length, mem_slots, num_heads, window_size)
+
 
 
 if __name__ == '__main__':
-    run(start_run=0, tot_runs=1, num_iterations=40, print_steps=2,
-       output_results=False, num_workers=1, save_state_dict=True, run_evaluation=True,
-       flag_load_state_dict=True)
+    run(start_run=0, tot_runs=1, num_iterations=100, print_steps=5,
+       output_results=True, num_workers=4, save_state_dict=True, run_evaluation=True,
+       flag_load_state_dict=False)
 
     ### hyperparam search
-    # run(start_run=1, tot_runs=10, num_iterations=200, print_steps=10,
-    #    output_results=True, num_workers=4, save_state_dict=False, run_evaluation=False)
+    # run(start_run=1, tot_runs=10, num_iterations=10, print_steps=1,
+    #    output_results=True, num_workers=4, save_state_dict=False, run_evaluation=False,
+    #    flag_load_state_dict=True)
