@@ -3,68 +3,88 @@ import matplotlib.pyplot as plt
 from math import log10, floor
 import torch
 
+def std(X, window_size):
+    res = []
+    for i in range(X.shape[0] - window_size + 1):
+        res.append(np.std(X[i:i+window_size, 0]))
+    return np.array(res)
+
+def sma(X, window_size):
+    return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
+
 def stochastic_oscillator(X, window_size = 3 * 14, k = 1):
     res = []
     for i in range(X.shape[0] - window_size + 1):
         max_price = np.max(X[i:i + window_size, 1])
         min_price = np.min(X[i:i + window_size, 2])
-        stoch = (X[i + window_size - 1, 0] - min_price) / (max_price - min_price)
+        min_close = np.min(X[i:i + window_size, 0])
+        stoch = (X[i + window_size - 1, 0] - min_close) / (max_price - min_price)
         res.append(stoch)
     res = np.array(res)
     res = np.convolve(res, np.ones((k,))/k, mode='valid')
     return res
 
-def calc_actions(model, X, sequence_length, latency, window_size, initial_capital = 1000, commissions = 0.00075):
+def heikin_ashi(X):
+    res = np.zeros((X.shape[0] - 1, 4))
+    for i in range(X.shape[0] - 1):
+        ha_close = 0.25 * np.sum(X[i + 1, :4])
+        if i == 0:
+            ha_open = 0.5 * (X[0, 0] + X[0, 3])
+        else:
+            ha_open = 0.5 * np.sum(res[i - 1, :2])
+        ha_high = np.max([X[i + 1, 1], ha_close, ha_open])
+        ha_low = np.min([X[i + 1, 2], ha_close, ha_open])
+        res[i, :] = [ha_close, ha_open, ha_high, ha_low]
+    return res
+
+def calc_actions(model, X, sequence_length, latency, window_size, k, initial_capital = 1000, commissions = 0.00075):
     capital_usd = initial_capital
-    trade_start_capital = capital_usd
     capital_coin = 0
 
     wealths = [initial_capital]
-    capital_usds = [capital_usd]
-    capital_coins = [capital_coin]
+    # capital_usds = [capital_usd]
+    # capital_coins = [capital_coin]
     buy_amounts = []
     sell_amounts = []
 
-    model_memory = model.initial_state(batch_size=1)
+    # model_memory = model.initial_state(batch_size=1)
 
-    stoch = stochastic_oscillator(X, window_size)
-    X = X[window_size - 1:, :]
+    stoch = stochastic_oscillator(X, window_size, k)
+
+    tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
+    ma = sma(tp, window_size)
+    stds = std(tp, window_size)
+
+    X = X[-sequence_length:, :]
+    ma = ma[-sequence_length:] / X[0, 0] - 1
+    stds = stds[-sequence_length:] / X[0, 0]
+
+    memory = model.initial_state(batch_size = 1)
 
     for i in range(sequence_length):
-        inp = X[i, 0] / X[0, 0] - 1
+        inp = X[i, :4] / X[0, :4] - 1
         # inp = X[i, :] / X[0, :] - 1
-        inp = np.append(inp, stoch[i])
+        inp = np.append(inp, [stoch[i] * 2 - 1, ma[i], stds[i]])
         inp = torch.from_numpy(inp.astype(np.float32)).view(1, 1, -1)
-        logit, _, model_memory = model(inp, model_memory)
-        BUY, SELL, DO_NOTHING, amount = tuple(logit.view(4).data.numpy())
+        logits, memory = model(inp, memory)
+        BUY, SELL, DO_NOTHING = tuple(logits.view(3).data.numpy())
         price = X[i + latency, 0]
 
-        if BUY > SELL and BUY > DO_NOTHING:
-            amount_coin = amount * capital_usd / price * (1 - commissions)
-            capital_coin += amount_coin
-            capital_usd *= 1 - amount
-            buy_amounts.append(amount_coin * price)
-        elif SELL > BUY and SELL > DO_NOTHING:
-            amount_usd = amount * capital_coin * price * (1 - commissions)
-            capital_usd += amount_usd
-            capital_coin *= 1 - amount
-            sell_amounts.append(amount_usd)
+        amount_coin_buy = BUY * capital_usd / price * (1 - commissions)
+        amount_usd_buy = capital_usd * BUY
+
+        amount_usd_sell = SELL * capital_coin * price * (1 - commissions)
+        amount_coin_sell = capital_coin * SELL
+
+        capital_coin += amount_coin_buy - amount_coin_sell
+        capital_usd += amount_usd_sell - amount_usd_buy
+
+        buy_amounts.append(amount_usd_buy)
+        sell_amounts.append(amount_usd_sell)
 
         wealths.append(capital_usd + capital_coin * price)
-        capital_usds.append(capital_usd)
-        capital_coins.append(capital_coin * price)
-
-        # profit = wealths[-1] / trade_start_capital - 1
-        # if profit > 0.005 or profit < -0.0025:
-        #     amount_usd = capital_coin * price * (1 - commissions)
-        #     capital_usd += amount_usd
-        #     sell_amounts.append(amount_usd)
-        #     # wealths.append(capital_usd + capital_coin * price)
-        #     # capital_usds.append(capital_usd)
-        #     # capital_coins.append(capital_coin * price)
-        #     capital_coin = 0
-        #     trade_start_capital = capital_usd
-        #     model_memory = model.initial_state(batch_size=1)
+        # capital_usds.append(capital_usd)
+        # capital_coins.append(capital_coin * price)
 
     price = X[-1, 0]
     amount_usd = capital_coin * price * (1 - commissions)
@@ -73,24 +93,17 @@ def calc_actions(model, X, sequence_length, latency, window_size, initial_capita
     capital_coin = 0
 
     wealths.append(capital_usd)
-    capital_usds.append(capital_usd)
-    capital_coins.append(capital_coin * price)
+    # capital_usds.append(capital_usd)
+    # capital_coins.append(capital_coin * price)
 
     wealths = np.array(wealths) / wealths[0] - 1
-    capital_usds = np.array(capital_usds) / initial_capital
-    capital_coins = np.array(capital_coins) / initial_capital
+    # capital_usds = np.array(capital_usds) / initial_capital
+    # capital_coins = np.array(capital_coins) / initial_capital
 
-    return wealths, buy_amounts, sell_amounts, capital_usds, capital_coins
+    return wealths, buy_amounts, sell_amounts
 
-def calc_reward(wealths, X, capital_usds, capital_coins):
-    # window_sizes = [10, 20, 30]
-    # reward = 0
-    # for window_size in window_sizes:
-    #     for i in range(X.shape[0] - window_size):
-    #         change = (X[i, 0] / X[i + window_size, 0] - 1)
-    #         reward += change * capital_coins[i + 1] - change * capital_usds[i + 1]
-
-    reward = np.mean(wealths)
+def calc_reward(wealths, buy_amounts, initial_capital):
+    reward = np.average(wealths, weights=range(wealths.shape[0])) / (np.sum(buy_amounts) / initial_capital + 1)
     return reward
 
 def round_to_n(x, n = 2):

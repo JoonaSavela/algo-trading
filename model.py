@@ -2,6 +2,25 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
+from math import ceil
+
+class FFN(nn.Module):
+    def __init__(self, n_inputs, n_hidden_layers = 2, decay_per_layer = 0.5):
+        super(FFN, self).__init__()
+
+        self.hidden_layers = nn.ModuleList([nn.Linear(ceil(n_inputs * decay_per_layer ** i), ceil(n_inputs * decay_per_layer ** (i + 1))) for i in range(n_hidden_layers)])
+
+        self.output_layer = nn.Linear(ceil(n_inputs * decay_per_layer ** n_hidden_layers), 3)
+
+    def forward(self, x):
+        hidden = x
+        for layer in self.hidden_layers:
+            hidden = layer(hidden)
+            hidden = F.relu(hidden)
+        output = self.output_layer(hidden)
+        output = F.softmax(output, dim=1)
+        return output
+
 
 # this class largely follows the official sonnet implementation
 # https://github.com/deepmind/sonnet/blob/master/sonnet/python/modules/relational_memory.py
@@ -104,11 +123,11 @@ class RelationalMemory(nn.Module):
         self.input_bias = nn.Parameter(torch.tensor([[input_bias]], dtype=torch.float32))
 
         # hidden layers
-        self.hidden = nn.Linear(self.mem_slots * self.mem_size, self.mem_slots * self.mem_size // 2)
+        self.hidden1 = nn.Linear(self.mem_slots * self.mem_size, self.mem_slots * self.mem_size // 2)
+        self.hidden2 = nn.Linear(self.mem_slots * self.mem_size // 2, self.mem_slots * self.mem_size // 4)
 
         # output layers
-        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size // 2, 3) # BUY, SELL, DO NOTHING
-        self.amount_layer = nn.Linear(self.mem_slots * self.mem_size // 2, 1) # Amount
+        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size // 4, 3) # BUY, SELL, DO NOTHING
 
         # needs 2 linear layers for tying weights for embedding layers
         # first match the "output" of the RMC to input_size, which is the embed dim
@@ -338,16 +357,16 @@ class RelationalMemory(nn.Module):
 
         output = next_memory.view(next_memory.shape[0], -1)
 
-        hidden = self.hidden(output)
+        hidden = self.hidden1(output)
+        hidden = F.relu(hidden)
+
+        hidden = self.hidden2(hidden)
         hidden = F.relu(hidden)
 
         decision = self.decision_layer(hidden)
         decision = F.softmax(decision, dim=1)
 
-        amount = self.amount_layer(hidden)
-        amount = torch.sigmoid(amount)
-
-        logit = torch.cat([decision, amount], dim=1)
+        logit = decision
 
         return logit, next_memory
 
@@ -370,22 +389,24 @@ class RelationalMemory(nn.Module):
         # concat the output from list(seq_length) of [batch, vocab] to [seq * batch, vocab]
         logits = torch.cat(logits)
 
-        if targets is not None:
-            if not self.use_adaptive_softmax:
-                # calculate loss inside this forward pass for more even VRAM usage of DataParallel
-                loss = self.criterion(logits, targets)
-            else:
-                # calculate the loss using adaptive softmax
-                _, loss = self.criterion_adaptive(logits, targets)
-        else:
-            loss = None
+        return logits, memory
 
-        # the forward pass only returns loss, because returning logits causes uneven VRAM usage of DataParallel
-        # logits are provided only for sampling stage
-        if not require_logits:
-            return loss, memory
-        else:
-            return logits, loss, memory
+        # if targets is not None:
+        #     if not self.use_adaptive_softmax:
+        #         # calculate loss inside this forward pass for more even VRAM usage of DataParallel
+        #         loss = self.criterion(logits, targets)
+        #     else:
+        #         # calculate the loss using adaptive softmax
+        #         _, loss = self.criterion_adaptive(logits, targets)
+        # else:
+        #     loss = None
+        #
+        # # the forward pass only returns loss, because returning logits causes uneven VRAM usage of DataParallel
+        # # logits are provided only for sampling stage
+        # if not require_logits:
+        #     return loss, memory
+        # else:
+        #     return logits, loss, memory
 
 
 if __name__ == '__main__':

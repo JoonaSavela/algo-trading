@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from utils import plot_y, stochastic_oscillator
+from utils import plot_y, stochastic_oscillator, heikin_ashi, sma
 from model import RelationalMemory
 from data import get_and_save_all, load_data
 import numpy as np
@@ -10,27 +10,60 @@ import pandas as pd
 import time
 import torch
 import copy
+import plotly.plotly as py
+import plotly.graph_objs as go
 
 def main():
 
-    # test_files = glob.glob('data/*/*.json')[:1]
-    # sequence_length = 4*60
-    # window_size = 3 * 14
+    for file in glob.glob('data/*/*.json'):
+        X = load_data(file, 2001, 0, 0)
+        zero_count = np.sum(X == 0, axis = 0)
+        if np.any(zero_count > 0):
+            print(file, zero_count)
+
+    # test_files = glob.glob('data/*/*.json')[14:15]
+    # window_size1 = 3 * 14
+    # window_size2 = 200
+    # k = 7
+    # window_size = np.max([window_size1 + k - 1, window_size2])
     # latency = 0
+    # sequence_length = 2001 - window_size + 1 - latency
+    # print(sequence_length)
     #
     # for file in test_files:
-    #     fig, axes = plt.subplots(figsize=(18, 8), ncols=3, nrows=2)
-    #     for i, k in enumerate(range(3, 8, 2)):
-    #         X = load_data(file, sequence_length, latency, window_size, k)
-    #         print(X.shape)
-    #         stoch = stochastic_oscillator(X, window_size, k)
-    #
-    #         print(stoch.shape)
-    #
-    #         axes[0][i].plot(range(stoch.shape[0]), X[window_size - 1 + k - 1:, 0] / X[window_size - 1 + k - 1, 0])
-    #         axes[1][i].plot(range(stoch.shape[0]), stoch)
-    #
-    #     plt.show()
+    #     X = load_data(file, sequence_length, latency, window_size)
+    #     print(np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1)))
+
+        # print(X.shape)
+        # ha = heikin_ashi(X)
+        # print(ha[-sequence_length:, :].shape)
+        #
+        # ma = sma(X, window_size2)
+        # print(ma.shape)
+        #
+        # stochastic = stochastic_oscillator(X, window_size1, k)
+        # print(stochastic.shape)
+        #
+        # plt.plot(list(range(sequence_length)), X[-sequence_length:, 0:4])
+        # plt.plot(list(range(sequence_length)), ma[-sequence_length:])
+        # plt.show()
+
+        # trace = go.Candlestick(x=list(range(X.shape[0])),
+        #         open=X[:, 3],
+        #         high=X[:, 1],
+        #         low=X[:, 2],
+        #         close=X[:, 0])
+        # data = [trace]
+        # py.plot(data, filename='simple_candlestick')
+        #
+        # trace1 = go.Candlestick(x=list(range(X.shape[0] - 1)),
+        #         open=ha[:, 1],
+        #         high=ha[:, 2],
+        #         low=ha[:, 3],
+        #         close=ha[:, 0])
+        # data1 = [trace1]
+        # py.plot(data1, filename='heikin-ashi_candlestick')
+
 
 
     # test_files = [glob.glob('data/*/*.json')[0]]
@@ -51,26 +84,26 @@ def main():
     #     axes[1].plot(range(stoch.shape[0]), stoch)
     #     plt.show()
 
-    for filename in glob.glob('run_summaries/*.csv'):
-        print(filename)
-        table = pd.read_csv(filename)
-        n = table.shape[0]
-        print(n)
-
-        print(np.prod(table['profit'] + 1))
-        print(np.power(np.prod(table['profit'] + 1), 1/n))
-        print(np.prod(table['max_profit'] + 1))
-        print(np.power(np.prod(table['max_profit'] + 1), 1/n))
-        print(np.prod(table['min_profit'] + 1))
-        print(np.power(np.prod(table['min_profit'] + 1), 1/n))
-
-        plt.plot(table['iteration'], table['profit'])
-        plt.plot(table['iteration'], table['max_profit'])
-        plt.plot(table['iteration'], table['min_profit'])
-        plt.show()
-
-        plt.plot(table['iteration'], table['reward'])
-        plt.show()
+    # for filename in glob.glob('run_summaries/*.csv'):
+    #     print(filename)
+    #     table = pd.read_csv(filename)
+    #     n = table.shape[0]
+    #     print(n)
+    #
+    #     print(np.prod(table['profit'] + 1))
+    #     print(np.power(np.prod(table['profit'] + 1), 1/n))
+    #     print(np.prod(table['max_profit'] + 1))
+    #     print(np.power(np.prod(table['max_profit'] + 1), 1/n))
+    #     print(np.prod(table['min_profit'] + 1))
+    #     print(np.power(np.prod(table['min_profit'] + 1), 1/n))
+    #
+    #     plt.plot(table['iteration'], table['profit'])
+    #     plt.plot(table['iteration'], table['max_profit'])
+    #     plt.plot(table['iteration'], table['min_profit'])
+    #     plt.show()
+    #
+    #     plt.plot(table['iteration'], table['reward'])
+    #     plt.show()
 
     # for filename in glob.glob('data/*/*.json'):
     #     with open(filename, 'r') as file:

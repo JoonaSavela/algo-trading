@@ -7,7 +7,7 @@ import requests
 import glob
 from keys import cryptocompare_key
 
-def get_recent_data(coin, size = 4 * 14):
+def get_recent_data(coin, size = 3 * 14):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=' + str(size - 1) + '&api_key=' + cryptocompare_key
     request = requests.get(url)
     content = json.loads(request._content)
@@ -48,7 +48,7 @@ def get_and_save(coin, time_str):
 
     return is_same_time
 
-coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'BNB']
+coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
 
 def get_and_save_all():
     for coin in coins:

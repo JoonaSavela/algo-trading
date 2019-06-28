@@ -27,7 +27,7 @@ class EvolutionStrategy(object):
         return state_dict_try
 
     # implimention of Algorithm 1: Evolution Strategies by Salimans et al., OpenAI [1], p.2/12
-    def run(self, iterations, train_files, model, print_step=10, sequence_length=4*60, latency=0, window_size = 3 * 14):
+    def run(self, iterations, train_files, model, print_step=10, sequence_length=4*60, latency=0, window_size = 3 * 14, k = 1):
         metrics = []
         run_name = ('npop={0:}_sigma={1:}_alpha={2:}_iters={3:}_type={4:}').format(self.POPULATION_SIZE ,
                                                                                    self.SIGMA ,
@@ -39,7 +39,7 @@ class EvolutionStrategy(object):
             for iteration in range(iterations):
 
                 filename = np.random.choice(train_files)
-                X = load_data(filename, sequence_length, latency, window_size)
+                X = load_data(filename, sequence_length, latency, window_size, k)
 
                 # checking fitness
                 if iteration % print_step == 0:
@@ -54,8 +54,8 @@ class EvolutionStrategy(object):
                 rewards = torch.zeros(self.POPULATION_SIZE)
                 for i in range(self.POPULATION_SIZE):
                     x = {}
-                    for k, w in self.state_dict.items():
-                        x[k] = torch.randn(w.shape)
+                    for key, w in self.state_dict.items():
+                        x[key] = torch.randn(w.shape)
                     noise.append(x)
 
                 for i in range(self.POPULATION_SIZE):
@@ -65,8 +65,8 @@ class EvolutionStrategy(object):
                 std = torch.std(rewards)
                 rewards = (rewards - torch.mean(rewards)) / (std if std != 0 else 1)
 
-                for k, w in self.state_dict.items():
-                    A = torch.stack([n[k] for n in noise])
+                for key, w in self.state_dict.items():
+                    A = torch.stack([n[key] for n in noise])
 
                     # for transposing A
                     permute_indices = list(range(len(A.shape)))[::-1]
@@ -77,7 +77,7 @@ class EvolutionStrategy(object):
                         delta = delta.permute(*permute_indices[1:])
                     except TypeError:
                         pass
-                    self.state_dict[k] += delta
+                    self.state_dict[key] += delta
 
         return metrics
 
@@ -99,7 +99,7 @@ class EvolutionStrategy(object):
         return_container[worker_id] = [noise, rewards]
 
     # Algorithm 2: Parallelized Evolution Strategies by Salimans et al., OpenAI [1], p.3/12
-    def run_dist(self, iterations, train_files, models, print_step=10, num_workers=1, sequence_length=4*60, latency=0, window_size = 3 * 14):
+    def run_dist(self, iterations, train_files, models, print_step=10, num_workers=1, sequence_length=4*60, latency=0, window_size = 3 * 14, k = 1):
         metrics = []
         run_name = ('npop={0:}_sigma={1:}_alpha={2:}_iters={3:}_type={4:}').format(self.POPULATION_SIZE * num_workers,
                                                                                    self.SIGMA ,
@@ -111,7 +111,7 @@ class EvolutionStrategy(object):
             for iteration in range(iterations):
 
                 filename = np.random.choice(train_files)
-                X = load_data(filename, sequence_length, latency, window_size)
+                X = load_data(filename, sequence_length, latency, window_size, k)
 
                 # checking fitness
                 if iteration % print_step == 0:
@@ -145,8 +145,8 @@ class EvolutionStrategy(object):
 
                 # print(rewards)
 
-                for k, w in self.state_dict.items():
-                    A = torch.stack([n[k] for n in noise])
+                for key, w in self.state_dict.items():
+                    A = torch.stack([n[key] for n in noise])
 
                     # for transposing A
                     permute_indices = list(range(len(A.shape)))[::-1]
@@ -157,6 +157,6 @@ class EvolutionStrategy(object):
                         delta = delta.permute(*permute_indices[1:])
                     except TypeError:
                         pass
-                    self.state_dict[k] += delta
+                    self.state_dict[key] += delta
 
         return metrics

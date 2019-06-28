@@ -8,7 +8,7 @@ import json
 import glob
 from es import EvolutionStrategy
 import matplotlib.pyplot as plt
-from model import RelationalMemory
+from model import RelationalMemory, FFN
 from data import load_data
 from utils import calc_actions, calc_reward, calc_metrics
 from sklearn.model_selection import train_test_split
@@ -19,32 +19,35 @@ import torch
 start_time = time.time()
 
 # data params
-sequence_length = 60*4
-# sequence_length = 2001
 latency = 0
 window_size = 3 * 14
+k = 7
+sequence_length = 60*8
+# sequence_length = 2001 - window_size + 1 - latency - k + 1
+commissions = 0#.00075
 
-input_size = 2
-seq_length = 1
+input_size = 7
 
 mem_slots = 8
-num_heads = 2
+num_heads = 8
+# decay_per_layer = 0.6
 
 # NN model definition
 model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
+# model = FFN(input_size, decay_per_layer = decay_per_layer)
 
 # reward function definition
-def get_reward(model, state_dict, X, flag_calc_metrics = False, commissions = 0.00075):
+def get_reward(model, state_dict, X, flag_calc_metrics = False, commissions = commissions):
     model.load_state_dict(state_dict)
 
     initial_capital = 1000
-    wealths, buy_amounts, sell_amounts, capital_usds, capital_coins = calc_actions(model, X, sequence_length, latency, window_size, initial_capital, commissions)
+    wealths, buy_amounts, sell_amounts = calc_actions(model, X, sequence_length, latency, window_size, k, initial_capital, commissions)
 
-    reward = calc_reward(wealths, X[window_size - 1:, :], capital_usds, capital_coins)
+    reward = calc_reward(wealths, buy_amounts, initial_capital)
 
     metrics = {}
     if flag_calc_metrics:
-        metrics = calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital, X[0, 0], X[-1, 0])
+        metrics = calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital, X[-sequence_length, 0], X[-1, 0])
 
     return reward, metrics
 
@@ -75,9 +78,9 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                     print('skipping run, as hyperparams [{}] have been chosen before'.format(runs[key]))
 
         else: #default - best hyperparams
-            npop = 100
-            sigma = 1
-            alpha = 1
+            npop = 52
+            sigma = 0.1
+            alpha = 0.01
 
         # will only run if hyperparams are not chosen before
         if not chosen_before:
@@ -95,19 +98,19 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                    sigma=sigma,
                                    learning_rate=alpha)
 
-            train_files, test_files = train_test_split(glob.glob('data/*/*.json'), random_state=1)
-            # train_files = test_files = [glob.glob('data/*/*.json')[0]]
-            # print(train_files, test_files)
+            # train_files, test_files = train_test_split(glob.glob('data/*/*.json'), random_state=1)
+            train_files = test_files = glob.glob('data/*/*.json')[:1]
+            print(train_files, test_files)
 
             if num_workers == 1:
                 # single thread version
-                metrics = es.run(num_iterations, train_files, model, print_steps, sequence_length, latency, window_size)
+                metrics = es.run(num_iterations, train_files, model, print_steps, sequence_length, latency, window_size, k)
             else:
                 models = []
                 for i in range(num_workers):
-                    models.append(RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.))
+                    models.append(copy.deepcopy(model))
                 # distributed version
-                metrics = es.run_dist(num_iterations, train_files, models, print_steps, num_workers, sequence_length, latency, window_size)
+                metrics = es.run_dist(num_iterations, train_files, models, print_steps, num_workers, sequence_length, latency, window_size, k)
 
             if output_results:
                 RUN_SUMMARY_LOC = './run_summaries/'
@@ -138,12 +141,12 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
         torch.save(model.state_dict(), filename)
 
         if run_evaluation:
-            evaluate(test_files, filename, None, input_size, seq_length, mem_slots, num_heads, window_size)
+            evaluate(test_files, filename, None, input_size, window_size, mem_slots = mem_slots, num_heads = num_heads)
 
 
 
 if __name__ == '__main__':
-    run(start_run=0, tot_runs=1, num_iterations=100, print_steps=5,
+    run(start_run=0, tot_runs=1, num_iterations=40, print_steps=1,
        output_results=True, num_workers=4, save_state_dict=True, run_evaluation=True,
        flag_load_state_dict=False)
 
