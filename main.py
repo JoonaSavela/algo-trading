@@ -15,38 +15,50 @@ import plotly.graph_objs as go
 
 def main():
 
-    for file in glob.glob('data/*/*.json'):
-        X = load_data(file, 2001, 0, 0)
-        zero_count = np.sum(X == 0, axis = 0)
-        if np.any(zero_count > 0):
-            print(file, zero_count)
+    # for file in glob.glob('data/*/*.json'):
+    #     X = load_data(file, 2001, 0, 0)
+    #     zero_count = np.sum(X == 0, axis = 0)
+    #     if np.any(zero_count > 0):
+    #         print(file, zero_count)
 
-    # test_files = glob.glob('data/*/*.json')[14:15]
-    # window_size1 = 3 * 14
-    # window_size2 = 200
-    # k = 7
+    test_files = glob.glob('data/*/*.json')[14:15]
+    window_size1 = 3 * 14
+    window_size2 = window_size1
+    k = 7
     # window_size = np.max([window_size1 + k - 1, window_size2])
-    # latency = 0
-    # sequence_length = 2001 - window_size + 1 - latency
-    # print(sequence_length)
-    #
-    # for file in test_files:
-    #     X = load_data(file, sequence_length, latency, window_size)
-    #     print(np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1)))
+    window_size = window_size1 + window_size2
+    latency = 0
+    sequence_length = 2001 - window_size + 2 - latency - k + 1
+    # sequence_length = 16*60
+    print(sequence_length)
 
-        # print(X.shape)
+    for file in test_files:
+        X = load_data(file, sequence_length, latency, window_size + 1, k)
+        # print(np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1)))
+
+        print(X.shape)
         # ha = heikin_ashi(X)
         # print(ha[-sequence_length:, :].shape)
-        #
-        # ma = sma(X, window_size2)
-        # print(ma.shape)
-        #
-        # stochastic = stochastic_oscillator(X, window_size1, k)
-        # print(stochastic.shape)
-        #
-        # plt.plot(list(range(sequence_length)), X[-sequence_length:, 0:4])
-        # plt.plot(list(range(sequence_length)), ma[-sequence_length:])
-        # plt.show()
+
+        ma = sma(X, window_size2)
+        print(ma.shape)
+
+        stochastic1 = stochastic_oscillator(X, window_size1, k)
+        print(stochastic1.shape)
+
+        X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+
+        stochastic2 = stochastic_oscillator(X_corrected, window_size1, k)
+        print(stochastic2.shape)
+
+        fig, axes = plt.subplots(figsize=(12, 8), ncols=2, nrows=2)
+
+        axes[0][0].plot(range(sequence_length), X[-sequence_length:, :4])
+        axes[0][0].plot(range(sequence_length), ma[-sequence_length:])
+        axes[1][0].plot(range(sequence_length), stochastic1[-sequence_length:])
+        axes[0][1].plot(range(sequence_length), X_corrected[-sequence_length:])
+        axes[1][1].plot(range(sequence_length), stochastic2[-sequence_length:])
+        plt.show()
 
         # trace = go.Candlestick(x=list(range(X.shape[0])),
         #         open=X[:, 3],

@@ -89,6 +89,7 @@ def load_data(filename, sequence_length, latency, window_size, k = 1):
     try:
         # start_index = np.random.choice(len(obj['Data']) - sequence_length - latency - window_size + 1 - k + 1)
         start_index = 0
+        # start_index = 750
     except ValueError:
         start_index = 0
 

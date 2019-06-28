@@ -54,12 +54,13 @@ def evaluate_strategy(files):
     window_size = 3 * 14
     k = 7
     latency = 0
-    sequence_length = 2001 - window_size + 1 - latency - k + 1
+    sequence_length = 2001 - window_size * 2 + 2 - latency - k + 1
+    # print(sequence_length)
 
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.1)
+    stochastic_criterion = Stochastic_criterion(0.065)
     ha_criterion = Heikin_ashi_criterion()
     bollinger_criterion = Bollinger_criterion(8)
     stop_loss = Stop_loss_criterion(-0.0075)
@@ -68,14 +69,18 @@ def evaluate_strategy(files):
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
 
     for file_i, file in enumerate(files):
-        X = load_data(file, sequence_length, latency, window_size, k)
+        X = load_data(file, sequence_length, latency, window_size * 2 + 1, k)
 
-        stochastic = stochastic_oscillator(X, window_size, k)
+        # stochastic = stochastic_oscillator(X, window_size, k)
         ha = heikin_ashi(X)
 
         tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
         ma = sma(tp, window_size)
         stds = std(tp, window_size)
+
+        X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+        stochastic = stochastic_oscillator(X_corrected, window_size, k)
+        # print(stochastic.shape)
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
