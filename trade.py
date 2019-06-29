@@ -75,7 +75,7 @@ def trading_pipeline():
 
     client = Client(binance_api_key, binance_secret_key)
     # symbol = np.random.choice(coins) + 'USDT'
-    symbol1 = 'BTC' # TODO: make this the other way around
+    symbol1 = 'ETH'
     symbol = symbol1 + 'USDT'
     print(symbol1)
 
@@ -94,10 +94,10 @@ def trading_pipeline():
         initial_bnb = asset_balance(client, 'BNB')
         print(initial_time, initial_capital, asset_balance(client, symbol1), initial_bnb)
 
-        window_size = 3 * 14
-        k = 7
+        window_size = 1 * 14
+        k = 1
 
-        stochastic_criterion = Stochastic_criterion(0.1)
+        stochastic_criterion = Stochastic_criterion(0.06)
         ha_criterion = Heikin_ashi_criterion()
         bollinger_criterion = Bollinger_criterion(8)
         stop_loss = Stop_loss_criterion(-0.0075)
@@ -108,16 +108,18 @@ def trading_pipeline():
         time.sleep(waiting_time)
 
         while True:
-            X, timeTo = get_recent_data(symbol1, size = window_size + k - 1)
+            X, timeTo = get_recent_data(symbol1, size = window_size * 2 + 2 + k - 1)
             balance_symbol = asset_balance(client, symbol1)
             balance_usdt = asset_balance(client, 'USDT')
-
-            stochastic = stochastic_oscillator(X, window_size, k)
-            ha = heikin_ashi(X)
 
             tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
             ma = sma(tp, window_size)
             stds = std(tp, window_size)
+
+            X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+
+            stochastic = stochastic_oscillator(X_corrected, window_size, k)
+            ha = heikin_ashi(X)
 
             price = X[-1 ,0]
 

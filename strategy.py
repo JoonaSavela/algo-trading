@@ -51,8 +51,8 @@ def calc_actions():
     pass
 
 def evaluate_strategy(files):
-    window_size = 3 * 14
-    k = 7
+    window_size = 1 * 14
+    k = 1
     latency = 0
     sequence_length = 2001 - window_size * 2 + 2 - latency - k + 1
     # print(sequence_length)
@@ -60,9 +60,9 @@ def evaluate_strategy(files):
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.065)
+    stochastic_criterion = Stochastic_criterion(0.06)
     ha_criterion = Heikin_ashi_criterion()
-    bollinger_criterion = Bollinger_criterion(8)
+    bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.0075)
 
     cs = np.zeros(shape=sequence_length * len(files))
@@ -154,8 +154,8 @@ def evaluate_strategy(files):
 
 if __name__ == '__main__':
     # print(len(glob.glob('data/*/*.json')))
-    # for dir in glob.glob('data/*/'):
-    dir = 'data/*/'
-    test_files = glob.glob(dir + '*.json')[:-1]
-    # print(dir, len(test_files))
-    evaluate_strategy(test_files)
+    for dir in glob.glob('data/*/'):
+        # dir = 'data/*/'
+        test_files = glob.glob(dir + '*.json')[:-1]
+        print(dir, len(test_files))
+        evaluate_strategy(test_files)
