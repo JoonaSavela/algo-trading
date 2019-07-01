@@ -51,17 +51,17 @@ def calc_actions():
     pass
 
 def evaluate_strategy(files):
-    # TODO: test with 2 different window sizes
-    window_size = 1 * 14
+    window_size1 = 3 * 14
+    window_size2 = 1 * 14
     k = 1
     latency = 0
-    sequence_length = 2001 - window_size * 2 + 2 - latency - k + 1
+    sequence_length = 2001 - window_size1 - window_size2 + 2 - latency - k + 1
     # print(sequence_length)
 
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.02, 0.065)
+    stochastic_criterion = Stochastic_criterion(0.04)
     ha_criterion = Heikin_ashi_criterion()
     # bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.0075)
@@ -70,17 +70,17 @@ def evaluate_strategy(files):
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
 
     for file_i, file in enumerate(files):
-        X = load_data(file, sequence_length, latency, window_size * 2 - 1, k)
+        X = load_data(file, sequence_length, latency, window_size1 + window_size2 - 1, k)
 
         # stochastic = stochastic_oscillator(X, window_size, k)
         ha = heikin_ashi(X)
 
         tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-        ma = sma(tp, window_size)
+        ma = sma(tp, window_size1)
         # stds = std(tp, window_size)
 
         X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
-        stochastic = stochastic_oscillator(X_corrected, window_size, k, latency)
+        stochastic = stochastic_oscillator(X_corrected, window_size2, k, latency)
         # print(stochastic.shape)
 
         X = X[-sequence_length:, :]

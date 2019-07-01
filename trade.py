@@ -23,9 +23,9 @@ def binance_price(client, symbol):
 
 def check_bnb(client):
     balance_bnb = asset_balance(client, 'BNB')
-    if balance_bnb < 0.2:
+    if balance_bnb < 0.25:
         try:
-            client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
+            client.order_market_buy(symbol='BNBUSDT', quantity=0.25)
             print('Bought BNB')
             time.sleep(0.1)
         except:
@@ -89,10 +89,11 @@ def trading_pipeline():
         initial_bnb = asset_balance(client, 'BNB')
         print(initial_time, initial_capital, asset_balance(client, symbol1), initial_bnb)
 
-        window_size = 1 * 14
+        window_size1 = 3 * 14
+        window_size2 = 1 * 14
         k = 1
 
-        stochastic_criterion = Stochastic_criterion(0.02, 0.065)
+        stochastic_criterion = Stochastic_criterion(0.04)
         ha_criterion = Heikin_ashi_criterion()
         # bollinger_criterion = Bollinger_criterion(8)
         stop_loss = Stop_loss_criterion(-0.0075)
@@ -104,14 +105,14 @@ def trading_pipeline():
 
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
-                X, timeTo = get_recent_data(symbol1, size = window_size * 2 + 2 + k - 1)
+                X, timeTo = get_recent_data(symbol1, size = window_size1 + window_size2 + 2 + k - 1)
 
                 tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-                ma = sma(tp, window_size)
+                ma = sma(tp, window_size1)
 
                 X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
 
-                stochastic = stochastic_oscillator(X_corrected, window_size, k)
+                stochastic = stochastic_oscillator(X_corrected, window_size2, k)
                 ha = heikin_ashi(X)
 
                 price = X[-1 ,0]
@@ -120,14 +121,14 @@ def trading_pipeline():
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
                     # cancel_orders(client, symbol, 'SELL')
-                    buy_assets(client, symbol, high, balance_usdt)
+                    # buy_assets(client, symbol, high, balance_usdt)
                     action = 'BUY'
                 elif ha_criterion.sell(ha[-1, :]) and \
                         (stochastic_criterion.sell(stochastic[-1]) or \
                         stop_loss.sell(price, X[-1, 3])):
                     balance_symbol = asset_balance(client, symbol1)
                     # cancel_orders(client, symbol, 'BUY')
-                    sell_assets(client, symbol, balance_symbol)
+                    # sell_assets(client, symbol, balance_symbol)
                     action = 'SELL'
                 else:
                     action = 'DO NOTHING'
