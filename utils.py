@@ -12,9 +12,9 @@ def std(X, window_size):
 def sma(X, window_size):
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
 
-def stochastic_oscillator(X, window_size = 3 * 14, k = 1):
+def stochastic_oscillator(X, window_size = 3 * 14, k = 1, latency = 0):
     res = []
-    for i in range(X.shape[0] - window_size + 1):
+    for i in range(X.shape[0] - window_size + 1 - latency):
         max_price = np.max(X[i:i + window_size, 1])
         min_price = np.min(X[i:i + window_size, 2])
         min_close = np.min(X[i:i + window_size, 0])
@@ -107,11 +107,13 @@ def calc_reward(wealths, buy_amounts, initial_capital):
     return reward
 
 def round_to_n(x, n = 2):
+    if x == 0: return x
     res = round(x, -int(floor(log10(abs(x)))) + (n - 1)) if x != 0 else 0
     res = int(res) if abs(res) >= 10**(n - 1) else res
     return res
 
 def floor_to_n(x, n = 2):
+    if x == 0: return x
     p = -int(floor(log10(abs(x)))) + (n - 1)
     res = floor(x * 10 ** p) / 10 ** p
     res = int(res) if abs(res) >= 10**(n - 1) else res

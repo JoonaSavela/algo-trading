@@ -22,14 +22,14 @@ def main():
     #         print(file, zero_count)
 
     test_files = glob.glob('data/*/*.json')[14:15]
-    window_size1 = 3 * 14
+    window_size1 = 1 * 14
     window_size2 = window_size1
-    k = 7
+    k = 1
     # window_size = np.max([window_size1 + k - 1, window_size2])
     window_size = window_size1 + window_size2
     latency = 0
-    sequence_length = 2001 - window_size + 2 - latency - k + 1
-    # sequence_length = 16*60
+    # sequence_length = 2001 - window_size + 2 - latency - k + 1
+    sequence_length = 4*60
     print(sequence_length)
 
     for file in test_files:

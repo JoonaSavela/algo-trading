@@ -51,6 +51,7 @@ def calc_actions():
     pass
 
 def evaluate_strategy(files):
+    # TODO: test with 2 different window sizes
     window_size = 1 * 14
     k = 1
     latency = 0
@@ -60,32 +61,33 @@ def evaluate_strategy(files):
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.06)
+    stochastic_criterion = Stochastic_criterion(0.02, 0.065)
     ha_criterion = Heikin_ashi_criterion()
-    bollinger_criterion = Bollinger_criterion(8) # Useless?
+    # bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.0075)
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
 
     for file_i, file in enumerate(files):
-        X = load_data(file, sequence_length, latency, window_size * 2 + 1, k)
+        X = load_data(file, sequence_length, latency, window_size * 2 - 1, k)
 
         # stochastic = stochastic_oscillator(X, window_size, k)
         ha = heikin_ashi(X)
 
         tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
         ma = sma(tp, window_size)
-        stds = std(tp, window_size)
+        # stds = std(tp, window_size)
 
         X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
-        stochastic = stochastic_oscillator(X_corrected, window_size, k)
+        stochastic = stochastic_oscillator(X_corrected, window_size, k, latency)
         # print(stochastic.shape)
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
         ma = ma[-sequence_length:]
-        stds = stds[-sequence_length:]
+        stochastic = stochastic[-sequence_length:]
+        # stds = stds[-sequence_length:]
 
         capital_usd = initial_capital
         trade_start_capital = capital_usd
@@ -99,19 +101,16 @@ def evaluate_strategy(files):
 
         i = 0
         while i < sequence_length:
-            price = X[i + latency, 0]
+            price = X[i, 0]
             stoch = stochastic[i]
 
-            if ha_criterion.buy(ha[i, :]) and \
-                    (stochastic_criterion.buy(stoch) or \
-                    bollinger_criterion.buy(price, ma[i], stds[i])):
+            if ha_criterion.buy(ha[i, :]) and stochastic_criterion.buy(stoch):
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
                 capital_usd = 0
                 buy_amounts.append(amount_coin * price)
             elif ha_criterion.sell(ha[i, :]) and \
                     (stochastic_criterion.sell(stoch) or \
-                    bollinger_criterion.sell(price, ma[i], stds[i]) or \
                     stop_loss.sell(price, X[i, 3])):
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
@@ -147,6 +146,7 @@ def evaluate_strategy(files):
 
     print('profit:', ws[-1])
     print('benchmark profit:', cs[-1])
+    print('min, max:', np.min(ws), np.max(ws))
 
     plt.plot(range(cs.shape[0]), cs)
     plt.plot(range(ws.shape[0]), ws)
@@ -154,8 +154,8 @@ def evaluate_strategy(files):
 
 if __name__ == '__main__':
     # print(len(glob.glob('data/*/*.json')))
-    for dir in glob.glob('data/*/'):
-        # dir = 'data/*/'
-        test_files = glob.glob(dir + '*.json')[:-1]
-        print(dir, len(test_files))
-        evaluate_strategy(test_files)
+    # for dir in glob.glob('data/*/'):
+    dir = 'data/ETH/'
+    test_files = glob.glob(dir + '*.json')[:-1]
+    # print(dir, len(test_files))
+    evaluate_strategy(test_files)
