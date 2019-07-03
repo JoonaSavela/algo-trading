@@ -39,11 +39,23 @@ class Stop_loss_criterion:
     def __init__(self, stop_loss):
         self.stop_loss = stop_loss
 
-    def buy(self, ha):
+    def buy(self):
         return True
 
     def sell(self, close, open):
         return close / open - 1 < self.stop_loss
+
+
+class Take_profit_criterion:
+    def __init__(self, take_profit):
+        self.take_profit = take_profit
+        self.buy_price = None
+
+    def buy(self):
+        return self.buy_price is None
+
+    def sell(self, close):
+        return self.buy_price is not None and close / self.buy_price - 1 > self.take_profit
 
 
 
@@ -65,6 +77,7 @@ def evaluate_strategy(files):
     ha_criterion = Heikin_ashi_criterion()
     # bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.0075)
+    take_profit = Take_profit_criterion(0.01)
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
@@ -104,14 +117,18 @@ def evaluate_strategy(files):
             price = X[i, 0]
             stoch = stochastic[i]
 
-            if ha_criterion.buy(ha[i, :]) and stochastic_criterion.buy(stoch):
+            if ha_criterion.buy(ha[i, :]) and stochastic_criterion.buy(stoch) and \
+                    take_profit.buy():
+                take_profit.buy_price = price
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
                 capital_usd = 0
                 buy_amounts.append(amount_coin * price)
             elif ha_criterion.sell(ha[i, :]) and \
                     (stochastic_criterion.sell(stoch) or \
-                    stop_loss.sell(price, X[i, 3])):
+                    stop_loss.sell(price, X[i, 3]) or \
+                    take_profit.sell(price)):
+                take_profit.buy_price = None
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
                 capital_coin = 0

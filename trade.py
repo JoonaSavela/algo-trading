@@ -9,7 +9,7 @@ import numpy as np
 from utils import round_to_n, floor_to_n, stochastic_oscillator, heikin_ashi, sma, std
 from math import floor, log10
 import json
-from strategy import Stochastic_criterion, Heikin_ashi_criterion, Bollinger_criterion, Stop_loss_criterion
+from strategy import Stochastic_criterion, Heikin_ashi_criterion, Bollinger_criterion, Stop_loss_criterion, Take_profit_criterion
 from requests.exceptions import ConnectionError
 
 def asset_balance(client, symbol):
@@ -97,6 +97,7 @@ def trading_pipeline():
         ha_criterion = Heikin_ashi_criterion()
         # bollinger_criterion = Bollinger_criterion(8)
         stop_loss = Stop_loss_criterion(-0.0075)
+        take_profit = Take_profit_criterion(0.01)
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
@@ -117,18 +118,22 @@ def trading_pipeline():
 
                 price = X[-1 ,0]
 
-                if ha_criterion.buy(ha[-1, :]) and stochastic_criterion.buy(stochastic[-1]):
+                if ha_criterion.buy(ha[-1, :]) and stochastic_criterion.buy(stochastic[-1]) and \
+                        take_profit.buy():
+                    take_profit.buy_price = price
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
                     # cancel_orders(client, symbol, 'SELL')
-                    # buy_assets(client, symbol, high, balance_usdt)
+                    buy_assets(client, symbol, high, balance_usdt)
                     action = 'BUY'
                 elif ha_criterion.sell(ha[-1, :]) and \
                         (stochastic_criterion.sell(stochastic[-1]) or \
-                        stop_loss.sell(price, X[-1, 3])):
+                        stop_loss.sell(price, X[-1, 3]) or \
+                        take_profit.sell(price)):
+                    take_profit.buy_price = None
                     balance_symbol = asset_balance(client, symbol1)
                     # cancel_orders(client, symbol, 'BUY')
-                    # sell_assets(client, symbol, balance_symbol)
+                    sell_assets(client, symbol, balance_symbol)
                     action = 'SELL'
                 else:
                     action = 'DO NOTHING'
