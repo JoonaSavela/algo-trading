@@ -188,9 +188,9 @@ def trading_pipeline():
         }
         filename = 'trading_logs/' + symbol1 + '-' + str(initial_time) + '-' + str(final_time) + '.json'
 
-        if not initial_capital == final_capital:
-            with open(filename, 'w') as file:
-                json.dump(obj, file)
+        # if not initial_capital == final_capital:
+        #     with open(filename, 'w') as file:
+        #         json.dump(obj, file)
 
 
 if __name__ == '__main__':
