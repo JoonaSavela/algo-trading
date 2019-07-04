@@ -10,7 +10,7 @@ from keys import cryptocompare_key
 def get_recent_data(coin, size = 3 * 14):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=' + str(size - 1) + '&api_key=' + cryptocompare_key
     request = requests.get(url)
-    content = json.loads(request._content)
+    content = request.json()
 
     data = content['Data']
 
