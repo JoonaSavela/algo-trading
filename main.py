@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from utils import plot_y, stochastic_oscillator, heikin_ashi, sma
+from utils import stochastic_oscillator, heikin_ashi, sma
 from model import RelationalMemory
 from data import get_and_save_all, load_data
 import numpy as np

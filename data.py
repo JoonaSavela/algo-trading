@@ -13,14 +13,14 @@ def get_recent_data(coin, size = 3 * 14):
     content = request.json()
 
     data = content['Data']
+    data_keys = ['close', 'high', 'low', 'open', 'volumefrom', 'volumeto']
 
     X = np.zeros(shape=(len(data), 6))
     for i in range(len(data)):
         item = data[i]
         tmp = []
-        for key, value in item.items():
-            if key != 'time':
-                tmp.append(value)
+        for key in data_keys:
+            tmp.append(item[key])
         X[i, :] = tmp
 
     return X, content['TimeTo']
