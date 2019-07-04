@@ -1,7 +1,11 @@
 from data import load_data
 from utils import stochastic_oscillator, heikin_ashi, sma, std
 import glob
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    print('Could not import matplotlib')
+
 import numpy as np
 
 class Stochastic_criterion:

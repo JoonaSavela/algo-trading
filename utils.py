@@ -1,7 +1,9 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from math import log10, floor
-import torch
+try:
+    import torch
+except ImportError:
+    print('Could not import torch')
 
 def std(X, window_size):
     res = []
@@ -136,16 +138,3 @@ def get_time(filename):
     split1 = filename.split('/')
     split2 = split1[2].split('.')
     return int(split2[0])
-
-def plot_y(X, Y, X_col):
-    tmp = X[:,X_col]
-    size = 8
-
-    fig, axes = plt.subplots(figsize=(16, 4), ncols=Y.shape[1])
-
-    for i in range(len(axes)):
-        axis = axes[i]
-        plot = axis.scatter(range(len(tmp)), tmp, c=Y[:,i], cmap=plt.get_cmap('viridis'), s=size)
-        fig.colorbar(plot, ax=axis)
-
-    plt.show()
