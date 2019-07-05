@@ -2,8 +2,8 @@ import numpy as np
 from math import log10, floor
 try:
     import torch
-except ImportError:
-    print('Could not import torch')
+except ImportError as e:
+    print(e)
 
 def std(X, window_size):
     res = []

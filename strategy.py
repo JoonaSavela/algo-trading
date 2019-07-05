@@ -1,10 +1,10 @@
 from data import load_data
-from utils import stochastic_oscillator, heikin_ashi, sma, std
+from utils import stochastic_oscillator, heikin_ashi, sma, std, get_time, round_to_n
 import glob
 try:
     import matplotlib.pyplot as plt
-except ImportError:
-    print('Could not import matplotlib')
+except ImportError as e:
+    print(e)
 
 import numpy as np
 
@@ -174,9 +174,10 @@ def evaluate_strategy(files):
     plt.show()
 
 if __name__ == '__main__':
-    # print(len(glob.glob('data/*/*.json')))
-    # for dir in glob.glob('data/*/'):
     dir = 'data/ETH/'
-    test_files = glob.glob(dir + '*.json')[:-1]
-    # print(dir, len(test_files))
+    # for dir in glob.glob('data/*/'):
+    test_files = glob.glob(dir + '*.json')
+    test_files.sort(key = get_time)
+    test_files = test_files[-20:]
+    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     evaluate_strategy(test_files)
