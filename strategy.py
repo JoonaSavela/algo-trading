@@ -80,11 +80,13 @@ def evaluate_strategy(files):
     stochastic_criterion = Stochastic_criterion(0.04)
     ha_criterion = Heikin_ashi_criterion()
     # bollinger_criterion = Bollinger_criterion(8) # Useless?
-    stop_loss = Stop_loss_criterion(-0.0075)
+    stop_loss = Stop_loss_criterion(-0.01)
     take_profit = Take_profit_criterion(0.01)
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
+
+    trades = []
 
     for file_i, file in enumerate(files):
         X = load_data(file, sequence_length, latency, window_size1 + window_size2 - 1, k)
@@ -132,6 +134,8 @@ def evaluate_strategy(files):
                     (stochastic_criterion.sell(stoch) or \
                     stop_loss.sell(price, X[i, 3]) or \
                     take_profit.sell(price)):
+                if take_profit.buy_price is not None:
+                    trades.append(price / take_profit.buy_price - 1)
                 take_profit.buy_price = None
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
@@ -171,6 +175,19 @@ def evaluate_strategy(files):
 
     plt.plot(range(cs.shape[0]), cs)
     plt.plot(range(ws.shape[0]), ws)
+    plt.show()
+
+    x = np.array(range(ws.shape[0]))
+    base = ws[-1] ** (1 / (sequence_length * len(files)))
+    print(base)
+    y = np.log(ws) / np.log(base)
+
+    plt.plot(x, y)
+    plt.plot(x, x)
+    plt.show()
+
+    print(len(trades), np.mean(trades), (np.min(trades) + np.max(trades)) / 2)
+    plt.hist(trades)
     plt.show()
 
 if __name__ == '__main__':
