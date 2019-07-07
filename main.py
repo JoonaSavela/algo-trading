@@ -22,14 +22,15 @@ def main():
     #         print(file, zero_count)
 
     test_files = glob.glob('data/ETH/*.json')[:1]
-    window_size1 = 1 * 14
-    window_size2 = window_size1 * 3
+    window_size1 = 3 * 14
+    window_size2 = 1 * 14
+    window_size3 = 1 * 14
     k = 1
     # window_size = np.max([window_size1 + k - 1, window_size2])
-    window_size = window_size1 + window_size2
+    window_size = window_size1 + window_size3
     latency = 0
-    sequence_length = 2001 - window_size + 2 - latency - k + 1
-    # sequence_length = 8*60
+    # sequence_length = 2001 - window_size + 2 - latency - k + 1
+    sequence_length = 8*60
     # print(sequence_length)
 
     for file in test_files:
@@ -40,24 +41,28 @@ def main():
         # ha = heikin_ashi(X)
         # print(ha[-sequence_length:, :].shape)
 
-        ma = sma(X, window_size2)
+        ma = sma(X, window_size1)
         # print(ma.shape)
 
         X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
 
-        stochastic1 = stochastic_oscillator(X, window_size1, k)
+        X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
+
+        ma_corrected = sma(X_corrected, window_size3)
+
+        # stochastic1 = stochastic_oscillator(X, window_size2, k)
         # print(stochastic1.shape)
 
-        stochastic2 = stochastic_oscillator(X_corrected, window_size1, k)
+        # stochastic2 = stochastic_oscillator(X_corrected, window_size2, k)
         # print(stochastic2.shape)
 
         fig, axes = plt.subplots(figsize=(12, 8), ncols=2, nrows=2)
 
         axes[0][0].plot(range(sequence_length), X[-sequence_length:, :4])
-        axes[0][0].plot(range(sequence_length), ma[-sequence_length:])
-        axes[1][0].plot(range(sequence_length), stochastic1[-sequence_length:])
+        # axes[0][0].plot(range(sequence_length), ma[-sequence_length:])
+        axes[1][0].plot(range(sequence_length), ma[-sequence_length:])
         axes[0][1].plot(range(sequence_length), X_corrected[-sequence_length:, :4])
-        axes[1][1].plot(range(sequence_length), stochastic2[-sequence_length:])
+        axes[0][1].plot(range(sequence_length), ma_corrected[-sequence_length:])
         plt.show()
 
         # trace = go.Candlestick(x=list(range(X.shape[0])),

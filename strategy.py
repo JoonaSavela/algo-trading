@@ -29,15 +29,15 @@ class Heikin_ashi_criterion:
     def sell(self, ha):
         return ha[1] == ha[2]
 
-class Bollinger_criterion:
-    def __init__(self, m):
-        self.m = m
+class Trend_criterion:
+    def __init__(self, threshold):
+        self.threshold = threshold
 
-    def buy(self, close, ma, std):
-        return close < ma - self.m * std
+    def buy(self, ma_corrected):
+        return ma_corrected > self.threshold
 
-    def sell(self, close, ma, std):
-        return close > ma + self.m * std
+    def sell(self, ma_corrected):
+        return ma_corrected < -self.threshold
 
 class Stop_loss_criterion:
     def __init__(self, stop_loss):
@@ -69,9 +69,10 @@ def calc_actions():
 def evaluate_strategy(files):
     window_size1 = 3 * 14
     window_size2 = 1 * 14
+    window_size3 = 1 * 14
     k = 1
     latency = 0
-    sequence_length = 2001 - window_size1 - window_size2 + 2 - latency - k + 1
+    sequence_length = 2001 - window_size1 - np.max([window_size3, window_size2]) + 2 - latency - k + 1
     # print(sequence_length)
 
     initial_capital = 1000
@@ -82,6 +83,7 @@ def evaluate_strategy(files):
     # bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.01)
     take_profit = Take_profit_criterion(0.01)
+    trend_criterion = Trend_criterion(0.02)
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
@@ -89,7 +91,7 @@ def evaluate_strategy(files):
     trades = []
 
     for file_i, file in enumerate(files):
-        X = load_data(file, sequence_length, latency, window_size1 + window_size2 - 1, k)
+        X = load_data(file, sequence_length, latency, window_size1 + np.max([window_size3, window_size2]) - 1, k)
 
         # stochastic = stochastic_oscillator(X, window_size, k)
         ha = heikin_ashi(X)
@@ -99,13 +101,18 @@ def evaluate_strategy(files):
         # stds = std(tp, window_size)
 
         X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+
         stochastic = stochastic_oscillator(X_corrected, window_size2, k, latency)
-        # print(stochastic.shape)
+
+        X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
+
+        ma_corrected = sma(X_corrected, window_size3)
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
         ma = ma[-sequence_length:]
         stochastic = stochastic[-sequence_length:]
+        ma_corrected = ma_corrected[-sequence_length:]
         # stds = stds[-sequence_length:]
 
         capital_usd = initial_capital
@@ -123,8 +130,9 @@ def evaluate_strategy(files):
             price = X[i, 0]
             stoch = stochastic[i]
 
-            if ha_criterion.buy(ha[i, :]) and stochastic_criterion.buy(stoch) and \
-                    take_profit.buy():
+            if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
+                    (stochastic_criterion.buy(stoch) or \
+                    trend_criterion.buy(ma_corrected[i])):
                 take_profit.buy_price = price
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
@@ -132,6 +140,7 @@ def evaluate_strategy(files):
                 buy_amounts.append(amount_coin * price)
             elif ha_criterion.sell(ha[i, :]) and \
                     (stochastic_criterion.sell(stoch) or \
+                    trend_criterion.sell(ma_corrected[i]) or \
                     stop_loss.sell(price, X[i, 3]) or \
                     take_profit.sell(price)):
                 if take_profit.buy_price is not None:
@@ -186,7 +195,7 @@ def evaluate_strategy(files):
     plt.plot(x, x)
     plt.show()
 
-    print(len(trades), np.mean(trades), (np.min(trades) + np.max(trades)) / 2)
+    print(len(trades), np.mean(trades), np.min(trades), np.max(trades))
     plt.hist(trades)
     plt.show()
 
@@ -195,6 +204,13 @@ if __name__ == '__main__':
     # for dir in glob.glob('data/*/'):
     test_files = glob.glob(dir + '*.json')
     test_files.sort(key = get_time)
+    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
+    evaluate_strategy(test_files)
+    print()
     test_files = test_files[-20:]
+    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
+    evaluate_strategy(test_files)
+    print()
+    test_files = test_files[-3:]
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     evaluate_strategy(test_files)
