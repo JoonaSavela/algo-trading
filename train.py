@@ -28,12 +28,14 @@ commissions = 0#.00075
 
 input_size = 7
 
-mem_slots = 8
-num_heads = 8
+mem_slots = 1
+num_heads = 4
+head_size = 4
+num_blocks = 4
 # decay_per_layer = 0.6
 
 # NN model definition
-model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
+model = RelationalMemory(mem_slots=mem_slots, head_size=head_size, input_size=input_size, num_heads=num_heads, num_blocks=num_blocks, forget_bias=1., input_bias=0.)
 # model = FFN(input_size, decay_per_layer = decay_per_layer)
 
 # reward function definition
@@ -80,7 +82,7 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
         else: #default - best hyperparams
             npop = 52
             sigma = 0.1
-            alpha = 0.01
+            alpha = 0.001
 
         # will only run if hyperparams are not chosen before
         if not chosen_before:
@@ -98,8 +100,8 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
                                    sigma=sigma,
                                    learning_rate=alpha)
 
-            # train_files, test_files = train_test_split(glob.glob('data/*/*.json'), random_state=1)
-            train_files = test_files = glob.glob('data/*/*.json')[:1]
+            # train_files, test_files = train_test_split(glob.glob('data/ETH/*.json'), random_state=1)
+            train_files = test_files = glob.glob('data/ETH/*.json')[:1]
             print(train_files, test_files)
 
             if num_workers == 1:
@@ -141,12 +143,12 @@ def run(start_run, tot_runs, num_iterations, print_steps, output_results, num_wo
         torch.save(model.state_dict(), filename)
 
         if run_evaluation:
-            evaluate(test_files, filename, None, input_size, window_size, mem_slots = mem_slots, num_heads = num_heads)
+            evaluate(test_files, filename, None, input_size, window_size, mem_slots = mem_slots, num_heads = num_heads, head_size = head_size, num_blocks = num_blocks)
 
 
 
 if __name__ == '__main__':
-    run(start_run=0, tot_runs=1, num_iterations=40, print_steps=1,
+    run(start_run=0, tot_runs=1, num_iterations=20, print_steps=1,
        output_results=True, num_workers=4, save_state_dict=True, run_evaluation=True,
        flag_load_state_dict=False)
 

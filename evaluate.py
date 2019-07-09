@@ -14,7 +14,7 @@ commissions = 0.00075
 initial_capital = 1000
 k = 7
 
-def evaluate(filenames, state_dict_filename = None, dirname = None, input_size = 2, window_size = 3 * 14, decay_per_layer = 0.5, mem_slots = 8, num_heads = 2):
+def evaluate(filenames, state_dict_filename = None, dirname = None, input_size = 7, window_size = 3 * 14, decay_per_layer = 0.5, mem_slots = 1, head_size = 4, num_heads = 4, num_blocks = 4):
     sequence_length = 2001 - window_size  + 1 - latency - k + 1
     if dirname is not None:
         print(dirname)
@@ -25,7 +25,7 @@ def evaluate(filenames, state_dict_filename = None, dirname = None, input_size =
         state_dict_filenames = [state_dict_filename]
 
     # NN model definition
-    model = RelationalMemory(mem_slots=mem_slots, head_size=input_size, input_size=input_size, num_heads=num_heads, num_blocks=1, forget_bias=1., input_bias=0.)
+    model = RelationalMemory(mem_slots=mem_slots, head_size=head_size, input_size=input_size, num_heads=num_heads, num_blocks=num_blocks, forget_bias=1., input_bias=0.)
     # model = FFN(input_size, decay_per_layer = decay_per_layer)
 
     for fname in state_dict_filenames:

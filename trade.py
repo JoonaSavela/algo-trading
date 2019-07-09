@@ -9,7 +9,7 @@ import numpy as np
 from utils import round_to_n, floor_to_n, stochastic_oscillator, heikin_ashi, sma, std
 from math import floor, log10
 import json
-from strategy import Stochastic_criterion, Heikin_ashi_criterion, Bollinger_criterion, Stop_loss_criterion, Take_profit_criterion
+from strategy import Stochastic_criterion, Heikin_ashi_criterion, Stop_loss_criterion, Take_profit_criterion, Trend_criterion
 from requests.exceptions import ConnectionError
 
 def asset_balance(client, symbol):
@@ -91,22 +91,25 @@ def trading_pipeline():
 
         window_size1 = 3 * 14
         window_size2 = 1 * 14
+        window_size3 = 1 * 14
         k = 1
 
         stochastic_criterion = Stochastic_criterion(0.04)
         ha_criterion = Heikin_ashi_criterion()
-        # bollinger_criterion = Bollinger_criterion(8)
-        stop_loss = Stop_loss_criterion(-0.0075)
+        stop_loss = Stop_loss_criterion(-0.01)
         take_profit = Take_profit_criterion(0.01)
+        trend_criterion = Trend_criterion(0.02)
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
+        while waiting_time < 0:
+            waiting_time += 60
         print('waiting', waiting_time, 'seconds')
         time.sleep(waiting_time)
 
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
-                X, timeTo = get_recent_data(symbol1, size = window_size1 + window_size2 + 2 + k - 1)
+                X, timeTo = get_recent_data(symbol1, size = window_size1 + np.max([window_size3, window_size2]) + 2 + k - 1)
 
                 tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
                 ma = sma(tp, window_size1)
@@ -116,10 +119,15 @@ def trading_pipeline():
                 stochastic = stochastic_oscillator(X_corrected, window_size2, k)
                 ha = heikin_ashi(X)
 
+                X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
+
+                ma_corrected = sma(X_corrected, window_size3)
+
                 price = X[-1 ,0]
 
-                if ha_criterion.buy(ha[-1, :]) and stochastic_criterion.buy(stochastic[-1]) and \
-                        take_profit.buy():
+                if ha_criterion.buy(ha[-1, :]) and take_profit.buy() and \
+                        (stochastic_criterion.buy(stochastic[-1]) or \
+                        trend_criterion.buy(ma_corrected[-1])):
                     take_profit.buy_price = price
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
@@ -128,6 +136,7 @@ def trading_pipeline():
                     action = 'BUY'
                 elif ha_criterion.sell(ha[-1, :]) and \
                         (stochastic_criterion.sell(stochastic[-1]) or \
+                        trend_criterion.sell(ma_corrected[-1]) or \
                         stop_loss.sell(price, X[-1, 3]) or \
                         take_profit.sell(price)):
                     take_profit.buy_price = None
@@ -153,6 +162,8 @@ def trading_pipeline():
 
                 time_diff = time.time() - timeTo
                 waiting_time = 60 - time_diff
+                while waiting_time < 0:
+                    waiting_time += 60
                 time.sleep(waiting_time)
             except ConnectionError as e:
                 print(e)

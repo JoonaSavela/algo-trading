@@ -80,7 +80,6 @@ def evaluate_strategy(files):
 
     stochastic_criterion = Stochastic_criterion(0.04)
     ha_criterion = Heikin_ashi_criterion()
-    # bollinger_criterion = Bollinger_criterion(8) # Useless?
     stop_loss = Stop_loss_criterion(-0.01)
     take_profit = Take_profit_criterion(0.01)
     trend_criterion = Trend_criterion(0.02)
@@ -186,14 +185,14 @@ def evaluate_strategy(files):
     plt.plot(range(ws.shape[0]), ws)
     plt.show()
 
-    x = np.array(range(ws.shape[0]))
-    base = ws[-1] ** (1 / (sequence_length * len(files)))
-    print(base)
-    y = np.log(ws) / np.log(base)
-
-    plt.plot(x, y)
-    plt.plot(x, x)
-    plt.show()
+    # x = np.array(range(ws.shape[0]))
+    # base = ws[-1] ** (1 / (sequence_length * len(files)))
+    # print(base)
+    # y = np.log(ws) / np.log(base)
+    #
+    # plt.plot(x, y)
+    # plt.plot(x, x)
+    # plt.show()
 
     print(len(trades), np.mean(trades), np.min(trades), np.max(trades))
     plt.hist(trades)
