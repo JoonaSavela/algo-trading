@@ -56,14 +56,18 @@ def main(from_local = True):
 
         prices = df.groupby('time')['price'].mean()
         wealths = df.groupby('time')['quoteQty'].sum()
+        times = (df['time'].unique() - df['time'].iloc[0]) / (1000 * 60 * 60 * 24)
 
         prices = prices / prices.iloc[0]
         wealths = wealths / wealths.iloc[0]
 
         print('Profit:', wealths.iloc[-1])
+        print('min, max:', np.min(wealths), np.max(wealths))
 
-        plt.plot(prices)
-        plt.plot(wealths)
+        plt.plot(times, prices)
+        plt.plot(times, wealths)
+        plt.xlabel('Days')
+        plt.ylabel('Profit')
         plt.show()
 
 
