@@ -94,9 +94,9 @@ def trading_pipeline():
         window_size3 = 1 * 14
         k = 1
 
-        stochastic_criterion = Stochastic_criterion(0.04)
+        stochastic_criterion = Stochastic_criterion(0.04, 0.08)
         ha_criterion = Heikin_ashi_criterion()
-        stop_loss = Stop_loss_criterion(-0.01)
+        stop_loss = Stop_loss_criterion(-0.03)
         take_profit = Take_profit_criterion(0.01)
         trend_criterion = Trend_criterion(0.02)
 
@@ -124,22 +124,26 @@ def trading_pipeline():
                 ma_corrected = sma(X_corrected, window_size3)
 
                 price = X[-1 ,0]
+                stoch = stochastic[-1]
 
                 if ha_criterion.buy(ha[-1, :]) and take_profit.buy() and \
-                        (stochastic_criterion.buy(stochastic[-1]) or \
+                        stop_loss.buy() and \
+                        (stochastic_criterion.buy(stoch) or \
                         trend_criterion.buy(ma_corrected[-1])):
                     take_profit.buy_price = price
+                    stop_loss.buy_price = price
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
                     # cancel_orders(client, symbol, 'SELL')
                     buy_assets(client, symbol, high, balance_usdt)
                     action = 'BUY'
                 elif ha_criterion.sell(ha[-1, :]) and \
-                        (stochastic_criterion.sell(stochastic[-1]) or \
+                        (stochastic_criterion.sell(stoch) or \
                         trend_criterion.sell(ma_corrected[-1]) or \
-                        stop_loss.sell(price, X[-1, 3]) or \
+                        stop_loss.sell(price) or \
                         take_profit.sell(price)):
                     take_profit.buy_price = None
+                    stop_loss.buy_price = None
                     balance_symbol = asset_balance(client, symbol1)
                     # cancel_orders(client, symbol, 'BUY')
                     sell_assets(client, symbol, balance_symbol)

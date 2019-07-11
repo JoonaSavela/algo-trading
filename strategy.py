@@ -42,12 +42,14 @@ class Trend_criterion:
 class Stop_loss_criterion:
     def __init__(self, stop_loss):
         self.stop_loss = stop_loss
+        self.buy_price = None
 
     def buy(self):
-        return True
+        return self.buy_price is None
 
-    def sell(self, close, open):
-        return close / open - 1 < self.stop_loss
+    def sell(self, close):
+        return self.buy_price is not None and close / self.buy_price - 1 < self.stop_loss
+        # return close / open - 1 < self.stop_loss
 
 
 class Take_profit_criterion:
@@ -78,9 +80,9 @@ def evaluate_strategy(files):
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.04)
+    stochastic_criterion = Stochastic_criterion(0.04, 0.08)
     ha_criterion = Heikin_ashi_criterion()
-    stop_loss = Stop_loss_criterion(-0.01)
+    stop_loss = Stop_loss_criterion(-0.03)
     take_profit = Take_profit_criterion(0.01)
     trend_criterion = Trend_criterion(0.02)
 
@@ -130,9 +132,11 @@ def evaluate_strategy(files):
             stoch = stochastic[i]
 
             if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
+                    stop_loss.buy() and \
                     (stochastic_criterion.buy(stoch) or \
                     trend_criterion.buy(ma_corrected[i])):
                 take_profit.buy_price = price
+                stop_loss.buy_price = price
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
                 capital_usd = 0
@@ -140,11 +144,12 @@ def evaluate_strategy(files):
             elif ha_criterion.sell(ha[i, :]) and \
                     (stochastic_criterion.sell(stoch) or \
                     trend_criterion.sell(ma_corrected[i]) or \
-                    stop_loss.sell(price, X[i, 3]) or \
+                    stop_loss.sell(price) or \
                     take_profit.sell(price)):
                 if take_profit.buy_price is not None:
                     trades.append(price / take_profit.buy_price - 1)
                 take_profit.buy_price = None
+                stop_loss.buy_price = None
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
                 capital_coin = 0
