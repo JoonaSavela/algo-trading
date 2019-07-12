@@ -10,7 +10,7 @@ from utils import round_to_n, floor_to_n, stochastic_oscillator, heikin_ashi, sm
 from math import floor, log10
 import json
 from strategy import Stochastic_criterion, Heikin_ashi_criterion, Stop_loss_criterion, Take_profit_criterion, Trend_criterion
-from requests.exceptions import ConnectionError
+from requests.exceptions import ConnectionError, ReadTimeout
 
 def asset_balance(client, symbol):
     response = client.get_asset_balance(asset=symbol)
@@ -25,11 +25,11 @@ def check_bnb(client):
     balance_bnb = asset_balance(client, 'BNB')
     if balance_bnb < 0.25:
         try:
-            client.order_market_buy(symbol='BNBUSDT', quantity=0.25)
+            client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
             print('Bought BNB')
             time.sleep(0.1)
-        except:
-            pass
+        except binance.exceptions.BinanceAPIException as e:
+            print(e)
 
 def snippet(amount, precision):
     return "{:0.0{}f}".format(amount, precision)
@@ -170,6 +170,10 @@ def trading_pipeline():
                     waiting_time += 60
                 time.sleep(waiting_time)
             except ConnectionError as e:
+                print(e)
+                status = client.get_account_status()
+                print('Status:', status)
+            except ReadTimeout as e:
                 print(e)
                 status = client.get_account_status()
                 print('Status:', status)
