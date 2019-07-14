@@ -1,6 +1,7 @@
 from data import load_data
 from utils import stochastic_oscillator, heikin_ashi, sma, std, get_time, round_to_n
 import glob
+from collections import deque
 try:
     import matplotlib.pyplot as plt
 except ImportError as e:
@@ -64,9 +65,27 @@ class Take_profit_criterion:
         return self.buy_price is not None and close / self.buy_price - 1 > self.take_profit
 
 
+class Deque_criterion:
+    def __init__(self, maxlen, waiting_time):
+        self.trades = deque(maxlen = maxlen)
+        self.waiting_time = waiting_time
+        self.sell_time = None
 
-def calc_actions():
-    pass
+    def get_profit(self):
+        res = 1.0
+        for trade in self.trades:
+            res *= trade
+        return res
+
+    def append(self, trade):
+        self.trades.append(trade)
+
+    def buy(self, current_time):
+        return self.get_profit() >= 1.0 or current_time - self.sell_time > self.waiting_time
+
+    def sell(self):
+        return self.sell_time is None
+
 
 def evaluate_strategy(files):
     window_size1 = 3 * 14
@@ -85,6 +104,7 @@ def evaluate_strategy(files):
     stop_loss = Stop_loss_criterion(-0.03)
     take_profit = Take_profit_criterion(0.01)
     trend_criterion = Trend_criterion(0.02)
+    deque_criterion = Deque_criterion(3, 10 * 60)
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
@@ -132,11 +152,12 @@ def evaluate_strategy(files):
             stoch = stochastic[i]
 
             if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
-                    stop_loss.buy() and \
+                    stop_loss.buy() and deque_criterion.buy(i) and \
                     (stochastic_criterion.buy(stoch) or \
                     trend_criterion.buy(ma_corrected[i])):
                 take_profit.buy_price = price
                 stop_loss.buy_price = price
+                deque_criterion.sell_time = None
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
                 capital_usd = 0
@@ -147,9 +168,12 @@ def evaluate_strategy(files):
                     stop_loss.sell(price) or \
                     take_profit.sell(price)):
                 if take_profit.buy_price is not None:
-                    trades.append(price / take_profit.buy_price - 1)
+                    trade = price / take_profit.buy_price
+                    trades.append(trade - 1)
+                    deque_criterion.append(trade)
                 take_profit.buy_price = None
                 stop_loss.buy_price = None
+                deque_criterion.sell_time = i
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
                 capital_coin = 0

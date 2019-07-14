@@ -9,8 +9,9 @@ import numpy as np
 from utils import round_to_n, floor_to_n, stochastic_oscillator, heikin_ashi, sma, std
 from math import floor, log10
 import json
-from strategy import Stochastic_criterion, Heikin_ashi_criterion, Stop_loss_criterion, Take_profit_criterion, Trend_criterion
+from strategy import *
 from requests.exceptions import ConnectionError, ReadTimeout
+from visualize import get_trades
 
 def asset_balance(client, symbol):
     response = client.get_asset_balance(asset=symbol)
@@ -99,6 +100,16 @@ def trading_pipeline():
         stop_loss = Stop_loss_criterion(-0.03)
         take_profit = Take_profit_criterion(0.01)
         trend_criterion = Trend_criterion(0.02)
+        deque_criterion = Deque_criterion(3, 10 * 60)
+
+        wealths = get_trades(count = 4)
+        trades = wealths[-3:] / wealths[:3]
+        print(trades)
+
+        for trade in trades:
+            deque_criterion.append(trade)
+
+        print(deque_criterion.get_profit())
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
@@ -127,11 +138,12 @@ def trading_pipeline():
                 stoch = stochastic[-1]
 
                 if ha_criterion.buy(ha[-1, :]) and take_profit.buy() and \
-                        stop_loss.buy() and \
+                        stop_loss.buy() and deque_criterion.buy(timeTo / 60) and \
                         (stochastic_criterion.buy(stoch) or \
                         trend_criterion.buy(ma_corrected[-1])):
                     take_profit.buy_price = price
                     stop_loss.buy_price = price
+                    deque_criterion.sell_time = None
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
                     # cancel_orders(client, symbol, 'SELL')
@@ -142,8 +154,12 @@ def trading_pipeline():
                         trend_criterion.sell(ma_corrected[-1]) or \
                         stop_loss.sell(price) or \
                         take_profit.sell(price)):
+                    if take_profit.buy_price is not None:
+                        trade = price / take_profit.buy_price
+                        deque_criterion.append(trade)
                     take_profit.buy_price = None
                     stop_loss.buy_price = None
+                    deque_criterion.sell_time = timeTo / 60
                     balance_symbol = asset_balance(client, symbol1)
                     # cancel_orders(client, symbol, 'BUY')
                     sell_assets(client, symbol, balance_symbol)
@@ -155,6 +171,12 @@ def trading_pipeline():
                 # print(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1])
                 print(timeTo, action, price, \
                     round_to_n(stochastic[-1], 3), round_to_n(ma[-1], 5))
+
+                if deque_criterion.get_profit() < 1.0:
+                    waiting_time = deque_criterion.waiting_time * 60
+                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
+                    time.sleep(waiting_time)
+                    _, timeTo = get_recent_data(symbol1)
 
                 time.sleep(20)
                 check_bnb(client)
