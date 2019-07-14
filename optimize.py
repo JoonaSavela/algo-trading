@@ -10,11 +10,13 @@ import os
 
 # TODO: optimize training hyperparameters using bayesian optimization
 
-def get_wealths(X, buys, sells, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+    if sells is None:
+        sells = 1 - buys
     capital_usd = initial_usd
     capital_coin = initial_coin
 
-    wealths = []
+    wealths = [0] * X.shape[0]
     buy_amounts = []
     sell_amounts = []
 
@@ -34,7 +36,7 @@ def get_wealths(X, buys, sells, initial_usd = 1000, initial_coin = 0, commission
         buy_amounts.append(amount_usd_buy)
         sell_amounts.append(amount_usd_sell)
 
-        wealths.append(capital_usd + capital_coin * price)
+        wealths[i] = capital_usd + capital_coin * price
 
     wealths = np.array(wealths) / wealths[0] - 1
 
@@ -94,7 +96,7 @@ def get_optimal_strategy(filename, sequence_length = 2001, batch_size = 30, verb
     buys_out = np.concatenate(buys_out)
 
     wealths, _, _, _, _ = get_wealths(
-        X_all, buys_out, 1 - buys_out
+        X_all, buys_out
     )
 
     if verbose:

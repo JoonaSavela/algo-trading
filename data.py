@@ -80,7 +80,7 @@ def get_and_save_all():
         print()
 
 
-def load_data(filename, sequence_length, latency, window_size, k = 1):
+def load_data(filename, sequence_length, latency, window_size, k = 1, return_start_index = False):
     obj = {}
 
     with open(filename, 'r') as file:
@@ -89,7 +89,6 @@ def load_data(filename, sequence_length, latency, window_size, k = 1):
     try:
         # start_index = np.random.choice(len(obj['Data']) - sequence_length - latency - window_size + 1 - k + 1)
         start_index = 0
-        # start_index = 750
     except ValueError:
         start_index = 0
 
@@ -103,6 +102,9 @@ def load_data(filename, sequence_length, latency, window_size, k = 1):
             if key != 'time':
                 tmp.append(value)
         X[i, :] = tmp
+
+    if return_start_index:
+        return X, start_index
 
     return X
 

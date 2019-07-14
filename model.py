@@ -127,18 +127,8 @@ class RelationalMemory(nn.Module):
         self.hidden2 = nn.Linear(self.mem_slots * self.mem_size // 2, self.mem_slots * self.mem_size // 4)
 
         # output layers
-        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size // 4, 3) # BUY, SELL, DO NOTHING
+        self.decision_layer = nn.Linear(self.mem_slots * self.mem_size // 4, 1) # BUY
 
-        # needs 2 linear layers for tying weights for embedding layers
-        # first match the "output" of the RMC to input_size, which is the embed dim
-        self.use_adaptive_softmax = use_adaptive_softmax
-        if not self.use_adaptive_softmax:
-            ########## loss function
-            self.criterion = nn.CrossEntropyLoss()
-        else:
-            # use adaptive softmax from the self.input_size logits, instead of the tied embed weights above
-            self.criterion_adaptive = nn.AdaptiveLogSoftmaxWithLoss(self.input_size, self.num_tokens,
-                                                                    cutoffs=cutoffs)
 
     def repackage_hidden(self, h):
         """Wraps hidden states in new Tensors, to detach them from their history."""
@@ -364,13 +354,13 @@ class RelationalMemory(nn.Module):
         hidden = F.relu(hidden)
 
         decision = self.decision_layer(hidden)
-        decision = F.softmax(decision, dim=1)
+        decision = torch.sigmoid(decision)
 
         logit = decision
 
         return logit, next_memory
 
-    def forward(self, inputs, memory, targets=None, require_logits=True):
+    def forward(self, inputs, memory):
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         memory = self.repackage_hidden(memory)
@@ -391,22 +381,6 @@ class RelationalMemory(nn.Module):
 
         return logits, memory
 
-        # if targets is not None:
-        #     if not self.use_adaptive_softmax:
-        #         # calculate loss inside this forward pass for more even VRAM usage of DataParallel
-        #         loss = self.criterion(logits, targets)
-        #     else:
-        #         # calculate the loss using adaptive softmax
-        #         _, loss = self.criterion_adaptive(logits, targets)
-        # else:
-        #     loss = None
-        #
-        # # the forward pass only returns loss, because returning logits causes uneven VRAM usage of DataParallel
-        # # logits are provided only for sampling stage
-        # if not require_logits:
-        #     return loss, memory
-        # else:
-        #     return logits, loss, memory
 
 
 if __name__ == '__main__':
