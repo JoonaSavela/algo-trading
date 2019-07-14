@@ -172,7 +172,7 @@ def trading_pipeline():
                 print(timeTo, action, price, \
                     round_to_n(stochastic[-1], 3), round_to_n(ma[-1], 5))
 
-                if deque_criterion.get_profit() < 1.0:
+                if not deque_criterion.buy(timeTo / 60):
                     waiting_time = deque_criterion.waiting_time * 60
                     print('Sleeping for', waiting_time // (60 * 60), 'hours')
                     time.sleep(waiting_time)
