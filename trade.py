@@ -101,6 +101,7 @@ def trading_pipeline():
         take_profit = Take_profit_criterion(0.01)
         trend_criterion = Trend_criterion(0.02)
         deque_criterion = Deque_criterion(3, 10 * 60)
+        deque_criterion.sell_time = initial_time / 60
 
         wealths = get_trades(count = 4)
         trades = wealths[-3:] / wealths[:3]
