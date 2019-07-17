@@ -69,7 +69,9 @@ class Deque_criterion:
     def __init__(self, maxlen, waiting_time):
         self.trades = deque(maxlen = maxlen)
         self.waiting_time = waiting_time
-        self.sell_time = None
+        self.sell_time = - self.waiting_time
+        self.recently_bought = False
+        self.recently_sold = False
 
     def get_profit(self):
         res = 1.0
@@ -80,11 +82,27 @@ class Deque_criterion:
     def append(self, trade):
         self.trades.append(trade)
 
+    def get_waiting_time(self, profit):
+        return self.waiting_time * (- profit * 100)
+
     def buy(self, current_time):
-        return self.get_profit() >= 1.0 or current_time - self.sell_time > self.waiting_time
+        profit = self.get_profit() - 1.0
+        return profit >= 0.0 or current_time - self.sell_time > self.get_waiting_time(profit)
 
     def sell(self):
-        return self.sell_time is None
+        return True
+
+
+class Logic_criterion:
+    def __init__(self):
+        self.recently_bought = False
+        self.recently_sold = False
+
+    def buy(self):
+        return not self.recently_bought
+
+    def sell(self):
+        return self.recently_bought and not self.recently_sold
 
 
 def evaluate_strategy(files):
@@ -99,17 +117,19 @@ def evaluate_strategy(files):
     initial_capital = 1000
     commissions = 0.00075
 
-    stochastic_criterion = Stochastic_criterion(0.04, 0.08)
+    stochastic_criterion = Stochastic_criterion(0.04, 0.07)
     ha_criterion = Heikin_ashi_criterion()
-    stop_loss = Stop_loss_criterion(-0.03)
+    stop_loss = Stop_loss_criterion(-0.02)
     take_profit = Take_profit_criterion(0.01)
     trend_criterion = Trend_criterion(0.02)
-    deque_criterion = Deque_criterion(3, 10 * 60)
+    deque_criterion = Deque_criterion(3, 12 * 60)
+    logic_criterion = Logic_criterion()
 
     cs = np.zeros(shape=sequence_length * len(files))
     ws = np.zeros(shape=(sequence_length + 2) * len(files))
 
     trades = []
+    current_time = 0
 
     for file_i, file in enumerate(files):
         X = load_data(file, sequence_length, latency, window_size1 + np.max([window_size3, window_size2]) - 1, k)
@@ -152,17 +172,20 @@ def evaluate_strategy(files):
             stoch = stochastic[i]
 
             if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
-                    stop_loss.buy() and deque_criterion.buy(i) and \
+                    stop_loss.buy() and deque_criterion.buy(current_time) and \
+                    logic_criterion.buy() and \
                     (stochastic_criterion.buy(stoch) or \
                     trend_criterion.buy(ma_corrected[i])):
                 take_profit.buy_price = price
                 stop_loss.buy_price = price
-                deque_criterion.sell_time = None
+                logic_criterion.recently_bought = True
+                logic_criterion.recently_sold = False
+
                 amount_coin = capital_usd / price * (1 - commissions)
                 capital_coin += amount_coin
                 capital_usd = 0
                 buy_amounts.append(amount_coin * price)
-            elif ha_criterion.sell(ha[i, :]) and \
+            elif ha_criterion.sell(ha[i, :]) and logic_criterion.sell() and \
                     (stochastic_criterion.sell(stoch) or \
                     trend_criterion.sell(ma_corrected[i]) or \
                     stop_loss.sell(price) or \
@@ -173,7 +196,10 @@ def evaluate_strategy(files):
                     deque_criterion.append(trade)
                 take_profit.buy_price = None
                 stop_loss.buy_price = None
-                deque_criterion.sell_time = i
+                deque_criterion.sell_time = current_time
+                logic_criterion.recently_bought = False
+                logic_criterion.recently_sold = True
+
                 amount_usd = capital_coin * price * (1 - commissions)
                 capital_usd += amount_usd
                 capital_coin = 0
@@ -184,6 +210,9 @@ def evaluate_strategy(files):
             capital_coins.append(capital_coin * price)
 
             i += 1
+            current_time += 1
+
+        current_time += window_size1 + np.max([window_size3, window_size2]) - 1
 
         price = X[-1, 0]
         amount_usd = capital_coin * price * (1 - commissions)
