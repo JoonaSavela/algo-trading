@@ -6,6 +6,7 @@ import os
 import requests
 import glob
 from keys import cryptocompare_key
+from utils import get_time
 
 def get_recent_data(coin, size = 3 * 14):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=' + str(size - 1) + '&api_key=' + cryptocompare_key
@@ -107,6 +108,21 @@ def load_data(filename, sequence_length, latency, window_size, k = 1, return_sta
         return X, start_index
 
     return X
+
+def load_all_data(filenames):
+    Xs = []
+
+    filenames = sorted(filenames, key = get_time)
+
+    for filename in filenames:
+        X = load_data(filename, 2001, 0, 1)
+        Xs.append(X[:2000, :]) # remove duplicates
+
+    X = np.concatenate(Xs)
+
+    return X
+
+
 
 if __name__ == "__main__":
     get_and_save_all()

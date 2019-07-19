@@ -1,4 +1,4 @@
-from data import load_data
+from data import load_data, load_all_data
 from utils import stochastic_oscillator, heikin_ashi, sma, std, get_time, round_to_n
 import glob
 from collections import deque
@@ -8,6 +8,7 @@ except ImportError as e:
     print(e)
 
 import numpy as np
+import pandas as pd
 
 class Stochastic_criterion:
     def __init__(self, buy_threshold, sell_threshold = None):
@@ -50,7 +51,6 @@ class Stop_loss_criterion:
 
     def sell(self, close):
         return self.buy_price is not None and close / self.buy_price - 1 < self.stop_loss
-        # return close / open - 1 < self.stop_loss
 
 
 class Take_profit_criterion:
@@ -111,8 +111,6 @@ def evaluate_strategy(files):
     window_size3 = 1 * 14
     k = 1
     latency = 0
-    sequence_length = 2001 - window_size1 - np.max([window_size3, window_size2]) + 2 - latency - k + 1
-    # print(sequence_length)
 
     initial_capital = 1000
     commissions = 0.00075
@@ -125,132 +123,121 @@ def evaluate_strategy(files):
     deque_criterion = Deque_criterion(3, 12 * 60)
     logic_criterion = Logic_criterion()
 
-    cs = np.zeros(shape=sequence_length * len(files))
-    ws = np.zeros(shape=(sequence_length + 2) * len(files))
-
     trades = []
     current_time = 0
 
-    for file_i, file in enumerate(files):
-        X = load_data(file, sequence_length, latency, window_size1 + np.max([window_size3, window_size2]) - 1, k)
+    X = load_all_data(files)
 
-        # stochastic = stochastic_oscillator(X, window_size, k)
-        ha = heikin_ashi(X)
+    # stochastic = stochastic_oscillator(X, window_size, k)
+    ha = heikin_ashi(X)
 
-        tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-        ma = sma(tp, window_size1)
-        # stds = std(tp, window_size)
+    tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
+    ma = sma(tp, window_size1)
+    sd = std(tp, window_size1)
 
-        X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+    X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
 
-        stochastic = stochastic_oscillator(X_corrected, window_size2, k, latency)
+    stochastic = stochastic_oscillator(X_corrected, window_size2, k, latency)
 
-        X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
+    X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
 
-        ma_corrected = sma(X_corrected, window_size3)
+    ma_corrected = sma(X_corrected, window_size3)
 
-        X = X[-sequence_length:, :]
-        ha = ha[-sequence_length:, :]
-        ma = ma[-sequence_length:]
-        stochastic = stochastic[-sequence_length:]
-        ma_corrected = ma_corrected[-sequence_length:]
-        # stds = stds[-sequence_length:]
+    sequence_length = np.min([X_corrected.shape[0], ma_corrected.shape[0], stochastic.shape[0], ma.shape[0]])
+    # print(sequence_length)
 
-        capital_usd = initial_capital
-        trade_start_capital = capital_usd
-        capital_coin = 0
+    X = X[-sequence_length:, :]
+    ha = ha[-sequence_length:, :]
+    ma = ma[-sequence_length:]
+    stochastic = stochastic[-sequence_length:]
+    ma_corrected = ma_corrected[-sequence_length:]
+    sd = sd[-sequence_length:]
 
-        wealths = [initial_capital]
-        capital_usds = [capital_usd]
-        capital_coins = [capital_coin]
-        buy_amounts = []
-        sell_amounts = []
+    m = 2 # TODO: move
+    upper = ma + m * sd
+    lower = ma - m * sd
+    width = (upper - lower) / ma
+    rolling_min_width = pd.Series(width).rolling(window_size2).min().dropna().values
 
-        i = 0
-        while i < sequence_length:
-            price = X[i, 0]
-            stoch = stochastic[i]
+    capital_usd = initial_capital
+    trade_start_capital = capital_usd
+    capital_coin = 0
 
-            if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
-                    stop_loss.buy() and deque_criterion.buy(current_time) and \
-                    logic_criterion.buy() and \
-                    (stochastic_criterion.buy(stoch) or \
-                    trend_criterion.buy(ma_corrected[i])):
-                take_profit.buy_price = price
-                stop_loss.buy_price = price
-                logic_criterion.recently_bought = True
-                logic_criterion.recently_sold = False
+    wealths = [initial_capital]
+    capital_usds = [capital_usd]
+    capital_coins = [capital_coin]
+    buy_amounts = []
+    sell_amounts = []
 
-                amount_coin = capital_usd / price * (1 - commissions)
-                capital_coin += amount_coin
-                capital_usd = 0
-                buy_amounts.append(amount_coin * price)
-            elif ha_criterion.sell(ha[i, :]) and logic_criterion.sell() and \
-                    (stochastic_criterion.sell(stoch) or \
-                    trend_criterion.sell(ma_corrected[i]) or \
-                    stop_loss.sell(price) or \
-                    take_profit.sell(price)):
-                if take_profit.buy_price is not None:
-                    trade = price / take_profit.buy_price
-                    trades.append(trade - 1)
-                    deque_criterion.append(trade)
-                take_profit.buy_price = None
-                stop_loss.buy_price = None
-                deque_criterion.sell_time = current_time
-                logic_criterion.recently_bought = False
-                logic_criterion.recently_sold = True
+    i = 0
+    while i < sequence_length:
+        price = X[i, 0]
+        stoch = stochastic[i]
 
-                amount_usd = capital_coin * price * (1 - commissions)
-                capital_usd += amount_usd
-                capital_coin = 0
-                sell_amounts.append(amount_usd)
+        if ha_criterion.buy(ha[i, :]) and take_profit.buy() and \
+                stop_loss.buy() and deque_criterion.buy(current_time) and \
+                logic_criterion.buy() and \
+                (stochastic_criterion.buy(stoch) or \
+                trend_criterion.buy(ma_corrected[i])):
+            take_profit.buy_price = price
+            stop_loss.buy_price = price
+            logic_criterion.recently_bought = True
+            logic_criterion.recently_sold = False
 
-            wealths.append(capital_usd + capital_coin * price)
-            capital_usds.append(capital_usd)
-            capital_coins.append(capital_coin * price)
+            amount_coin = capital_usd / price * (1 - commissions)
+            capital_coin += amount_coin
+            capital_usd = 0
+            buy_amounts.append(amount_coin * price)
+        elif ha_criterion.sell(ha[i, :]) and logic_criterion.sell() and \
+                (stochastic_criterion.sell(stoch) or \
+                trend_criterion.sell(ma_corrected[i]) or \
+                stop_loss.sell(price) or \
+                take_profit.sell(price)):
+            if take_profit.buy_price is not None:
+                trade = price / take_profit.buy_price
+                trades.append(trade - 1)
+                deque_criterion.append(trade)
+            take_profit.buy_price = None
+            stop_loss.buy_price = None
+            deque_criterion.sell_time = current_time
+            logic_criterion.recently_bought = False
+            logic_criterion.recently_sold = True
 
-            i += 1
-            current_time += 1
+            amount_usd = capital_coin * price * (1 - commissions)
+            capital_usd += amount_usd
+            capital_coin = 0
+            sell_amounts.append(amount_usd)
 
-        current_time += window_size1 + np.max([window_size3, window_size2]) - 1
-
-        price = X[-1, 0]
-        amount_usd = capital_coin * price * (1 - commissions)
-        capital_usd += amount_usd
-        sell_amounts.append(amount_usd)
-        capital_coin = 0
-
-        wealths.append(capital_usd)
+        wealths.append(capital_usd + capital_coin * price)
         capital_usds.append(capital_usd)
         capital_coins.append(capital_coin * price)
 
-        wealths = np.array(wealths) / wealths[0]
-        capital_usds = np.array(capital_usds) / initial_capital
-        capital_coins = np.array(capital_coins) / initial_capital
+        i += 1
+        current_time += 1
 
-        cs[file_i*sequence_length:(file_i+1)*sequence_length] = X[:,0] / X[0, 0]
-        ws[file_i*(sequence_length + 2):(file_i+1)*(sequence_length + 2)] = wealths
+    price = X[-1, 0]
+    amount_usd = capital_coin * price * (1 - commissions)
+    capital_usd += amount_usd
+    sell_amounts.append(amount_usd)
+    capital_coin = 0
 
-        if file_i > 0:
-            cs[file_i*sequence_length:(file_i+1)*sequence_length] *= cs[file_i*sequence_length - 1]
-            ws[file_i*(sequence_length + 2):(file_i+1)*(sequence_length + 2)] *= ws[file_i*(sequence_length + 2) - 1]
+    wealths.append(capital_usd)
+    capital_usds.append(capital_usd)
+    capital_coins.append(capital_coin * price)
 
-    print('profit:', ws[-1])
-    print('benchmark profit:', cs[-1])
-    print('min, max:', np.min(ws), np.max(ws))
+    wealths = np.array(wealths) / wealths[0]
+    capital_usds = np.array(capital_usds) / initial_capital
+    capital_coins = np.array(capital_coins) / initial_capital
 
-    plt.plot(range(cs.shape[0]), cs)
-    plt.plot(range(ws.shape[0]), ws)
+    closes = X[:,0] / X[0, 0]
+
+    print('profit:', wealths[-1])
+    print('benchmark profit:', closes[-1])
+    print('min, max:', np.min(wealths), np.max(wealths))
+
+    plt.plot(range(closes.shape[0]), closes)
+    plt.plot(range(wealths.shape[0]), wealths)
     plt.show()
-
-    # x = np.array(range(ws.shape[0]))
-    # base = ws[-1] ** (1 / (sequence_length * len(files)))
-    # print(base)
-    # y = np.log(ws) / np.log(base)
-    #
-    # plt.plot(x, y)
-    # plt.plot(x, x)
-    # plt.show()
 
     print(len(trades), np.mean(trades), np.min(trades), np.max(trades))
     plt.hist(trades)

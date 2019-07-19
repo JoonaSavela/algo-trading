@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from math import log10, floor
 try:
     import torch
@@ -6,10 +7,7 @@ except ImportError as e:
     print(e)
 
 def std(X, window_size):
-    res = []
-    for i in range(X.shape[0] - window_size + 1):
-        res.append(np.std(X[i:i+window_size, 0]))
-    return np.array(res)
+    return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 
 def sma(X, window_size):
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
