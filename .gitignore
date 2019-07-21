@@ -4,3 +4,4 @@ run_summaries/
 models/
 keys.py
 trading_logs/
+search_results/
