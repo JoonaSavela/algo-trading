@@ -16,7 +16,6 @@ from visualize import get_trades
 def asset_balance(client, symbol):
     response = client.get_asset_balance(asset=symbol)
     time.sleep(0.05)
-    # print(response)
     return float(response['free'])
 
 def binance_price(client, symbol):
@@ -52,11 +51,11 @@ def sell_assets(client, symbol, balance_symbol, amount = 1):
         order = client.order_market_sell(
             symbol=symbol,
             quantity=quantity)
-        # print('Sold:', order)
         time.sleep(0.1)
+        return True
     except binance.exceptions.BinanceAPIException as e:
         print(e)
-        # pass
+        return False
 
 def buy_assets(client, symbol, prev_close, balance_usdt, amount = 1):
     quantity = floor_to_n(balance_usdt / prev_close * amount, 4)
@@ -64,11 +63,11 @@ def buy_assets(client, symbol, prev_close, balance_usdt, amount = 1):
         order = client.order_market_buy(
             symbol=symbol,
             quantity=quantity)
-        # print('Bought:', order)
         time.sleep(0.1)
+        return True
     except binance.exceptions.BinanceAPIException as e:
         print(e)
-        # pass
+        return False
 
 
 def trading_pipeline():
@@ -90,83 +89,50 @@ def trading_pipeline():
         initial_bnb = asset_balance(client, 'BNB')
         print(initial_time, initial_capital, asset_balance(client, symbol1), initial_bnb)
 
-        window_size1 = 3 * 14
-        window_size2 = 1 * 14
-        window_size3 = 1 * 14
-        k = 1
+        obj = {'target': 7.120549378179335, 'params': {'buy_threshold': 0.18044507894143255, 'change_threshold': 2.395989524989884, 'ha_threshold': 0.00022740452198337369, 'look_back_size': 11, 'maxlen': 4, 'min_threshold': 1.6516799323842664, 'rolling_min_window_size': 123, 'sell_threshold': 0.007327020114091631, 'stop_loss': -0.05763852099375464, 'take_profit': 0.016606080089034008, 'waiting_time': 0, 'window_size': 42, 'window_size1': 2 * 14 * 14, 'window_size2': 4 * 14 * 14}}
+        stop_loss_take_profit = True
+        restrictive = False
 
-        stochastic_criterion = Stochastic_criterion(0.04, 0.07)
-        ha_criterion = Heikin_ashi_criterion()
-        stop_loss = Stop_loss_criterion(-0.02)
-        take_profit = Take_profit_criterion(0.01)
-        trend_criterion = Trend_criterion(0.02)
-        deque_criterion = Deque_criterion(3, 12 * 60)
-        logic_criterion = Logic_criterion()
+        params = obj['params']
 
-        wealths = get_trades(count = 4)
-        trades = wealths[-3:] / wealths[:3]
-        print(trades)
+        # print(params)
 
-        for trade in trades:
-            deque_criterion.append(trade)
+        strategy = Main_Strategy(params, stop_loss_take_profit, restrictive)
 
-        print(deque_criterion.get_profit())
+        # wealths = get_trades(count = 4)
+        # trades = wealths[-3:] / wealths[:3]
+        # print(trades)
+        #
+        # for trade in trades:
+        #     deque_criterion.append(trade)
+        #
+        # print(deque_criterion.get_profit())
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
         while waiting_time < 0:
             waiting_time += 60
+        print()
         print('waiting', waiting_time, 'seconds')
         time.sleep(waiting_time)
 
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
-                X, timeTo = get_recent_data(symbol1, size = window_size1 + np.max([window_size3, window_size2]) + 2 + k - 1)
+                print()
 
-                tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-                ma = sma(tp, window_size1)
+                X, timeTo = get_recent_data(symbol1, size = strategy.size())
 
-                X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
+                buy, sell = strategy.get_output(X, reset = False)
 
-                stochastic = stochastic_oscillator(X_corrected, window_size2, k)
-                ha = heikin_ashi(X)
+                # print(buy, sell)
 
-                X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
-
-                ma_corrected = sma(X_corrected, window_size3)
-
-                price = X[-1 ,0]
-                stoch = stochastic[-1]
-
-                if ha_criterion.buy(ha[-1, :]) and take_profit.buy() and \
-                        stop_loss.buy() and deque_criterion.buy(timeTo / 60) and \
-                        logic_criterion.buy() and \
-                        (stochastic_criterion.buy(stoch) or \
-                        trend_criterion.buy(ma_corrected[-1])):
-                    take_profit.buy_price = price
-                    stop_loss.buy_price = price
-                    logic_criterion.recently_bought = True
-                    logic_criterion.recently_sold = False
-
+                if buy:
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
                     # cancel_orders(client, symbol, 'SELL')
                     buy_assets(client, symbol, high, balance_usdt)
                     action = 'BUY'
-                elif ha_criterion.sell(ha[-1, :]) and logic_criterion.sell() and \
-                        (stochastic_criterion.sell(stoch) or \
-                        trend_criterion.sell(ma_corrected[-1]) or \
-                        stop_loss.sell(price) or \
-                        take_profit.sell(price)):
-                    if take_profit.buy_price is not None:
-                        trade = price / take_profit.buy_price
-                        deque_criterion.append(trade)
-                    take_profit.buy_price = None
-                    stop_loss.buy_price = None
-                    deque_criterion.sell_time = timeTo / 60
-                    logic_criterion.recently_bought = False
-                    logic_criterion.recently_sold = True
-
+                elif sell:
                     balance_symbol = asset_balance(client, symbol1)
                     # cancel_orders(client, symbol, 'BUY')
                     sell_assets(client, symbol, balance_symbol)
@@ -174,18 +140,17 @@ def trading_pipeline():
                 else:
                     action = 'DO NOTHING'
 
-                print()
-                # print(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1])
-                print(timeTo, action, price, \
-                    round_to_n(stochastic[-1], 3), round_to_n(ma[-1], 5))
+                price = X[-1, 0]
 
-                if logic_criterion.recently_sold and not deque_criterion.buy(timeTo / 60):
-                    profit = deque_criterion.get_profit() - 1.0
-                    waiting_time = deque_criterion.get_waiting_time(profit) * 60
-                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
-                    time.sleep(waiting_time)
-                    logic_criterion.recently_sold = False
-                    _, timeTo = get_recent_data(symbol1)
+                print(timeTo, action, price)
+
+                # if logic_criterion.recently_sold and not deque_criterion.buy(timeTo / 60):
+                #     profit = deque_criterion.get_profit() - 1.0
+                #     waiting_time = deque_criterion.get_waiting_time(profit) * 60
+                #     print('Sleeping for', waiting_time // (60 * 60), 'hours')
+                #     time.sleep(waiting_time)
+                #     logic_criterion.recently_sold = False
+                #     _, timeTo = get_recent_data(symbol1)
 
                 time.sleep(20)
                 check_bnb(client)

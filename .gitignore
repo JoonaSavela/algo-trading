@@ -5,3 +5,4 @@ models/
 keys.py
 trading_logs/
 search_results/
+optim_results/

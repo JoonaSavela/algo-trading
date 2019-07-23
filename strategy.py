@@ -35,18 +35,6 @@ class Heikin_ashi_criterion:
         ha = args['ha']
         return 1 - ha[1] / ha[2] <= self.threshold
 
-class Trend_criterion:
-    def __init__(self, threshold):
-        self.threshold = threshold
-
-    def buy(self, args):
-        ma_corrected = args['ma_corrected']
-        return ma_corrected > self.threshold
-
-    def sell(self, args):
-        ma_corrected = args['ma_corrected']
-        return ma_corrected < -self.threshold
-
 class Stop_loss_criterion:
     def __init__(self, stop_loss):
         self.stop_loss = stop_loss
@@ -134,8 +122,8 @@ class Base_Strategy:
         self.stop_loss = Stop_loss_criterion(params['stop_loss'] if stop_loss_take_profit else -1)
         self.take_profit = Take_profit_criterion(params['take_profit'] if stop_loss_take_profit else 1)
         self.deque_criterion = Deque_criterion(
-            params['maxlen'] if restrictive else 3,
-            (params['waiting_time'] if restrictive else 1) * 60
+            int(params['maxlen']) if restrictive else 3,
+            (int(params['waiting_time']) if restrictive else 1)
         )
         self.logic_criterion = Logic_criterion()
 
@@ -210,6 +198,9 @@ class Base_Strategy:
         self.logic_criterion.recently_bought = False
         self.logic_criterion.recently_sold = False
 
+    def size(self):
+        return 1
+
     @staticmethod
     def get_options(stop_loss_take_profit, restrictive):
         options = {}
@@ -222,7 +213,7 @@ class Base_Strategy:
 
         if restrictive:
             options['maxlen'] = ('range', (3, 5))
-            options['waiting_time'] = ('range', (0, 17))
+            options['waiting_time'] = ('range', (0, 17 * 60))
 
         return options
 
@@ -230,7 +221,7 @@ class Base_Strategy:
 class Stochastic_Strategy(Base_Strategy):
     def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
         super().__init__(params, stop_loss_take_profit, restrictive)
-        self.window_size = params['window_size'] * 14
+        self.window_size = int(params['window_size'])
 
         self.stochastic_criterion = Stochastic_criterion(params['buy_threshold'], params['sell_threshold'])
 
@@ -275,13 +266,16 @@ class Stochastic_Strategy(Base_Strategy):
 
         return buys, sells
 
+    def size(self):
+        return self.window_size
+
     @staticmethod
     def get_options(stop_loss_take_profit, restrictive):
         options = super(Stochastic_Strategy, Stochastic_Strategy).get_options(stop_loss_take_profit, restrictive)
 
         options['name'] = 'Stochastic_Strategy'
 
-        options['window_size'] = ('range', (1, 5))
+        options['window_size'] = ('range', (1, 5 * 14 * 14))
 
         options['buy_threshold'] = ('uniform', (0.0, 0.3))
         options['sell_threshold'] = ('uniform', (0.0, 0.3))
@@ -334,6 +328,9 @@ class HA_Strategy(Base_Strategy):
 
         return buys, sells
 
+    def size(self):
+        return 2
+
     @staticmethod
     def get_options(stop_loss_take_profit, restrictive):
         options = super(HA_Strategy, HA_Strategy).get_options(stop_loss_take_profit, restrictive)
@@ -348,9 +345,9 @@ class HA_Strategy(Base_Strategy):
 class Bollinger_squeeze_Strategy(Base_Strategy):
     def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
         super().__init__(params, stop_loss_take_profit, restrictive)
-        self.window_size = params['window_size']
-        self.look_back_size = params['look_back_size']
-        self.rolling_min_window_size = params['rolling_min_window_size']
+        self.window_size = int(params['window_size'])
+        self.look_back_size = int(params['look_back_size'])
+        self.rolling_min_window_size = int(params['rolling_min_window_size'])
 
         self.bollinger_squeeze_criterion = Bollinger_squeeze_criterion(
             params['min_threshold'],
@@ -426,18 +423,21 @@ class Bollinger_squeeze_Strategy(Base_Strategy):
 
         return buys, sells
 
+    def size(self):
+        return self.window_size + np.min([self.rolling_min_window_size, self.look_back_size])
+
     @staticmethod
     def get_options(stop_loss_take_profit, restrictive):
         options = super(Bollinger_squeeze_Strategy, Bollinger_squeeze_Strategy).get_options(stop_loss_take_profit, restrictive)
 
         options['name'] = 'Bollinger_squeeze_Strategy'
 
-        options['window_size'] = ('range', (1, 60 + 1))
-        options['look_back_size'] = ('range', (1, 20 + 1))
-        options['rolling_min_window_size'] = ('range', (30, 8 * 60 + 1))
+        options['window_size'] = ('range', (1, 5 * 14 * 14))
+        options['look_back_size'] = ('range', (1, 5 * 14 * 14))
+        options['rolling_min_window_size'] = ('range', (1, 5 * 14 * 14))
 
-        options['min_threshold'] = ('uniform', (0.0, 4.0))
-        options['change_threshold'] = ('uniform', (0.0, 4.0))
+        options['min_threshold'] = ('uniform', (0.0, 8.0))
+        options['change_threshold'] = ('uniform', (0.0, 8.0))
 
         options['ha_threshold'] = ('uniform', (0.0, 0.0005))
 
@@ -446,16 +446,15 @@ class Bollinger_squeeze_Strategy(Base_Strategy):
 class Main_Strategy(Base_Strategy):
     def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
         super().__init__(params, stop_loss_take_profit, restrictive)
-        self.window_size1 = params['window_size1'] * 14
-        self.window_size2 = params['window_size2'] * 14
-        self.window_size3 = params['window_size3'] * 14
+        self.window_size1 = int(params['window_size1'])
+        self.window_size2 = int(params['window_size2'])
 
         self.stochastic_criterion = Stochastic_criterion(params['buy_threshold'], params['sell_threshold'])
         self.ha_criterion = Heikin_ashi_criterion(params['ha_threshold'])
 
-        self.window_size = params['window_size']
-        self.look_back_size = params['look_back_size']
-        self.rolling_min_window_size = params['rolling_min_window_size']
+        self.window_size = int(params['window_size'])
+        self.look_back_size = int(params['look_back_size'])
+        self.rolling_min_window_size = int(params['rolling_min_window_size'])
 
         self.bollinger_squeeze_criterion = Bollinger_squeeze_criterion(
             params['min_threshold'],
@@ -491,12 +490,16 @@ class Main_Strategy(Base_Strategy):
 
         stochastic = stochastic_oscillator(X_corrected, self.window_size2)
 
-        X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
-
-        ma_corrected = sma(X_corrected, self.window_size3)
-
         ma = sma(tp, self.window_size)
         sd = std(tp, self.window_size)
+
+        # print(np.any(sd == 0))
+
+        if sd.size == 0:
+            test = pd.Series(tp).rolling(self.window_size).std().values
+            print(test)
+            raise ValueError('asdf')
+            sd = 0
 
         upper = ma + sd
         lower = ma - sd
@@ -505,16 +508,15 @@ class Main_Strategy(Base_Strategy):
 
         width_sma = sma(width.reshape((width.shape[0], 1)), self.look_back_size)
 
-        sequence_length = np.min([rolling_min_width.shape[0], width_sma.shape[0], X_corrected.shape[0], ma_corrected.shape[0], stochastic.shape[0], ma.shape[0]])
+        sequence_length = np.min([rolling_min_width.shape[0], width_sma.shape[0], X_corrected.shape[0], stochastic.shape[0], ma.shape[0]])
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
         ma = ma[-sequence_length:]
         stochastic = stochastic[-sequence_length:]
-        ma_corrected = ma_corrected[-sequence_length:]
 
-        buys = np.zeros(sequence_length, dtype=bool)
-        sells = np.zeros(sequence_length, dtype=bool)
+        buys = np.zeros(sequence_length - 1, dtype=bool)
+        sells = np.zeros(sequence_length - 1, dtype=bool)
 
         sequence_length -= 1
 
@@ -526,7 +528,6 @@ class Main_Strategy(Base_Strategy):
                 'close': price,
                 'stoch': stoch,
                 'current_time': i + 1,
-                'ma_corrected': ma_corrected[i + 1],
                 'ha': ha[i + 1, :],
                 'rolling_min_width': rolling_min_width[i],
                 'mean_width': width_sma[i],
@@ -535,15 +536,24 @@ class Main_Strategy(Base_Strategy):
 
             if self.buy(args):
                 self.update_after_buy(price)
-                buys[i + 1] = True
+                buys[i] = True
             elif self.sell(args):
                 self.update_after_sell(price, i + 1)
-                sells[i + 1] = True
+                sells[i] = True
 
         if reset:
             self.reset()
 
+        if buys.shape[0] == 1:
+            return buys[0], sells[0]
+
         return buys, sells
+
+    def size(self):
+        return np.max([self.window_size + np.min([self.rolling_min_window_size, self.look_back_size]),
+            self.window_size1 + self.window_size2
+        ])
+
 
     @staticmethod
     def get_options(stop_loss_take_profit, restrictive):
@@ -551,16 +561,15 @@ class Main_Strategy(Base_Strategy):
 
         options['name'] = 'Main_Strategy'
 
-        options['window_size1'] = ('range', (1, 5))
-        options['window_size2'] = ('range', (1, 5))
-        options['window_size3'] = ('range', (1, 5))
+        options['window_size1'] = ('range', (1, 5 * 14 * 14))
+        options['window_size2'] = ('range', (1, 5 * 14 * 14))
 
-        options['window_size'] = ('range', (1, 60 + 1))
-        options['look_back_size'] = ('range', (1, 20 + 1))
-        options['rolling_min_window_size'] = ('range', (30, 8 * 60 + 1))
+        options['window_size'] = ('range', (1, 5 * 14 * 14))
+        options['look_back_size'] = ('range', (1, 5 * 14 * 14))
+        options['rolling_min_window_size'] = ('range', (1, 5 * 14 * 14))
 
-        options['min_threshold'] = ('uniform', (0.0, 4.0))
-        options['change_threshold'] = ('uniform', (0.0, 4.0))
+        options['min_threshold'] = ('uniform', (0.0, 8.0))
+        options['change_threshold'] = ('uniform', (0.0, 8.0))
 
         options['buy_threshold'] = ('uniform', (0.0, 0.3))
         options['sell_threshold'] = ('uniform', (0.0, 0.3))
@@ -571,7 +580,13 @@ class Main_Strategy(Base_Strategy):
 
 
 
-def evaluate_strategy(X, strategy, verbose = True):
+def evaluate_strategy(X, strategy, start = 0, verbose = True):
+    X = X[start:, :]
+
+    n_months = X.shape[0] / (60 * 24 * 30)
+
+    print('Number of months:', n_months)
+
     buys, sells = strategy.get_output(X)
     sequence_length = buys.shape[0]
     X = X[-sequence_length:, :]
@@ -616,7 +631,7 @@ def evaluate_strategy(X, strategy, verbose = True):
     closes = X[:,0] / X[0, 0]
 
     if verbose:
-        print('profit:', wealths[-1])
+        print('profit:', wealths[-1], wealths[-1] ** (1 / n_months))
         print('benchmark profit:', closes[-1])
         print('min, max:', np.min(wealths), np.max(wealths))
 
@@ -628,7 +643,7 @@ def evaluate_strategy(X, strategy, verbose = True):
         plt.hist(trades)
         plt.show()
 
-    wealths -= 1
+    # wealths -= 1
 
     return wealths[-1], np.min(wealths), np.max(wealths)
 
@@ -636,7 +651,7 @@ def evaluate_strategy(X, strategy, verbose = True):
 
 if __name__ == '__main__':
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
     params = {
         'stop_loss': -0.03,
@@ -648,27 +663,39 @@ if __name__ == '__main__':
         'window_size': 3,
         'window_size1': 3,
         'window_size2': 1,
-        'window_size3': 1,
     }
+
+    results = pd.read_csv('search_results/random_search_Main_Strategy_True_True.csv', index_col = 0)
+
+    params = results.loc[results['profit'].idxmax()]
+
+    obj = {"target": 5.787133713535071, "params": {"buy_threshold": 0.033628835756311704, "change_threshold": 2.785132665534652, "ha_threshold": 3.365051455267121e-05, "look_back_size": 13, "maxlen": 3, "min_threshold": 0.12671463174531716, "rolling_min_window_size": 125, "sell_threshold": 0.19047059487259504, "stop_loss": -0.04886347717346559, "take_profit": 0.027972894173244552, "waiting_time": 0, "window_size": 43, "window_size1": 14 * 14, "window_size2": 4 * 14 * 14}, "datetime": {"datetime": "2019-07-23 17:49:30", "elapsed": 35787.299946, "delta": 69.858608}}
+
+    obj = {'target': 7.120549378179335, 'params': {'buy_threshold': 0.18044507894143255, 'change_threshold': 2.395989524989884, 'ha_threshold': 0.00022740452198337369, 'look_back_size': 11, 'maxlen': 4, 'min_threshold': 1.6516799323842664, 'rolling_min_window_size': 123, 'sell_threshold': 0.007327020114091631, 'stop_loss': -0.05763852099375464, 'take_profit': 0.016606080089034008, 'waiting_time': 0, 'window_size': 42, 'window_size1': 2 * 14 * 14, 'window_size2': 4 * 14 * 14}}
+
+    params = obj['params']
+
+    print(params)
 
     strategy = Main_Strategy(params, stop_loss_take_profit, restrictive)
 
     dir = 'data/ETH/'
     test_files = glob.glob(dir + '*.json')
+    start = 0
 
     test_files.sort(key = get_time)
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     X = load_all_data(test_files)
-    evaluate_strategy(X, strategy)
+    evaluate_strategy(X, strategy, start)
 
     print()
     test_files = test_files[-20:]
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     X = load_all_data(test_files)
-    evaluate_strategy(X, strategy)
+    evaluate_strategy(X, strategy, start)
 
     print()
     test_files = test_files[-3:]
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     X = load_all_data(test_files)
-    evaluate_strategy(X, strategy)
+    evaluate_strategy(X, strategy, start)

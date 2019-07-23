@@ -5,6 +5,11 @@ import glob
 from utils import get_time
 import os
 
+from bayes_opt import BayesianOptimization
+from bayes_opt.observer import JSONLogger
+from bayes_opt.event import Events
+from bayes_opt.util import load_logs
+
 def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive):
     X = load_all_data(files)
 
@@ -42,7 +47,7 @@ def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrict
 
             strategy = strategy_class(chosen_params, stop_loss_take_profit, restrictive)
 
-            profit, min_profit, max_profit = evaluate_strategy(X, strategy, False)
+            profit, min_profit, max_profit = evaluate_strategy(X, strategy, 0, False)
 
             chosen_params['profit'] = float(profit)
             chosen_params['min_profit'] = float(min_profit)
@@ -59,15 +64,120 @@ def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrict
 
     print(resulting_df.loc[resulting_df['profit'].idxmax(), :])
 
+
+def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
+    X = load_all_data(files)
+
+    n_months = X.shape[0] / (60 * 24 * 30)
+
+    print('Number of months:', n_months)
+
+    def objective_function(stop_loss,
+                       take_profit,
+                       # maxlen,
+                       # waiting_time,
+                       window_size1,
+                       window_size2,
+                       window_size,
+                       look_back_size,
+                       rolling_min_window_size,
+                       min_threshold,
+                       change_threshold,
+                       buy_threshold,
+                       sell_threshold,
+                       ha_threshold):
+
+        maxlen = int(maxlen)
+        waiting_time = int(waiting_time)
+        window_size1 = int(window_size1)
+        window_size2 = int(window_size2)
+        window_size = int(window_size)
+        look_back_size = int(look_back_size)
+        rolling_min_window_size = int(rolling_min_window_size)
+
+        params = {
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            # 'maxlen': maxlen,
+            # 'waiting_time': waiting_time,
+            'window_size1': window_size1,
+            'window_size2': window_size2,
+            'window_size': window_size,
+            'look_back_size': look_back_size,
+            'rolling_min_window_size': rolling_min_window_size,
+            'min_threshold': min_threshold,
+            'change_threshold': change_threshold,
+            'buy_threshold': buy_threshold,
+            'sell_threshold': sell_threshold,
+            'ha_threshold': ha_threshold,
+        }
+
+        strategy = strategy_class(params, stop_loss_take_profit, restrictive)
+
+        profit, min_profit, max_profit = evaluate_strategy(X, strategy, 0, False)
+
+        score = profit ** (1 / n_months)
+
+        print('Score:', score)
+
+        return score
+
+
+    options = strategy_class.get_options(stop_loss_take_profit, restrictive)
+
+    # Bounded region of parameter space
+    pbounds = {}
+
+    for k, v in options.items():
+        if k != 'name':
+            type, bounds = v
+            pbounds[k] = bounds # TODO: set bounds differently if not in strategy class
+
+    # print(pbounds)
+
+    optimizer = BayesianOptimization(
+        f = objective_function,
+        pbounds = pbounds,
+        # random_state = 1,
+    )
+
+    filename = 'optim_results/{}_{}_{}_{}.json'.format(
+        coin,
+        options['name'],
+        stop_loss_take_profit,
+        restrictive
+    )
+
+    # load_logs(optimizer, logs=[filename])
+
+    logger = JSONLogger(path=filename)
+    optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
+
+    optimizer.maximize(
+        init_points = int(np.sqrt(n_runs)),
+        n_iter = n_runs,
+    )
+
+    # fix_optim_log(filename)
+
+    print(optimizer.max)
+
+
+
+
 if __name__ == '__main__':
     n_runs = 1000
+    kappa = 1.0
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
-    dir = 'data/ETH/'
+    coin = 'ETH'
+
+    dir = 'data/' + coin + '/'
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
     print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
 
-    random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
+    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
+    # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
