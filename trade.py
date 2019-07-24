@@ -12,6 +12,7 @@ import json
 from strategy import *
 from requests.exceptions import ConnectionError, ReadTimeout
 from visualize import get_trades
+from parameters import parameters
 
 def asset_balance(client, symbol):
     response = client.get_asset_balance(asset=symbol)
@@ -89,24 +90,27 @@ def trading_pipeline():
         initial_bnb = asset_balance(client, 'BNB')
         print(initial_time, initial_capital, asset_balance(client, symbol1), initial_bnb)
 
-        obj = {'target': 7.120549378179335, 'params': {'buy_threshold': 0.18044507894143255, 'change_threshold': 2.395989524989884, 'ha_threshold': 0.00022740452198337369, 'look_back_size': 11, 'maxlen': 4, 'min_threshold': 1.6516799323842664, 'rolling_min_window_size': 123, 'sell_threshold': 0.007327020114091631, 'stop_loss': -0.05763852099375464, 'take_profit': 0.016606080089034008, 'waiting_time': 0, 'window_size': 42, 'window_size1': 2 * 14 * 14, 'window_size2': 4 * 14 * 14}}
         stop_loss_take_profit = True
-        restrictive = False
+        restrictive = True
+
+        obj = parameters[-1]
 
         params = obj['params']
 
-        # print(params)
+        if 'decay' not in params:
+            params['decay'] = 0.0001
 
         strategy = Main_Strategy(params, stop_loss_take_profit, restrictive)
+        X_size = strategy.size()
 
-        # wealths = get_trades(count = 4)
-        # trades = wealths[-3:] / wealths[:3]
-        # print(trades)
-        #
-        # for trade in trades:
-        #     deque_criterion.append(trade)
-        #
-        # print(deque_criterion.get_profit())
+        wealths = get_trades(count = 4)
+        trades = wealths[-3:] / wealths[:3]
+        print(trades)
+
+        for trade in trades:
+            strategy.deque_criterion.append(trade)
+
+        print(strategy.deque_criterion.get_profit())
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
@@ -120,37 +124,48 @@ def trading_pipeline():
             try:
                 print()
 
-                X, timeTo = get_recent_data(symbol1, size = strategy.size())
+                X, timeTo = get_recent_data(symbol1, size = X_size)
 
-                buy, sell = strategy.get_output(X, reset = False)
+                buy, sell, buy_or_criteria, sell_or_criteria = strategy.get_output(X, timeTo / 60, reset = False, update = False)
 
                 # print(buy, sell)
+
+                price = X[-1, 0]
 
                 if buy:
                     balance_usdt = asset_balance(client, 'USDT')
                     high = binance_price(client, symbol)
-                    # cancel_orders(client, symbol, 'SELL')
-                    buy_assets(client, symbol, high, balance_usdt)
+
+                    success = buy_assets(client, symbol, high, balance_usdt)
+
+                    if success:
+                        strategy.update_after_buy(price, timeTo / 60)
+
                     action = 'BUY'
                 elif sell:
                     balance_symbol = asset_balance(client, symbol1)
-                    # cancel_orders(client, symbol, 'BUY')
-                    sell_assets(client, symbol, balance_symbol)
+
+                    success = sell_assets(client, symbol, balance_symbol)
+
+                    if success:
+                        strategy.update_after_buy(price, timeTo / 60)
+
+                    print(strategy.deque_criterion.trades)
+                    print(strategy.deque_criterion.get_profit())
                     action = 'SELL'
                 else:
                     action = 'DO NOTHING'
 
-                price = X[-1, 0]
 
-                print(timeTo, action, price)
+                print(timeTo, action, price, buy_or_criteria, sell_or_criteria)
 
-                # if logic_criterion.recently_sold and not deque_criterion.buy(timeTo / 60):
-                #     profit = deque_criterion.get_profit() - 1.0
-                #     waiting_time = deque_criterion.get_waiting_time(profit) * 60
-                #     print('Sleeping for', waiting_time // (60 * 60), 'hours')
-                #     time.sleep(waiting_time)
-                #     logic_criterion.recently_sold = False
-                #     _, timeTo = get_recent_data(symbol1)
+                if strategy.logic_criterion.recently_sold and not strategy.deque_criterion.buy(timeTo / 60):
+                    profit = strategy.deque_criterion.get_profit() - 1.0
+                    waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
+                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
+                    time.sleep(waiting_time)
+                    strategy.logic_criterion.recently_sold = False
+                    _, timeTo = get_recent_data(symbol1)
 
                 time.sleep(20)
                 check_bnb(client)

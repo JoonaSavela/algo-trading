@@ -73,9 +73,10 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     print('Number of months:', n_months)
 
     def objective_function(stop_loss,
+                       decay,
                        take_profit,
-                       # maxlen,
-                       # waiting_time,
+                       maxlen,
+                       waiting_time,
                        window_size1,
                        window_size2,
                        window_size,
@@ -97,9 +98,10 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
         params = {
             'stop_loss': stop_loss,
+            'decay': decay,
             'take_profit': take_profit,
-            # 'maxlen': maxlen,
-            # 'waiting_time': waiting_time,
+            'maxlen': maxlen,
+            'waiting_time': waiting_time,
             'window_size1': window_size1,
             'window_size2': window_size2,
             'window_size': window_size,
@@ -114,11 +116,16 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
         strategy = strategy_class(params, stop_loss_take_profit, restrictive)
 
-        profit, min_profit, max_profit = evaluate_strategy(X, strategy, 0, False)
+        profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, 0, 0, False)
+#
+        if trades.shape[0] == 0:
+            return -1
 
-        score = profit ** (1 / n_months)
+        score = profit ** (1 / n_months) - 1
+        if score > 0 and trades.shape[0] > 2:
+            score /= np.std(trades)
 
-        print('Score:', score)
+        print('Profit:', profit ** (1 / n_months), 'Score:', score)
 
         return score
 
@@ -170,14 +177,14 @@ if __name__ == '__main__':
     kappa = 1.0
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = False
+    restrictive = True
 
     coin = 'ETH'
 
     dir = 'data/' + coin + '/'
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
-    print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
+    # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
 
     optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
     # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
