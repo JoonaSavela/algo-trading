@@ -24,7 +24,9 @@ def binance_price(client, symbol):
 
 def check_bnb(client):
     balance_bnb = asset_balance(client, 'BNB')
-    if balance_bnb < 0.25:
+    time.sleep(0.05)
+    balance_usdt = asset_balance(client, 'USDT')
+    if balance_bnb < 0.25 and balance_usdt > 50:
         try:
             client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
             print('Bought BNB')
@@ -158,7 +160,7 @@ def trading_pipeline():
 
                 print(timeTo, action, price, buy_or_criteria, sell_or_criteria)
 
-                if strategy.logic_criterion.recently_sold and not strategy.deque_criterion.buy(timeTo / 60):
+                if strategy.logic_criterion.recently_sold and not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
                     profit = strategy.deque_criterion.get_profit() - 1.0
                     waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
                     print('Sleeping for', waiting_time // (60 * 60), 'hours')

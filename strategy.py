@@ -662,7 +662,7 @@ def evaluate_strategy(X, strategy, start = 0, current_time = 0, verbose = True):
 
 if __name__ == '__main__':
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
     obj = parameters[-1]
 

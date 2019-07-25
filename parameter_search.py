@@ -69,15 +69,17 @@ def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrict
 def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
     X = load_all_data(files)
 
-    n_months = X.shape[0] / (60 * 24 * 30)
+    starts = [0, X.shape[0] // 2]
+
+    n_months = (X.shape[0] * len(starts) - sum(starts)) / (60 * 24 * 30)
 
     print('Number of months:', n_months)
 
     def objective_function(stop_loss,
                        decay,
                        take_profit,
-                       # maxlen,
-                       # waiting_time,
+                       maxlen,
+                       waiting_time,
                        window_size1,
                        window_size2,
                        window_size,
@@ -89,8 +91,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                        sell_threshold,
                        ha_threshold):
 
-        # maxlen = int(maxlen)
-        # waiting_time = int(waiting_time)
+        maxlen = int(maxlen)
+        waiting_time = int(waiting_time)
         window_size1 = int(window_size1)
         window_size2 = int(window_size2)
         window_size = int(window_size)
@@ -101,8 +103,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'stop_loss': stop_loss,
             'decay': decay,
             'take_profit': take_profit,
-            # 'maxlen': maxlen,
-            # 'waiting_time': waiting_time,
+            'maxlen': maxlen,
+            'waiting_time': waiting_time,
             'window_size1': window_size1,
             'window_size2': window_size2,
             'window_size': window_size,
@@ -119,7 +121,17 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
         if strategy.size() > 2000:
             return -1
 
-        profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, 0, 0, False)
+        profits = []
+        trades_list = []
+
+        for start in starts:
+            profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, 0, 0, False)
+
+            profits.append(profit)
+            trades_list.append(trades)
+
+        profit = np.prod(profits)
+        trades = np.concatenate(trades_list)
 
         if trades.shape[0] == 0:
             return -1
@@ -165,8 +177,10 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
     for obj in parameters:
         params = obj['params']
-        if 'decay' not in params:
-            params['decay'] = 0.0
+        for k, v in options.items():
+            if k != 'name' and k not in params:
+                type, bounds = v
+                params[k] = bounds[0]
 
         optimizer.probe(
             params=params,
@@ -186,11 +200,11 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 if __name__ == '__main__':
-    n_runs = 1200
+    n_runs = 200
     kappa = 1.0
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = False
+    restrictive = True
 
     coin = 'ETH'
 
