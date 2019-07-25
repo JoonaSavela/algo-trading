@@ -95,7 +95,7 @@ def trading_pipeline():
         stop_loss_take_profit = True
         restrictive = True
 
-        obj = parameters[-1]
+        obj = parameters[2]
 
         params = obj['params']
 
