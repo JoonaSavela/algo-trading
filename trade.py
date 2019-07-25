@@ -23,16 +23,17 @@ def binance_price(client, symbol):
     return float(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1][2])
 
 def check_bnb(client):
-    balance_bnb = asset_balance(client, 'BNB')
-    time.sleep(0.05)
     balance_usdt = asset_balance(client, 'USDT')
-    if balance_bnb < 0.25 and balance_usdt > 50:
-        try:
-            client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
-            print('Bought BNB')
-            time.sleep(0.1)
-        except binance.exceptions.BinanceAPIException as e:
-            print(e)
+    time.sleep(0.05)
+    if balance_usdt > 50:
+        balance_bnb = asset_balance(client, 'BNB')
+        if balance_bnb < 0.25:
+            try:
+                client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
+                print('Bought BNB')
+                time.sleep(0.1)
+            except binance.exceptions.BinanceAPIException as e:
+                print(e)
 
 def snippet(amount, precision):
     return "{:0.0{}f}".format(amount, precision)
