@@ -448,12 +448,12 @@ class Bollinger_squeeze_Strategy(Base_Strategy):
 
         options['name'] = 'Bollinger_squeeze_Strategy'
 
-        options['window_size'] = ('range', (2, 5 * 14 * 14))
-        options['look_back_size'] = ('range', (2, 5 * 14 * 14))
-        options['rolling_min_window_size'] = ('range', (2, 5 * 14 * 14))
+        options['window_size'] = ('range', (5, 5 * 14 * 14))
+        options['look_back_size'] = ('range', (5, 5 * 14 * 14))
+        options['rolling_min_window_size'] = ('range', (5, 5 * 14 * 14))
 
-        options['min_threshold'] = ('uniform', (0.0, 8.0))
-        options['change_threshold'] = ('uniform', (0.0, 8.0))
+        options['min_threshold'] = ('uniform', (0.0, 4.0))
+        options['change_threshold'] = ('uniform', (0.0, 4.0))
 
         options['ha_threshold'] = ('uniform', (0.0, 0.0005))
 

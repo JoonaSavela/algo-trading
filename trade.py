@@ -131,6 +131,7 @@ def trading_pipeline():
                 # print(buy, sell)
 
                 price = X[-1, 0]
+                action = 'DO NOTHING'
 
                 if buy:
                     balance_usdt = asset_balance(client, 'USDT')
@@ -140,21 +141,19 @@ def trading_pipeline():
 
                     if success:
                         strategy.update_after_buy(price, timeTo / 60)
-
-                    action = 'BUY'
+                        action = 'BUY'
                 elif sell:
                     balance_symbol = asset_balance(client, symbol1)
 
                     success = sell_assets(client, symbol, balance_symbol)
 
                     if success:
-                        strategy.update_after_buy(price, timeTo / 60)
+                        strategy.update_after_sell(price, timeTo / 60)
+                        action = 'SELL'
 
                     print(strategy.deque_criterion.trades)
                     print(strategy.deque_criterion.get_profit())
-                    action = 'SELL'
-                else:
-                    action = 'DO NOTHING'
+
 
 
                 print(timeTo, action, price, buy_or_criteria, sell_or_criteria)

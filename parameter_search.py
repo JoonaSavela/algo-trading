@@ -4,6 +4,7 @@ import pandas as pd
 import glob
 from utils import get_time
 import os
+from parameters import parameters
 
 from bayes_opt import BayesianOptimization
 from bayes_opt.observer import JSONLogger
@@ -75,8 +76,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     def objective_function(stop_loss,
                        decay,
                        take_profit,
-                       maxlen,
-                       waiting_time,
+                       # maxlen,
+                       # waiting_time,
                        window_size1,
                        window_size2,
                        window_size,
@@ -88,8 +89,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                        sell_threshold,
                        ha_threshold):
 
-        maxlen = int(maxlen)
-        waiting_time = int(waiting_time)
+        # maxlen = int(maxlen)
+        # waiting_time = int(waiting_time)
         window_size1 = int(window_size1)
         window_size2 = int(window_size2)
         window_size = int(window_size)
@@ -100,8 +101,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'stop_loss': stop_loss,
             'decay': decay,
             'take_profit': take_profit,
-            'maxlen': maxlen,
-            'waiting_time': waiting_time,
+            # 'maxlen': maxlen,
+            # 'waiting_time': waiting_time,
             'window_size1': window_size1,
             'window_size2': window_size2,
             'window_size': window_size,
@@ -115,9 +116,11 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
         }
 
         strategy = strategy_class(params, stop_loss_take_profit, restrictive)
+        if strategy.size() > 2000:
+            return -1
 
         profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, 0, 0, False)
-#
+
         if trades.shape[0] == 0:
             return -1
 
@@ -160,6 +163,16 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     logger = JSONLogger(path=filename)
     optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
 
+    for obj in parameters:
+        params = obj['params']
+        if 'decay' not in params:
+            params['decay'] = 0.0
+
+        optimizer.probe(
+            params=params,
+            lazy=True,
+        )
+
     optimizer.maximize(
         init_points = int(np.sqrt(n_runs)),
         n_iter = n_runs,
@@ -173,11 +186,11 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 if __name__ == '__main__':
-    n_runs = 1000
+    n_runs = 1200
     kappa = 1.0
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
     coin = 'ETH'
 
