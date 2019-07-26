@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from utils import stochastic_oscillator, heikin_ashi, sma, std
 from model import RelationalMemory
-from data import get_and_save_all, load_data
+from data import get_and_save_all, load_data, load_all_data
 import numpy as np
 import json
 import requests
@@ -25,7 +25,8 @@ def main():
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    idx = np.array([2, 4, 5, -1])
+    # idx = np.array([2, 4, 5, -1])
+    idx = np.array([0, 1])
     test_files = np.array(test_files)[idx]
     window_size1 = 14#3 * 14
     window_size2 = 4 * 60#1 * 14
@@ -38,65 +39,44 @@ def main():
     # sequence_length = 8*60
     # print(sequence_length)
 
-    for file in test_files:
-        X = load_data(file, sequence_length, latency, window_size, k)
-        # print(np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1)))
+    # for file in test_files:
+    # X = load_data(file, sequence_length, latency, window_size, k)
+    X = load_all_data(test_files)
+    # print(np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1)))
 
-        # print(X.shape)
-        # ha = heikin_ashi(X)
-        # print(ha[-sequence_length:, :].shape)
+    # print(X.shape)
+    # ha = heikin_ashi(X)
+    # print(ha[-sequence_length:, :].shape)
 
-        tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-        ma = sma(tp, window_size1)
-        sd = std(tp, window_size1)
-        print(sd)
+    tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
+    c = 20
+    lips = sma(tp, 5 * c)
+    teeth = sma(tp, 8 * c)
+    jaws = sma(tp, 13 * c)
 
-        m = 2
-        upper = ma + m * sd
-        lower = ma - m * sd
-        width = (upper - lower) / ma
-        rolling_min_width = pd.Series(width).rolling(window_size2).min().dropna().values
-        # print(ma.shape)
+    sequence_length = jaws.shape[0]
 
-        # X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
-        #
-        # X_corrected /= np.repeat(X[-X_corrected.shape[0]:, 0].reshape((-1, 1)), 4, axis = 1)
-        #
-        # ma_corrected = sma(X_corrected, window_size3)
+    plt.plot(range(sequence_length), X[-sequence_length:, 0])
+    plt.plot(np.arange(sequence_length), lips[-sequence_length:], 'g')
+    plt.plot(np.arange(sequence_length) + 0 * c, teeth[-sequence_length:], 'r')
+    plt.plot(np.arange(sequence_length) + 0 * c, jaws[-sequence_length:], 'b')
+    plt.show()
 
-        # stochastic1 = stochastic_oscillator(X, window_size2, k)
-        # print(stochastic1.shape)
-
-        # stochastic2 = stochastic_oscillator(X_corrected, window_size2, k)
-        # print(stochastic2.shape)
-
-        fig, axes = plt.subplots(figsize=(12, 8), ncols=2, nrows=2)
-
-        axes[0][0].plot(range(sequence_length), X[-sequence_length:, 0])
-        axes[0][0].plot(range(sequence_length), ma[-sequence_length:])
-        axes[0][0].plot(range(sequence_length), upper[-sequence_length:])
-        axes[0][0].plot(range(sequence_length), lower[-sequence_length:])
-        axes[1][0].plot(range(sequence_length), width[-sequence_length:])
-        axes[1][0].plot(range(sequence_length), rolling_min_width[-sequence_length:])
-        # axes[0][1].plot(range(sequence_length), X_corrected[-sequence_length:, :4])
-        # axes[0][1].plot(range(sequence_length), ma_corrected[-sequence_length:])
-        plt.show()
-
-        # trace = go.Candlestick(x=list(range(X.shape[0])),
-        #         open=X[:, 3],
-        #         high=X[:, 1],
-        #         low=X[:, 2],
-        #         close=X[:, 0])
-        # data = [trace]
-        # py.plot(data, filename='simple_candlestick')
-        #
-        # trace1 = go.Candlestick(x=list(range(X.shape[0] - 1)),
-        #         open=ha[:, 1],
-        #         high=ha[:, 2],
-        #         low=ha[:, 3],
-        #         close=ha[:, 0])
-        # data1 = [trace1]
-        # py.plot(data1, filename='heikin-ashi_candlestick')
+    # trace = go.Candlestick(x=list(range(X.shape[0])),
+    #         open=X[:, 3],
+    #         high=X[:, 1],
+    #         low=X[:, 2],
+    #         close=X[:, 0])
+    # data = [trace]
+    # py.plot(data, filename='simple_candlestick')
+    #
+    # trace1 = go.Candlestick(x=list(range(X.shape[0] - 1)),
+    #         open=ha[:, 1],
+    #         high=ha[:, 2],
+    #         low=ha[:, 3],
+    #         close=ha[:, 0])
+    # data1 = [trace1]
+    # py.plot(data1, filename='heikin-ashi_candlestick')
 
 
 

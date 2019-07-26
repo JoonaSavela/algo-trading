@@ -125,7 +125,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
         trades_list = []
 
         for start in starts:
-            profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, 0, 0, False)
+            profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, start, 0, False)
 
             profits.append(profit)
             trades_list.append(trades)

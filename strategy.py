@@ -123,6 +123,20 @@ class Bollinger_squeeze_criterion:
         return self.buy(args)
 
 
+class Alligator_criterion:
+    def __init__(self):
+        pass
+
+    def sell(self, args):
+        lips = args['lips']
+        teeth = args['teeth']
+        jaws = args['jaws']
+        return lips < teeth and teeth < jaws
+
+    def buy(self, args):
+        return not self.sell(args)
+
+
 
 class Base_Strategy:
     def __init__(self, params, stop_loss_take_profit, restrictive):
@@ -477,8 +491,13 @@ class Main_Strategy(Base_Strategy):
             params['change_threshold']
         )
 
+        self.c = int(params['c'])
+
+        self.alligator_criterion = Alligator_criterion()
+
         self.buy_and_criteria.extend([
-            self.ha_criterion
+            self.ha_criterion,
+            self.alligator_criterion
         ])
 
         self.sell_and_criteria.extend([
@@ -492,7 +511,8 @@ class Main_Strategy(Base_Strategy):
 
         self.sell_or_criteria.extend([
             self.stochastic_criterion,
-            self.bollinger_squeeze_criterion
+            self.bollinger_squeeze_criterion,
+            self.alligator_criterion
         ])
 
 
@@ -501,6 +521,9 @@ class Main_Strategy(Base_Strategy):
 
         tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
         ma = sma(tp, self.window_size1)
+        lips = sma(tp, 5 * self.c)
+        teeth = sma(tp, 8 * self.c)
+        jaws = sma(tp, 13 * self.c)
 
         X_corrected = X[-ma.shape[0]:, :4] - np.repeat(ma.reshape((-1, 1)), 4, axis = 1)
 
@@ -516,12 +539,15 @@ class Main_Strategy(Base_Strategy):
 
         width_sma = sma(width.reshape((width.shape[0], 1)), self.look_back_size)
 
-        sequence_length = np.min([rolling_min_width.shape[0], width_sma.shape[0], X_corrected.shape[0], stochastic.shape[0], ma.shape[0]])
+        sequence_length = np.min([rolling_min_width.shape[0], width_sma.shape[0], X_corrected.shape[0], stochastic.shape[0], ma.shape[0], jaws.shape[0]])
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
         ma = ma[-sequence_length:]
         stochastic = stochastic[-sequence_length:]
+        lips = lips[-sequence_length:]
+        teeth = teeth[-sequence_length:]
+        jaws = jaws[-sequence_length:]
 
         buys = np.zeros(sequence_length - 1, dtype=bool)
         sells = np.zeros(sequence_length - 1, dtype=bool)
@@ -539,7 +565,10 @@ class Main_Strategy(Base_Strategy):
                 'ha': ha[i + 1, :],
                 'rolling_min_width': rolling_min_width[i],
                 'mean_width': width_sma[i],
-                'width': width[i + 1]
+                'width': width[i + 1],
+                'lips': lips[i + 1],
+                'teeth': teeth[i + 1],
+                'jaws': jaws[i + 1],
             }
 
             if self.buy(args):
@@ -561,7 +590,8 @@ class Main_Strategy(Base_Strategy):
 
     def size(self):
         return np.max([self.window_size + np.max([self.rolling_min_window_size, self.look_back_size]),
-            self.window_size1 + self.window_size2
+            self.window_size1 + self.window_size2,
+            13 * self.c + 1
         ])
 
 
@@ -677,21 +707,12 @@ if __name__ == '__main__':
 
     dir = 'data/ETH/'
     test_files = glob.glob(dir + '*.json')
-    start = 0
 
     test_files.sort(key = get_time)
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     X = load_all_data(test_files)
-    evaluate_strategy(X, strategy, start)
+    starts = [0, X.shape[0] // 2, X.shape[0] * 3 // 4]
 
-    print()
-    test_files = test_files[-20:]
-    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
-    X = load_all_data(test_files)
-    evaluate_strategy(X, strategy, start)
-
-    print()
-    test_files = test_files[-3:]
-    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
-    X = load_all_data(test_files)
-    evaluate_strategy(X, strategy, start)
+    for start in starts:
+        evaluate_strategy(X, strategy, start)
+        print()
