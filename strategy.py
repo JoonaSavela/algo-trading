@@ -242,237 +242,6 @@ class Base_Strategy:
         return options
 
 
-class Stochastic_Strategy(Base_Strategy):
-    def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
-        super().__init__(params, stop_loss_take_profit, restrictive)
-        self.window_size = int(params['window_size'])
-
-        self.stochastic_criterion = Stochastic_criterion(params['buy_threshold'], params['sell_threshold'])
-
-        self.buy_or_criteria.append(
-            self.stochastic_criterion
-        )
-
-        self.sell_or_criteria.append(
-            self.stochastic_criterion
-        )
-
-
-    def get_output(self, X, current_time, reset = True, update = True):
-        stochastic = stochastic_oscillator(X, self.window_size)
-
-        sequence_length = stochastic.shape[0]
-
-        X = X[-sequence_length:, :]
-
-        buys = np.zeros(sequence_length, dtype=bool)
-        sells = np.zeros(sequence_length, dtype=bool)
-
-        for i in range(sequence_length):
-            price = X[i, 0]
-            stoch = stochastic[i]
-
-            args = {
-                'close': price,
-                'stoch': stoch,
-                'current_time': current_time + i,
-            }
-
-            if self.buy(args):
-                if update:
-                    self.update_after_buy(price, current_time + i)
-                buys[i] = True
-            elif self.sell(args):
-                if update:
-                    self.update_after_sell(price, current_time + i)
-                sells[i] = True
-
-        if reset:
-            self.reset()
-
-        return buys, sells
-
-    def size(self):
-        return self.window_size
-
-    @staticmethod
-    def get_options(stop_loss_take_profit, restrictive):
-        options = super(Stochastic_Strategy, Stochastic_Strategy).get_options(stop_loss_take_profit, restrictive)
-
-        options['name'] = 'Stochastic_Strategy'
-
-        options['window_size'] = ('range', (2, 5 * 14 * 14))
-
-        options['buy_threshold'] = ('uniform', (0.0, 0.3))
-        options['sell_threshold'] = ('uniform', (0.0, 0.3))
-
-        return options
-
-class HA_Strategy(Base_Strategy):
-    def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
-        super().__init__(params, stop_loss_take_profit, restrictive)
-
-        self.ha_criterion = Heikin_ashi_criterion(params['ha_threshold'])
-
-        self.buy_or_criteria.append(
-            self.ha_criterion
-        )
-
-        self.sell_and_criteria.append(
-            self.ha_criterion
-        )
-
-
-    def get_output(self, X, current_time, reset = True, update = True):
-        ha = heikin_ashi(X)
-
-        sequence_length = ha.shape[0]
-
-        X = X[-sequence_length:, :]
-
-        buys = np.zeros(sequence_length, dtype=bool)
-        sells = np.zeros(sequence_length, dtype=bool)
-
-        for i in range(sequence_length):
-            price = X[i, 0]
-
-            args = {
-                'close': price,
-                'ha': ha[i, :],
-                'current_time': current_time + i,
-            }
-
-            if self.buy(args):
-                if update:
-                    self.update_after_buy(price, current_time + i)
-                buys[i] = True
-            elif self.sell(args):
-                if update:
-                    self.update_after_sell(price, current_time + i)
-                sells[i] = True
-
-        if reset:
-            self.reset()
-
-        return buys, sells
-
-    def size(self):
-        return 2
-
-    @staticmethod
-    def get_options(stop_loss_take_profit, restrictive):
-        options = super(HA_Strategy, HA_Strategy).get_options(stop_loss_take_profit, restrictive)
-
-        options['name'] = 'HA_Strategy'
-
-        options['ha_threshold'] = ('uniform', (0.0, 0.005))
-
-        return options
-
-
-class Bollinger_squeeze_Strategy(Base_Strategy):
-    def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
-        super().__init__(params, stop_loss_take_profit, restrictive)
-        self.window_size = int(params['window_size'])
-        self.look_back_size = int(params['look_back_size'])
-        self.rolling_min_window_size = int(params['rolling_min_window_size'])
-
-        self.bollinger_squeeze_criterion = Bollinger_squeeze_criterion(
-            params['min_threshold'],
-            params['change_threshold']
-        )
-        self.ha_criterion = Heikin_ashi_criterion(params['ha_threshold'])
-
-        self.buy_and_criteria.append(
-            self.ha_criterion
-        )
-
-        self.buy_or_criteria.append(
-            self.bollinger_squeeze_criterion
-        )
-
-        self.sell_and_criteria.append(
-            self.ha_criterion
-        )
-
-        self.sell_or_criteria.append(
-            self.bollinger_squeeze_criterion
-        )
-
-    def get_output(self, X, current_time, reset = True, update = True):
-        ha = heikin_ashi(X)
-
-        tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-        ma = sma(tp, self.window_size)
-        sd = std(tp, self.window_size)
-
-        upper = ma + sd
-        lower = ma - sd
-        width = (upper - lower) / ma
-        rolling_min_width = pd.Series(width).rolling(self.rolling_min_window_size).min().dropna().values
-
-        width_sma = sma(width.reshape((width.shape[0], 1)), self.look_back_size)
-
-        sequence_length = np.min([rolling_min_width.shape[0], width_sma.shape[0]]) + 1
-
-        X = X[-sequence_length:, :]
-        ma = ma[-sequence_length:]
-        sd = sd[-sequence_length:]
-        width = width[-sequence_length:]
-        rolling_min_width = rolling_min_width[-sequence_length:]
-        width_sma = width_sma[-sequence_length:]
-
-        buys = np.zeros(sequence_length, dtype=bool)
-        sells = np.zeros(sequence_length, dtype=bool)
-
-        sequence_length -= 1
-
-        for i in range(sequence_length):
-            price = X[i + 1, 0]
-
-            args = {
-                'close': price,
-                'ha': ha[i + 1, :],
-                'current_time': current_time + i,
-                'rolling_min_width': rolling_min_width[i],
-                'mean_width': width_sma[i],
-                'width': width[i + 1]
-            }
-
-            if self.buy(args):
-                if update:
-                    self.update_after_buy(price, current_time + i)
-                buys[i + 1] = True
-            elif self.sell(args):
-                if update:
-                    self.update_after_sell(price, current_time + i)
-                sells[i + 1] = True
-
-        if reset:
-            self.reset()
-
-        return buys, sells
-
-    def size(self):
-        return self.window_size + np.min([self.rolling_min_window_size, self.look_back_size])
-
-    @staticmethod
-    def get_options(stop_loss_take_profit, restrictive):
-        options = super(Bollinger_squeeze_Strategy, Bollinger_squeeze_Strategy).get_options(stop_loss_take_profit, restrictive)
-
-        options['name'] = 'Bollinger_squeeze_Strategy'
-
-        options['window_size'] = ('range', (5, 5 * 14 * 14))
-        options['look_back_size'] = ('range', (5, 5 * 14 * 14))
-        options['rolling_min_window_size'] = ('range', (5, 5 * 14 * 14))
-
-        options['min_threshold'] = ('uniform', (0.0, 4.0))
-        options['change_threshold'] = ('uniform', (0.0, 4.0))
-
-        options['ha_threshold'] = ('uniform', (0.0, 0.0005))
-
-        return options
-
 class Main_Strategy(Base_Strategy):
     def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
         super().__init__(params, stop_loss_take_profit, restrictive)
@@ -614,6 +383,8 @@ class Main_Strategy(Base_Strategy):
         options['buy_threshold'] = ('uniform', (0.0, 0.3))
         options['sell_threshold'] = ('uniform', (0.0, 0.3))
 
+        options['c'] = ('range', (1, 150))
+
         options['ha_threshold'] = ('uniform', (0.0, 0.0005))
 
         return options
@@ -692,14 +463,18 @@ def evaluate_strategy(X, strategy, start = 0, current_time = 0, verbose = True):
 
 if __name__ == '__main__':
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
     obj = parameters[2]
 
     params = obj['params']
 
-    if 'decay' not in params:
-        params['decay'] = 0.0001
+    for k, v in Main_Strategy.get_options(stop_loss_take_profit, restrictive).items():
+        if k != 'name' and k not in params:
+            type, bounds = v
+            params[k] = bounds[0]
+
+    # params['take_profit'] = 0.02
 
     print(params)
 
@@ -711,7 +486,7 @@ if __name__ == '__main__':
     test_files.sort(key = get_time)
     print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
     X = load_all_data(test_files)
-    starts = [0, X.shape[0] // 2, X.shape[0] * 3 // 4]
+    starts = [0]#, X.shape[0] // 2, X.shape[0] * 3 // 4]
 
     for start in starts:
         evaluate_strategy(X, strategy, start)

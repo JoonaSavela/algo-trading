@@ -69,7 +69,10 @@ def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrict
 def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
     X = load_all_data(files)
 
-    starts = [0, X.shape[0] // 2]
+    if restrictive:
+        starts = [0, X.shape[0] // 2]
+    else:
+        starts = [0]
 
     n_months = (X.shape[0] * len(starts) - sum(starts)) / (60 * 24 * 30)
 
@@ -78,8 +81,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     def objective_function(stop_loss,
                        decay,
                        take_profit,
-                       maxlen,
-                       waiting_time,
+                       # maxlen,
+                       # waiting_time,
                        window_size1,
                        window_size2,
                        window_size,
@@ -89,10 +92,11 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                        change_threshold,
                        buy_threshold,
                        sell_threshold,
-                       ha_threshold):
+                       ha_threshold,
+                       c):
 
-        maxlen = int(maxlen)
-        waiting_time = int(waiting_time)
+        # maxlen = int(maxlen)
+        # waiting_time = int(waiting_time)
         window_size1 = int(window_size1)
         window_size2 = int(window_size2)
         window_size = int(window_size)
@@ -103,8 +107,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'stop_loss': stop_loss,
             'decay': decay,
             'take_profit': take_profit,
-            'maxlen': maxlen,
-            'waiting_time': waiting_time,
+            # 'maxlen': maxlen,
+            # 'waiting_time': waiting_time,
             'window_size1': window_size1,
             'window_size2': window_size2,
             'window_size': window_size,
@@ -115,6 +119,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'buy_threshold': buy_threshold,
             'sell_threshold': sell_threshold,
             'ha_threshold': ha_threshold,
+            'c': c,
         }
 
         strategy = strategy_class(params, stop_loss_take_profit, restrictive)
@@ -182,6 +187,14 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                 type, bounds = v
                 params[k] = bounds[0]
 
+        keys_to_pop = []
+        for k, v in params.items():
+            if k not in options:
+                keys_to_pop.append(k)
+
+        for k in keys_to_pop:
+            params.pop(k)
+
         optimizer.probe(
             params=params,
             lazy=True,
@@ -200,11 +213,11 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 if __name__ == '__main__':
-    n_runs = 200
-    kappa = 1.0
+    n_runs = 600
+    kappa = 1
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = True
+    restrictive = False
 
     coin = 'ETH'
 
