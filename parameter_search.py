@@ -81,8 +81,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     def objective_function(stop_loss,
                        decay,
                        take_profit,
-                       # maxlen,
-                       # waiting_time,
+                       maxlen,
+                       waiting_time,
                        window_size1,
                        window_size2,
                        window_size,
@@ -95,8 +95,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                        ha_threshold,
                        c):
 
-        # maxlen = int(maxlen)
-        # waiting_time = int(waiting_time)
+        maxlen = int(maxlen)
+        waiting_time = int(waiting_time)
         window_size1 = int(window_size1)
         window_size2 = int(window_size2)
         window_size = int(window_size)
@@ -107,8 +107,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'stop_loss': stop_loss,
             'decay': decay,
             'take_profit': take_profit,
-            # 'maxlen': maxlen,
-            # 'waiting_time': waiting_time,
+            'maxlen': maxlen,
+            'waiting_time': waiting_time,
             'window_size1': window_size1,
             'window_size2': window_size2,
             'window_size': window_size,
@@ -130,12 +130,12 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
         trades_list = []
 
         for start in starts:
-            profit, min_profit, max_profit, trades = evaluate_strategy(X, strategy, start, 0, False)
+            profit, min_profit, max_profit, trades, biggest_loss = evaluate_strategy(X, strategy, start, 0, False)
 
             profits.append(profit)
             trades_list.append(trades)
 
-        profit = np.prod(profits)
+        profit = np.prod(profits) * biggest_loss
         trades = np.concatenate(trades_list)
 
         if trades.shape[0] == 0:
@@ -145,7 +145,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
         if score > 0 and trades.shape[0] > 2:
             score /= np.std(trades)
 
-        print('Profit:', profit ** (1 / n_months), 'Score:', score)
+        print('Profit:', profit ** (1 / n_months), 'Score:', score, 'Biggest loss:', biggest_loss)
 
         return score
 
@@ -217,7 +217,7 @@ if __name__ == '__main__':
     kappa = 1
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
-    restrictive = False
+    restrictive = True
 
     coin = 'ETH'
 

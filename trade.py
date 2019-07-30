@@ -110,10 +110,10 @@ def trading_pipeline():
         trades = wealths[-3:] / wealths[:3]
         print(trades)
 
-        for trade in trades:
-            strategy.deque_criterion.append(trade)
-
-        print(strategy.deque_criterion.get_profit())
+        # for trade in trades:
+        #     strategy.deque_criterion.append(trade)
+        #
+        # print(strategy.deque_criterion.get_profit())
 
         time_diff = time.time() - initial_time
         waiting_time = 60 - time_diff
@@ -129,7 +129,8 @@ def trading_pipeline():
 
                 X, timeTo = get_recent_data(symbol1, size = X_size)
 
-                buy, sell, buy_or_criteria, sell_or_criteria = strategy.get_output(X, timeTo / 60, reset = False, update = False)
+                buy, sell, buy_and_criteria, sell_and_criteria, buy_or_criteria, sell_or_criteria = \
+                    strategy.get_output(X, timeTo / 60, reset = False, update = False)
 
                 # print(buy, sell)
 
@@ -154,14 +155,16 @@ def trading_pipeline():
                         strategy.update_after_sell(price, timeTo / 60)
                         action = 'SELL'
 
-                    print(strategy.deque_criterion.trades)
-                    print(strategy.deque_criterion.get_profit())
+                        print(strategy.deque_criterion.trades)
+                        print(strategy.deque_criterion.get_profit())
 
+                if action == 'BUY':
+                    print(timeTo, action, price, buy_and_criteria, buy_or_criteria)
+                elif action == 'SELL':
+                    print(timeTo, action, price, sell_and_criteria, sell_or_criteria)
 
-
-                print(timeTo, action, price, buy_or_criteria, sell_or_criteria)
-
-                if strategy.logic_criterion.recently_sold and not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
+                if restrictive and strategy.logic_criterion.recently_sold and \
+                        not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
                     profit = strategy.deque_criterion.get_profit() - 1.0
                     waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
                     print('Sleeping for', waiting_time // (60 * 60), 'hours')
@@ -170,12 +173,13 @@ def trading_pipeline():
                     _, timeTo = get_recent_data(symbol1)
 
                 time.sleep(20)
-                check_bnb(client)
-                # open_orders = client.get_open_orders(symbol=symbol)
-                balance_symbol = asset_balance(client, symbol1)
-                balance_usdt = asset_balance(client, 'USDT')
-                balance_bnb = asset_balance(client, 'BNB')
-                print(balance_usdt, balance_symbol, balance_bnb)
+                if action != 'DO NOTHING':
+                    check_bnb(client)
+                    # open_orders = client.get_open_orders(symbol=symbol)
+                    balance_symbol = asset_balance(client, symbol1)
+                    balance_usdt = asset_balance(client, 'USDT')
+                    balance_bnb = asset_balance(client, 'BNB')
+                    print(balance_usdt, balance_symbol, balance_bnb)
 
                 time_diff = time.time() - timeTo
                 waiting_time = 60 - time_diff

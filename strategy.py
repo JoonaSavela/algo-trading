@@ -353,7 +353,11 @@ class Main_Strategy(Base_Strategy):
             self.reset()
 
         if buys.shape[0] == 1:
-            return buys[0], sells[0], list(map(lambda x: x.buy(args), self.buy_or_criteria)), list(map(lambda x: x.sell(args), self.sell_or_criteria))
+            return buys[0], sells[0], \
+                list(map(lambda x: x.buy(args), self.buy_and_criteria)), \
+                list(map(lambda x: x.sell(args), self.sell_and_criteria)), \
+                list(map(lambda x: x.buy(args), self.buy_or_criteria)), \
+                list(map(lambda x: x.sell(args), self.sell_or_criteria))
 
         return buys, sells
 
@@ -442,28 +446,49 @@ def evaluate_strategy(X, strategy, start = 0, current_time = 0, verbose = True):
 
     closes = X[:,0] / X[0, 0]
 
+    trades = np.array(trades)
+
+    losing_trades = (trades < 0).astype(int)
+    idx = np.arange(1, len(trades))
+
+    begins = idx[np.diff(losing_trades) == 1]
+    ends = idx[np.diff(losing_trades) == -1]
+
+    losses = []
+
+    for i in range(min([len(ends), len(begins)])):
+        loss = np.prod(trades[begins[i]:ends[i]] + 1)
+        losses.append(loss)
+
+    try:
+        biggest_loss = min(losses)
+    except ValueError as e:
+        biggest_loss = 1.0
+
+
     if verbose:
         print('profit:', wealths[-1], wealths[-1] ** (1 / n_months))
         print('benchmark profit:', closes[-1])
         print('min, max:', np.min(wealths), np.max(wealths))
+        print('biggest loss:', biggest_loss)
 
         plt.plot(range(closes.shape[0]), closes)
         plt.plot(range(wealths.shape[0]), wealths)
         plt.show()
 
-        print(len(trades), np.mean(trades), np.min(trades), np.max(trades))
+        print(len(trades), np.std(trades), np.mean(trades), np.min(trades), np.max(trades))
         plt.hist(trades)
         plt.show()
 
     # wealths -= 1
 
-    return wealths[-1], np.min(wealths), np.max(wealths), np.array(trades)
+    return wealths[-1], np.min(wealths), np.max(wealths), trades, biggest_loss
 
 
 
 if __name__ == '__main__':
     stop_loss_take_profit = True
-    restrictive = False
+    restrictive = True
 
     obj = parameters[2]
 
@@ -475,6 +500,8 @@ if __name__ == '__main__':
             params[k] = bounds[0]
 
     # params['take_profit'] = 0.02
+    # params['waiting_time'] = 60 * 12
+    # params['maxlen'] = 3
 
     print(params)
 
