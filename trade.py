@@ -125,8 +125,6 @@ def trading_pipeline():
 
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
-                print()
-
                 X, timeTo = get_recent_data(symbol1, size = X_size)
 
                 buy, sell, buy_and_criteria, sell_and_criteria, buy_or_criteria, sell_or_criteria = \
@@ -159,8 +157,10 @@ def trading_pipeline():
                         print(strategy.deque_criterion.get_profit())
 
                 if action == 'BUY':
+                    print()
                     print(timeTo, action, price, buy_and_criteria, buy_or_criteria)
                 elif action == 'SELL':
+                    print()
                     print(timeTo, action, price, sell_and_criteria, sell_or_criteria)
 
                 if restrictive and strategy.logic_criterion.recently_sold and \
