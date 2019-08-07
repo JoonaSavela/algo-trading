@@ -65,6 +65,124 @@ def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrict
 
     print(resulting_df.loc[resulting_df['profit'].idxmax(), :])
 
+def optimise_smoothing_strategy(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
+    X = load_all_data(files)
+
+    if restrictive:
+        starts = [0, X.shape[0] // 2]
+    else:
+        starts = [0]
+
+    n_months = (X.shape[0] * len(starts) - sum(starts)) / (60 * 24 * 30)
+
+    print('Number of months:', n_months)
+
+    def objective_function(stop_loss,
+                       decay,
+                       take_profit,
+                       maxlen,
+                       waiting_time,
+                       alpha):
+
+        maxlen = int(maxlen)
+        waiting_time = int(waiting_time)
+
+        params = {
+            'stop_loss': stop_loss,
+            'decay': decay,
+            'take_profit': take_profit,
+            'maxlen': maxlen,
+            'waiting_time': waiting_time,
+            'alpha': alpha,
+        }
+
+        strategy = Smoothing_Strategy(params, stop_loss_take_profit, restrictive)
+        if strategy.size() > 2000:
+            return -1
+
+        profits = []
+        trades_list = []
+
+        for start in starts:
+            profit, min_profit, max_profit, trades, biggest_loss = evaluate_strategy(X, strategy, start, 0, False)
+
+            profits.append(profit)
+            trades_list.append(trades)
+
+        profit = np.prod(profits) * biggest_loss
+        trades = np.concatenate(trades_list)
+
+        if trades.shape[0] == 0:
+            return -1
+
+        score = profit ** (1 / n_months) - 1
+        if score > 0 and trades.shape[0] > 2:
+            score /= np.std(trades)
+
+        print('Profit:', profit ** (1 / n_months), 'Score:', score, 'Biggest loss:', biggest_loss)
+
+        return score
+
+
+    options = Smoothing_Strategy.get_options(stop_loss_take_profit, restrictive)
+
+    # Bounded region of parameter space
+    pbounds = {}
+
+    for k, v in options.items():
+        if k != 'name':
+            type, bounds = v
+            pbounds[k] = bounds # TODO: set bounds differently if not in strategy class
+
+    # print(pbounds)
+
+    optimizer = BayesianOptimization(
+        f = objective_function,
+        pbounds = pbounds,
+        # random_state = 1,
+    )
+
+    filename = 'optim_results/{}_{}_{}_{}.json'.format(
+        coin,
+        options['name'],
+        stop_loss_take_profit,
+        restrictive
+    )
+
+    # load_logs(optimizer, logs=[filename])
+
+    logger = JSONLogger(path=filename)
+    optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
+
+    # for obj in parameters:
+    #     params = obj['params']
+    #     for k, v in options.items():
+    #         if k != 'name' and k not in params:
+    #             type, bounds = v
+    #             params[k] = bounds[0]
+    #
+    #     keys_to_pop = []
+    #     for k, v in params.items():
+    #         if k not in options:
+    #             keys_to_pop.append(k)
+    #
+    #     for k in keys_to_pop:
+    #         params.pop(k)
+    #
+    #     optimizer.probe(
+    #         params=params,
+    #         lazy=True,
+    #     )
+
+    optimizer.maximize(
+        init_points = int(np.sqrt(n_runs)),
+        n_iter = n_runs,
+    )
+
+    # fix_optim_log(filename)
+
+    print(optimizer.max)
+
 
 def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
     X = load_all_data(files)
@@ -226,5 +344,5 @@ if __name__ == '__main__':
     files.sort(key = get_time)
     # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
 
-    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
+    optimise_smoothing_strategy(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
     # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)

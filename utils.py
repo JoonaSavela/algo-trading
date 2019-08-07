@@ -6,6 +6,38 @@ try:
 except ImportError as e:
     print(e)
 
+def aggregate(X, n = 5):
+    aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))
+    X = X[-n * aggregated_X.shape[0]:, :]
+
+    for i in range(aggregated_X.shape[0]):
+        js = np.arange(i * n, (i + 1) * n)
+        
+        aggregated_X[i, 0] = X[js[-1], 0] # close
+        aggregated_X[i, 1] = np.max(X[js, 1]) # high
+        aggregated_X[i, 2] = np.min(X[js, 2]) # low
+        aggregated_X[i, 3] = X[js[0], 3] # open
+
+    return aggregated_X
+
+def smoothed_returns(X, alpha = 0.75):
+    returns = X[1:, 0] / X[:-1, 0] - 1
+
+    mus = []
+    mu_prior = 0.0
+
+    for i in range(returns.shape[0]):
+        if i > 0:
+            mu_prior = mu_posterior
+
+        mu_posterior = alpha * mu_prior + (1 - alpha) * returns[i]
+
+        mus.append(mu_posterior)
+
+    mus = np.array(mus)
+
+    return mus
+
 def std(X, window_size):
     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 

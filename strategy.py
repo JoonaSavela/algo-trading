@@ -1,5 +1,6 @@
 from data import load_data, load_all_data
-from utils import stochastic_oscillator, heikin_ashi, sma, std, get_time, round_to_n
+from utils import stochastic_oscillator, heikin_ashi, sma, std, get_time, \
+    round_to_n, smoothed_returns, aggregate
 import glob
 from collections import deque
 try:
@@ -136,6 +137,17 @@ class Alligator_criterion:
     def buy(self, args):
         return not self.sell(args)
 
+class Smoothed_returns_criterion:
+    def __init__(self):
+        pass
+
+    def buy(self, args):
+        mu = args['mu']
+        return mu > 0
+
+    def sell(self, args):
+        return not self.buy(args)
+
 
 
 class Base_Strategy:
@@ -178,15 +190,23 @@ class Base_Strategy:
 
 
     def get_buy_and_rules(self, args):
+        if len(self.buy_and_criteria) == 0:
+            return True
         return all(map(lambda x: x.buy(args), self.buy_and_criteria))
 
     def get_sell_and_rules(self, args):
+        if len(self.sell_and_criteria) == 0:
+            return True
         return all(map(lambda x: x.sell(args), self.sell_and_criteria))
 
     def get_buy_or_rules(self, args):
+        if len(self.buy_or_criteria) == 0:
+            return True
         return any(map(lambda x: x.buy(args), self.buy_or_criteria))
 
     def get_sell_or_rules(self, args):
+        if len(self.sell_or_criteria) == 0:
+            return True
         return any(map(lambda x: x.sell(args), self.sell_or_criteria))
 
     def buy(self, args):
@@ -241,6 +261,85 @@ class Base_Strategy:
 
         return options
 
+class Smoothing_Strategy(Base_Strategy):
+    def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
+        super().__init__(params, stop_loss_take_profit, restrictive)
+        self.alpha = params['alpha']
+
+        self.smoothed_returns_criterion = Smoothed_returns_criterion()
+
+        self.ha_criterion = Heikin_ashi_criterion(params['ha_threshold'])
+
+        self.buy_and_criteria.extend([
+            self.smoothed_returns_criterion,
+            # self.ha_criterion
+        ])
+
+        self.sell_and_criteria.extend([
+            self.smoothed_returns_criterion,
+            # self.ha_criterion
+        ])
+
+
+    def get_output(self, X, current_time, reset = True, update = True):
+        mus = smoothed_returns(X, alpha = self.alpha)
+
+        ha = heikin_ashi(X)
+
+        sequence_length = mus.shape[0]
+
+        X = X[-sequence_length:, :]
+        ha = ha[-sequence_length:, :]
+
+        buys = np.zeros(sequence_length, dtype=bool)
+        sells = np.zeros(sequence_length, dtype=bool)
+
+        for i in range(sequence_length):
+            price = X[i, 0]
+
+            args = {
+                'close': price,
+                'current_time': current_time + i,
+                'mu': mus[i],
+                'ha': ha[i, :],
+            }
+
+            if self.buy(args):
+                if update:
+                    self.update_after_buy(price, current_time + i)
+                buys[i] = True
+            elif self.sell(args):
+                if update:
+                    self.update_after_sell(price, current_time + i)
+                sells[i] = True
+
+        if reset:
+            self.reset()
+
+        if buys.shape[0] == 1:
+            return buys[0], sells[0], \
+                list(map(lambda x: x.buy(args), self.buy_and_criteria)), \
+                list(map(lambda x: x.sell(args), self.sell_and_criteria)), \
+                list(map(lambda x: x.buy(args), self.buy_or_criteria)), \
+                list(map(lambda x: x.sell(args), self.sell_or_criteria))
+
+        return buys, sells
+
+    def size(self):
+        return 2
+
+
+    @staticmethod
+    def get_options(stop_loss_take_profit, restrictive):
+        options = super(Main_Strategy, Main_Strategy).get_options(stop_loss_take_profit, restrictive)
+
+        options['name'] = 'Smoothing_Strategy'
+
+        options['alpha'] = ('uniform', (0.0, 1.0))
+
+        options['ha_threshold'] = ('uniform', (0.0, 0.0005))
+
+        return options
 
 class Main_Strategy(Base_Strategy):
     def __init__(self, params, stop_loss_take_profit = False, restrictive = False):
@@ -264,13 +363,19 @@ class Main_Strategy(Base_Strategy):
 
         self.alligator_criterion = Alligator_criterion()
 
+        self.alpha = params['alpha']
+
+        self.smoothed_returns_criterion = Smoothed_returns_criterion()
+
         self.buy_and_criteria.extend([
             self.ha_criterion,
-            self.alligator_criterion
+            self.alligator_criterion,
+            self.smoothed_returns_criterion
         ])
 
         self.sell_and_criteria.extend([
-            self.ha_criterion
+            self.ha_criterion,
+            self.smoothed_returns_criterion
         ])
 
         self.buy_or_criteria.extend([
@@ -287,6 +392,7 @@ class Main_Strategy(Base_Strategy):
 
     def get_output(self, X, current_time, reset = True, update = True):
         ha = heikin_ashi(X)
+        mus = smoothed_returns(X, alpha = self.alpha)
 
         tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
         ma = sma(tp, self.window_size1)
@@ -312,6 +418,7 @@ class Main_Strategy(Base_Strategy):
 
         X = X[-sequence_length:, :]
         ha = ha[-sequence_length:, :]
+        mus = mus[-sequence_length:]
         ma = ma[-sequence_length:]
         stochastic = stochastic[-sequence_length:]
 
@@ -343,6 +450,7 @@ class Main_Strategy(Base_Strategy):
                 'lips': lips[i + 1],
                 'teeth': teeth[i + 1],
                 'jaws': jaws[i + 1],
+                'mu': mus[i + 1]
             }
 
             if self.buy(args):
@@ -395,6 +503,8 @@ class Main_Strategy(Base_Strategy):
         options['c'] = ('range', (1, 150))
 
         options['ha_threshold'] = ('uniform', (0.0, 0.0005))
+
+        options['alpha'] = ('uniform', (0.0, 1.0))
 
         return options
 
@@ -508,6 +618,16 @@ if __name__ == '__main__':
     # params['waiting_time'] = 60 * 12
     # params['maxlen'] = 3
 
+    # params = {
+    #     'alpha': 0.75,
+    #     'stop_loss': -0.02,
+    #     'take_profit': 0.02,
+    #     'decay': 0.0002,
+    #     'ha_threshold': 0.0001
+    # }
+
+    # params['alpha'] = 0.4
+
     print(params)
 
     strategy = Main_Strategy(params, stop_loss_take_profit, restrictive)
@@ -516,8 +636,10 @@ if __name__ == '__main__':
     test_files = glob.glob(dir + '*.json')
 
     test_files.sort(key = get_time)
-    print(dir, len(test_files), round_to_n(len(test_files) * 2001 / (60 * 24)))
-    X = load_all_data(test_files)
+    print(dir, len(test_files), round_to_n(len(test_files) * 2000 / (60 * 24)))
+    X = aggregate(load_all_data(test_files), 1)
+    print(X.shape)
+
     starts = [0]#, X.shape[0] // 2, X.shape[0] * 3 // 4]
 
     for start in starts:
