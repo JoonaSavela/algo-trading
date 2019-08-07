@@ -213,7 +213,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 if __name__ == '__main__':
-    n_runs = 600
+    n_runs = 800
     kappa = 1
     strategy_class = Main_Strategy
     stop_loss_take_profit = True

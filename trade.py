@@ -153,8 +153,6 @@ def trading_pipeline():
                         strategy.update_after_sell(price, timeTo / 60)
                         action = 'SELL'
 
-                        print(strategy.deque_criterion.trades)
-                        print(strategy.deque_criterion.get_profit())
 
                 if action == 'BUY':
                     print()
@@ -162,15 +160,8 @@ def trading_pipeline():
                 elif action == 'SELL':
                     print()
                     print(timeTo, action, price, sell_and_criteria, sell_or_criteria)
-
-                if restrictive and strategy.logic_criterion.recently_sold and \
-                        not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
-                    profit = strategy.deque_criterion.get_profit() - 1.0
-                    waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
-                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
-                    time.sleep(waiting_time)
-                    strategy.logic_criterion.recently_sold = False
-                    _, timeTo = get_recent_data(symbol1)
+                    print(strategy.deque_criterion.trades)
+                    print(strategy.deque_criterion.get_profit())
 
                 time.sleep(20)
                 if action != 'DO NOTHING':
@@ -180,6 +171,15 @@ def trading_pipeline():
                     balance_usdt = asset_balance(client, 'USDT')
                     balance_bnb = asset_balance(client, 'BNB')
                     print(balance_usdt, balance_symbol, balance_bnb)
+
+                if restrictive and strategy.logic_criterion.recently_sold and \
+                        not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
+                    profit = strategy.deque_criterion.get_profit() - 1.0
+                    waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
+                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
+                    time.sleep(waiting_time)
+                    strategy.logic_criterion.recently_sold = False
+                    _, timeTo = get_recent_data(symbol1)
 
                 time_diff = time.time() - timeTo
                 waiting_time = 60 - time_diff

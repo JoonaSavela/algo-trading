@@ -314,9 +314,14 @@ class Main_Strategy(Base_Strategy):
         ha = ha[-sequence_length:, :]
         ma = ma[-sequence_length:]
         stochastic = stochastic[-sequence_length:]
+
         lips = lips[-sequence_length:]
         teeth = teeth[-sequence_length:]
         jaws = jaws[-sequence_length:]
+
+        width = width[-sequence_length:]
+        width_sma = width_sma[-sequence_length:]
+        rolling_min_width = rolling_min_width[-sequence_length:]
 
         buys = np.zeros(sequence_length - 1, dtype=bool)
         sells = np.zeros(sequence_length - 1, dtype=bool)
