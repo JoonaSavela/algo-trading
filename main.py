@@ -11,8 +11,6 @@ import pandas as pd
 import time
 import torch
 import copy
-import plotly.plotly as py
-import plotly.graph_objs as go
 from utils import get_time, round_to_n, smoothed_returns
 
 def main():
@@ -23,10 +21,10 @@ def main():
 
     # idx = np.array([2, 4, 5, -1])
     # idx = np.array([0, 1, 2, 3])
-    idx = np.arange(2)
+    idx = np.arange(1)
     test_files = np.array(test_files)[idx]
     X = load_all_data(test_files)
-    # print(X.shape)
+    X = X[:1200, :]
 
     # tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
     # c = 70
@@ -57,16 +55,60 @@ def main():
 
     returns = X[1:, 0] / X[:-1, 0] - 1
 
-    mus = smoothed_returns(X, alpha = 0.75)
+    alpha = 0.92
+    mus = []
+
+    r = returns
+
+    N = 3
+    for i in range(N):
+        r = smoothed_returns(np.cumprod(r + 1).reshape(-1, 1), alpha = alpha)
+        mus.append(r)
+
+    n = mus[-1].shape[0]
+    buys = []
+    sells = []
+
+    for i in range(N - 1):
+        buys.append(np.cumprod(mus[i][-n:] + 1) > np.cumprod(mus[i + 1][-n:] + 1))
+        sells.append(np.cumprod(mus[i][-n:] + 1) < np.cumprod(mus[i + 1][-n:] + 1))
+
+    buys = np.stack(buys)
+    sells = np.stack(sells)
+
+    buys = np.all(buys, axis=0)
+    sells = np.all(sells, axis=0)
+
+    buys = np.diff(buys)
+    sells = np.diff(sells)
+    idx = np.arange(1, n)
+    buys = idx[buys]
+    sells = idx[sells]
+
+    i = 0
+    j = 0
+
+    while i < buys.shape[0] and j < sells.shape[0]:
+        break # TODO: filter some buys and sells out
 
 
-    plt.plot(returns, label='returns')
-    plt.plot(mus, label='mean')
-    plt.axhline(c='k', alpha=0.5)
-    plt.plot(X[:-1, 0] / X[0, 0] - 1, c='k', alpha = 0.3, label='price')
+    #mus1 = smoothed_returns(X, alpha = alpha * 2 - alpha ** 2)
 
-    approx_price = np.cumprod(mus + 1)
-    plt.plot(approx_price / approx_price[0] - 1, c='b', alpha = 0.4, label='approx. price')
+
+    #plt.plot(returns, label='returns')
+    #plt.plot(mus, label='mean')
+    #plt.axhline(c='k', alpha=0.5)
+    plt.plot(X[-n:, 0] / X[0, 0] - 1, c='k', alpha = 0.3, label='price')
+
+    for i in range(N):
+        approx_price = np.cumprod(mus[i][-n:] + 1)
+        plt.plot(approx_price / approx_price[0] - 1, label=str(i))
+
+    for x in buys:
+        plt.axvline(x, c='g', alpha=0.5)
+
+    for x in sells:
+        plt.axvline(x, c='r', alpha=0.5)
 
     plt.legend()
     plt.show()

@@ -538,7 +538,8 @@ def evaluate_strategy(X, strategy, start = 0, current_time = 0, verbose = True):
         price = X[i, 0]
 
         if buys[i]:
-            buy_price = price
+            if buy_price is None:
+                buy_price = price
 
             amount_coin = capital_usd / price * (1 - commissions)
             capital_coin += amount_coin

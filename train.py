@@ -294,11 +294,11 @@ if __name__ == '__main__':
     # decay_per_layer = 0.6
 
     # NN model definition
-    model = RelationalMemory(mem_slots=mem_slots, head_size=head_size, input_size=input_size, num_heads=num_heads, num_blocks=num_blocks, forget_bias=1., input_bias=0.)
-    # model = FFN(input_size, decay_per_layer = decay_per_layer)
+    # model = RelationalMemory(mem_slots=mem_slots, head_size=head_size, input_size=input_size, num_heads=num_heads, num_blocks=num_blocks, forget_bias=1., input_bias=0.)
+    model = FFN(input_size, decay_per_layer = decay_per_layer)
 
     n_epochs = 20
-    print_step = max(n_epochs // 20, 1)
+    print_step = 1#max(n_epochs // 20, 1)
     lr = 0.001
     n_iter_per_file = 50
 
@@ -314,7 +314,7 @@ if __name__ == '__main__':
         commissions = commissions,
         print_step = print_step,
         save_model = True,
-        load_model = True,
+        load_model = False,
     )
 
 

@@ -211,7 +211,8 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
                        buy_threshold,
                        sell_threshold,
                        ha_threshold,
-                       c):
+                       c,
+                       alpha):
 
         maxlen = int(maxlen)
         waiting_time = int(waiting_time)
@@ -238,6 +239,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
             'sell_threshold': sell_threshold,
             'ha_threshold': ha_threshold,
             'c': c,
+            'alpha': alpha,
         }
 
         strategy = strategy_class(params, stop_loss_take_profit, restrictive)
@@ -344,5 +346,5 @@ if __name__ == '__main__':
     files.sort(key = get_time)
     # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
 
-    optimise_smoothing_strategy(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
+    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
     # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
