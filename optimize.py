@@ -1,5 +1,5 @@
 from scipy.optimize import minimize, LinearConstraint, Bounds
-from data import load_data
+from data import load_all_data
 import numpy as np
 import pandas as pd
 import glob
@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 import time
 from utils import round_to_n, get_time
 import os
-
-# TODO: optimize training hyperparameters using bayesian optimization
+from tqdm import tqdm
 
 def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
     if sells is None:
@@ -49,8 +48,8 @@ def objective_function(buys, X, initial_usd, initial_coin):
     )
     return -wealths[-1]
 
-def get_optimal_strategy(filename, sequence_length = 2001, batch_size = 30, verbose = False):
-    X_all = load_data(filename, sequence_length, 0, 1)
+def get_optimal_strategy(filenames, batch_size = 30, verbose = False):
+    X_all = load_all_data(filenames)
 
     i = 0
 
@@ -59,9 +58,10 @@ def get_optimal_strategy(filename, sequence_length = 2001, batch_size = 30, verb
 
     buys_out = []
 
-    while i < sequence_length:
+    for i in tqdm(range(0, X_all.shape[0], batch_size)):
         X = X_all[i:i+batch_size, :]
         bounds = Bounds(np.zeros(X.shape[0]), np.ones(X.shape[0]))
+        # TODO: load previous optima
         x0 = np.random.rand(X.shape[0])
 
         result = minimize(
@@ -91,7 +91,6 @@ def get_optimal_strategy(filename, sequence_length = 2001, batch_size = 30, verb
             X, buys, sells, capital_usd, capital_coin
         )
 
-        i += batch_size
 
     buys_out = np.concatenate(buys_out)
 
@@ -104,38 +103,33 @@ def get_optimal_strategy(filename, sequence_length = 2001, batch_size = 30, verb
 
     return X_all, buys_out
 
-def save_optimum(filename, buys):
+def save_optimum(coin, buys, dir):
     ser = pd.Series(buys)
 
-    t = str(get_time(filename))
-    coin = filename.split('/')[1]
-
-    dir = 'data/labels/'
-    if not os.path.exists(dir):
-        os.mkdir(dir)
-
-    dir = 'data/labels/' + coin + '/'
-    if not os.path.exists(dir):
-        os.mkdir(dir)
-
-    if not os.path.exists(dir + t + '.csv'):
-        ser.to_csv(dir + t + '.csv', header=False)
+    filename = dir + coin + '.csv'
+    ser.to_csv(filename, header=False)
 
 def save_optima(coin = None):
     if coin is None:
-        file_list = glob.glob('data/*/*.json')
+        coin_dir_list = glob.glob('data/*/')
     else:
-        file_list = glob.glob('data/' + coin + '/*.json')
+        coin_dir_list = glob.glob('data/' + coin + '/')
 
-    for filename in file_list:
-        t = str(get_time(filename))
-        coin = filename.split('/')[1]
-        dir = 'data/labels/' + coin + '/'
+    dir = 'data/labels/'
 
-        if not os.path.exists(dir + t + '.csv'):
-            X, buys = get_optimal_strategy(filename)
-            save_optimum(filename, buys)
-            print(filename, 'processed')
+    for coin_dirname in coin_dir_list:
+        if coin_dirname != dir:
+            coin = coin_dirname.split('/')[1]
+            filename = dir + coin + '.csv'
+
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+
+            if not os.path.exists(filename):
+                filenames = glob.glob(coin_dirname + '*.json')
+                X, buys = get_optimal_strategy(filenames)
+                save_optimum(coin, buys, dir)
+                print(filename, 'processed')
 
 
 def visualize_optimum(X, buys):
