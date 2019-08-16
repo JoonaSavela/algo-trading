@@ -16,8 +16,11 @@ import torch
 import torch.nn as nn
 from optimize import get_wealths
 
-def plot_labels(files, coin, n = 800):
+def get_labels(files, coin, n = None, l = 35, c = 10):
     X = load_all_data(files)
+
+    if n is None:
+        n = X.shape[0]
 
     df = pd.read_csv(
         'data/labels/' + coin + '.csv',
@@ -28,13 +31,6 @@ def plot_labels(files, coin, n = 800):
 
     buys_optim = df.values.reshape(-1)
 
-    wealths, _, _, _, _ = get_wealths(
-        X[:n, :], buys_optim
-    )
-
-    print(wealths[-1])
-
-
     diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
     idx = np.arange(n + 1)
 
@@ -44,14 +40,9 @@ def plot_labels(files, coin, n = 800):
     buys_idx = idx[buys_li]
     sells_idx = idx[sells_li]
 
-    print(buys_idx.shape[0])
-    print(sells_idx.shape[0])
-
     buys_li = buys_li.astype(float)
     sells_li = sells_li.astype(float)
 
-    l = 35
-    c = 10
     for i in range(buys_idx.shape[0]):
         buy_i = buys_idx[i]
 
@@ -100,22 +91,48 @@ def plot_labels(files, coin, n = 800):
 
     diffs_li = buys_li - sells_li
 
-    buys_li = np.zeros(diffs_li.shape[0])
-    sells_li = np.zeros(diffs_li.shape[0])
+    buy = np.zeros(diffs_li.shape[0])
+    sell = np.zeros(diffs_li.shape[0])
 
     li = diffs_li > 0
-    buys_li[li] = diffs_li[li]
+    buy[li] = diffs_li[li]
 
     li = diffs_li < 0
-    sells_li[li] = -diffs_li[li]
+    sell[li] = -diffs_li[li]
+
+    do_nothing = 1 - buy - sell
+
+    return buy, sell, do_nothing
+
+
+
+def plot_labels(files, coin, n = 800):
+    X = load_all_data(files)
+
+    df = pd.read_csv(
+        'data/labels/' + coin + '.csv',
+        index_col = 0,
+        header = None,
+        nrows = n,
+    )
+
+    buys_optim = df.values.reshape(-1)
+
+    wealths, _, _, _, _ = get_wealths(
+        X[:n, :], buys_optim
+    )
+
+    idx = np.arange(n + 1)
+
+    buy, sell, do_nothing = get_labels(files, coin, n, l = 35, c = 10)
 
     plt.style.use('seaborn')
     #plt.plot(buys_optim, label='buys')
     plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
     plt.plot(wealths * 100, c='b', alpha=0.5, label='wealth')
 
-    plt.plot(idx, buys_li, c='g', alpha=0.5)
-    plt.plot(idx, sells_li, c='r', alpha=0.5)
+    plt.plot(idx, buy, c='g', alpha=0.5)
+    plt.plot(idx, sell, c='r', alpha=0.5)
 
     plt.axhline(0.5, c='k', linestyle=':', alpha=0.75)
 
@@ -124,8 +141,9 @@ def plot_labels(files, coin, n = 800):
     plt.legend()
     plt.show()
 
-# TODO: pretrain on MLE, then train with Q-learning
-def train(files, model, n_epochs, lr):
+# TODO: pretrain on MLE, then train with Q-learning?
+# TODO: take turns training in MLE and in Q-learning?
+def train(coin, files, model, n_epochs, lr):
     X = load_all_data(files)
 
     for e in range(n_epochs):
@@ -160,6 +178,7 @@ if __name__ == '__main__':
     files.sort(key = get_time)
 
     train(
+        coin = coin,
         files = files,
         model = model,
         n_epochs = n_epochs,

@@ -208,7 +208,7 @@ if __name__ == '__main__':
     coin = 'ETH'
     improve = True
     batch_size = 30 * 1
-    commissions = 0.001
+    commissions = 0.00125
     verbose = False
 
     start_time = time.time()
