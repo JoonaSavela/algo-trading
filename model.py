@@ -12,6 +12,7 @@ class FFN(nn.Module):
 
         self.output_layer = nn.Linear(ceil(n_inputs * decay_per_layer ** n_hidden_layers), 3)
 
+    # TODO: have different outputs depending on the type of training
     def forward(self, x):
         hidden = x
         for layer in self.hidden_layers:

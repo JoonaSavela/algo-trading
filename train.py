@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from optimize import get_wealths
 
-def plot_labels(files, coin, n = 200):
+def plot_labels(files, coin, n = 800):
     X = load_all_data(files)
 
     df = pd.read_csv(
@@ -34,13 +34,97 @@ def plot_labels(files, coin, n = 200):
 
     print(wealths[-1])
 
+
+    diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
+    idx = np.arange(n + 1)
+
+    buys_li = diffs == 1
+    sells_li = diffs == -1
+
+    buys_idx = idx[buys_li]
+    sells_idx = idx[sells_li]
+
+    print(buys_idx.shape[0])
+    print(sells_idx.shape[0])
+
+    buys_li = buys_li.astype(float)
+    sells_li = sells_li.astype(float)
+
+    l = 35
+    c = 10
+    for i in range(buys_idx.shape[0]):
+        buy_i = buys_idx[i]
+
+        start_i = max(0, buy_i - l)
+        end_i = min(n - 1, buy_i + l)
+
+        if i > 0:
+            start_i = max(start_i, (buy_i + buys_idx[i - 1]) // 2)
+            start_i = max(start_i, sells_idx[i - 1])
+
+        if i < buys_idx.shape[0] - 1:
+            end_i = min(end_i, (buy_i + buys_idx[i + 1]) // 2)
+            end_i = min(end_i, sells_idx[i])
+
+        nearby_idx = np.arange(start_i, end_i)
+        nearby_prices = X[nearby_idx, 0]
+        min_i = np.argmin(nearby_prices)
+        min_price = nearby_prices[min_i]
+        max_price = np.max(nearby_prices)
+
+        values = np.exp(- c * (max_price / min_price - 1) * (nearby_idx - nearby_idx[min_i]) ** 2)
+        buys_li[start_i:end_i] = values
+
+    for i in range(sells_idx.shape[0]):
+        sell_i = sells_idx[i]
+
+        start_i = max(0, sell_i - l)
+        end_i = min(n - 1, sell_i + l)
+
+        if i > 0:
+            start_i = max(start_i, (sell_i + sells_idx[i - 1]) // 2)
+            start_i = max(start_i, buys_idx[i])
+
+        if i < sells_idx.shape[0] - 1:
+            end_i = min(end_i, (sell_i + sells_idx[i + 1]) // 2)
+            end_i = min(end_i, buys_idx[i + 1])
+
+        nearby_idx = np.arange(start_i, end_i)
+        nearby_prices = X[nearby_idx, 0]
+        max_i = np.argmax(nearby_prices)
+        max_price = nearby_prices[max_i]
+        min_price = np.min(nearby_prices)
+
+        values = np.exp(- c * (max_price / min_price - 1) * (nearby_idx - nearby_idx[max_i]) ** 2)
+        sells_li[start_i:end_i] = values
+
+    diffs_li = buys_li - sells_li
+
+    buys_li = np.zeros(diffs_li.shape[0])
+    sells_li = np.zeros(diffs_li.shape[0])
+
+    li = diffs_li > 0
+    buys_li[li] = diffs_li[li]
+
+    li = diffs_li < 0
+    sells_li[li] = -diffs_li[li]
+
     plt.style.use('seaborn')
-    plt.plot(buys_optim, label='buys')
+    #plt.plot(buys_optim, label='buys')
     plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
-    plt.plot(wealths * 100, label='wealth')
+    plt.plot(wealths * 100, c='b', alpha=0.5, label='wealth')
+
+    plt.plot(idx, buys_li, c='g', alpha=0.5)
+    plt.plot(idx, sells_li, c='r', alpha=0.5)
+
+    plt.axhline(0.5, c='k', linestyle=':', alpha=0.75)
+
+    #plt.plot(idx, buys_li - sells_li, c='m', alpha=0.5)
+
     plt.legend()
     plt.show()
 
+# TODO: pretrain on MLE, then train with Q-learning
 def train(files, model, n_epochs, lr):
     X = load_all_data(files)
 
@@ -51,6 +135,11 @@ def train(files, model, n_epochs, lr):
 if __name__ == '__main__':
     commissions = 0.00075
 
+    # inputs:
+    #   - state:
+    #       -
+    #   - obs:
+    #       -
     inputs = {
         'close',
 
