@@ -16,7 +16,8 @@ import torch
 import torch.nn as nn
 from optimize import get_wealths
 
-def get_labels(files, coin, n = None, l = 35, c = 10):
+# TODO: make labels skewed to the right
+def get_labels(files, coin, n = None, l = 35, c = 10, separate = False):
     X = load_all_data(files)
 
     if n is None:
@@ -100,14 +101,25 @@ def get_labels(files, coin, n = None, l = 35, c = 10):
     li = diffs_li < 0
     sell[li] = -diffs_li[li]
 
+    buy = buy[:-1]
+    sell = sell[:-1]
+
     do_nothing = 1 - buy - sell
 
-    return buy, sell, do_nothing
+    if separate:
+        return buy, sell, do_nothing
+
+    labels = np.stack([buy, sell, do_nothing], axis = 1)
+
+    return labels
 
 
 
-def plot_labels(files, coin, n = 800):
+def plot_labels(files, coin, n = None):
     X = load_all_data(files)
+
+    if n is None:
+        n = X.shape[0]
 
     df = pd.read_csv(
         'data/labels/' + coin + '.csv',
@@ -122,9 +134,9 @@ def plot_labels(files, coin, n = 800):
         X[:n, :], buys_optim
     )
 
-    idx = np.arange(n + 1)
+    idx = np.arange(n)
 
-    buy, sell, do_nothing = get_labels(files, coin, n, l = 35, c = 10)
+    buy, sell, do_nothing = get_labels(files, coin, n, l = 35, c = 10, separate = True)
 
     plt.style.use('seaborn')
     #plt.plot(buys_optim, label='buys')
@@ -141,33 +153,86 @@ def plot_labels(files, coin, n = 800):
     plt.legend()
     plt.show()
 
+
+
 # TODO: pretrain on MLE, then train with Q-learning?
 # TODO: take turns training in MLE and in Q-learning?
-def train(coin, files, model, n_epochs, lr):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step):
     X = load_all_data(files)
 
+    state = init_state(inputs, batch_size = batch_size)
+
+    obs, N = get_obs_input(X, inputs, params)
+
+    labels = get_labels(files, coin)
+    labels = torch.from_numpy(labels[-N:, :])
+
+    # discard some of the last values; their labels are bad
+    N_discard = 10
+    obs = obs[:-N_discard, :]
+    labels = labels[:-N_discard, :]
+    N -= N_discard
+
+    criterion = nn.BCELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
     for e in range(n_epochs):
-        break
+        #i = torch.randint(N - sequence_length, (batch_size,))
+        i = torch.zeros(batch_size).long()
+        for j in range(sequence_length):
+            optimizer.zero_grad()
+
+            inp = torch.cat([state, obs[i + j, :]], dim = -1)
+            print(inp.shape)
+            break
+
 
 
 if __name__ == '__main__':
     commissions = 0.00075
 
     # inputs:
+    #   note: all prices (and stds) are relative to a running average price
     #   - state:
-    #       -
+    #       - capital_usd
+    #       - capital_coin (in usd)
+    #       - time since bought (or -1)
+    #       - price when bought (or -1)
+    #       - other data at time of bought?
     #   - obs:
-    #       -
+    #       - close, high, low, open (not all?)
+    #       - running std, or bollinger band width
+    #       - sma, alligator stuff?
+    #       - smoothed returns
+    #       - stoch
+    #       - ha
     inputs = {
-        'close',
-
+        # states
+        'capital_usd': 1,
+        'capital_coin': 1,
+        'timedelta': 1,
+        'buy_price': 1,
+        # obs
+        'price': 1,
+        'mus': 3,
+        'std': 2,
+        'ma': 2,
+        'ha': 4,
     }
 
-    input_size = len(inputs)
+    params = {
+        'alpha': 0.8,
+        'std_window_min_max': [60, 600],
+        'ma_window_min_max': [60, 1200],
+    }
+
+    sequence_length = 120
+
     lr = 0.001
+    batch_size = 1
 
     # NN model definition
-    model = FFN(input_size)
+    model = FFN(inputs)
 
     n_epochs = 20
     print_step = 1#max(n_epochs // 20, 1)
@@ -177,12 +242,17 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
+    #plot_labels(files, coin)
+
     train(
         coin = coin,
         files = files,
+        inputs = inputs,
+        params = params,
         model = model,
         n_epochs = n_epochs,
         lr = lr,
+        batch_size = batch_size,
+        sequence_length = sequence_length,
+        print_step = print_step,
     )
-
-    plot_labels(files, coin)

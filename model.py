@@ -3,10 +3,17 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 from math import ceil
+import hashlib
+import json
 
 class FFN(nn.Module):
-    def __init__(self, n_inputs, n_hidden_layers = 2, decay_per_layer = 0.75):
+    def __init__(self, inputs, n_hidden_layers = 2, decay_per_layer = 0.75):
         super(FFN, self).__init__()
+        n_inputs = sum(list(inputs.values()))
+
+        hash_object = hashlib.md5(json.dumps(inputs).encode())
+        self.name = hash_object.hexdigest()
+        #print(self.name)
 
         self.hidden_layers = nn.ModuleList([nn.Linear(ceil(n_inputs * decay_per_layer ** i), ceil(n_inputs * decay_per_layer ** (i + 1))) for i in range(n_hidden_layers)])
 

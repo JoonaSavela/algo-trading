@@ -12,7 +12,7 @@ def aggregate(X, n = 5):
 
     for i in range(aggregated_X.shape[0]):
         js = np.arange(i * n, (i + 1) * n)
-        
+
         aggregated_X[i, 0] = X[js[-1], 0] # close
         aggregated_X[i, 1] = np.max(X[js, 1]) # high
         aggregated_X[i, 2] = np.min(X[js, 2]) # low
@@ -69,74 +69,6 @@ def heikin_ashi(X):
         res[i, :] = [ha_close, ha_open, ha_high, ha_low]
     return res
 
-def calc_actions(model, X, sequence_length, latency, window_size, k, initial_capital = 1000, commissions = 0.00075):
-    capital_usd = initial_capital
-    capital_coin = 0
-
-    wealths = [initial_capital]
-    # capital_usds = [capital_usd]
-    # capital_coins = [capital_coin]
-    buy_amounts = []
-    sell_amounts = []
-
-    # model_memory = model.initial_state(batch_size=1)
-
-    stoch = stochastic_oscillator(X, window_size, k)
-
-    tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-    ma = sma(tp, window_size)
-    stds = std(tp, window_size)
-
-    X = X[-sequence_length:, :]
-    ma = ma[-sequence_length:] / X[0, 0] - 1
-    stds = stds[-sequence_length:] / X[0, 0]
-
-    memory = model.initial_state(batch_size = 1)
-
-    for i in range(sequence_length):
-        inp = X[i, :4] / X[0, :4] - 1
-        # inp = X[i, :] / X[0, :] - 1
-        inp = np.append(inp, [stoch[i] * 2 - 1, ma[i], stds[i]])
-        inp = torch.from_numpy(inp.astype(np.float32)).view(1, 1, -1)
-        logits, memory = model(inp, memory)
-        BUY, SELL, DO_NOTHING = tuple(logits.view(3).data.numpy())
-        price = X[i + latency, 0]
-
-        amount_coin_buy = BUY * capital_usd / price * (1 - commissions)
-        amount_usd_buy = capital_usd * BUY
-
-        amount_usd_sell = SELL * capital_coin * price * (1 - commissions)
-        amount_coin_sell = capital_coin * SELL
-
-        capital_coin += amount_coin_buy - amount_coin_sell
-        capital_usd += amount_usd_sell - amount_usd_buy
-
-        buy_amounts.append(amount_usd_buy)
-        sell_amounts.append(amount_usd_sell)
-
-        wealths.append(capital_usd + capital_coin * price)
-        # capital_usds.append(capital_usd)
-        # capital_coins.append(capital_coin * price)
-
-    price = X[-1, 0]
-    amount_usd = capital_coin * price * (1 - commissions)
-    capital_usd += amount_usd
-    sell_amounts.append(amount_usd)
-    capital_coin = 0
-
-    wealths.append(capital_usd)
-    # capital_usds.append(capital_usd)
-    # capital_coins.append(capital_coin * price)
-
-    wealths = np.array(wealths) / wealths[0] - 1
-    # capital_usds = np.array(capital_usds) / initial_capital
-    # capital_coins = np.array(capital_coins) / initial_capital
-
-    return wealths, buy_amounts, sell_amounts
-
-def calc_reward(wealths, buy_amounts, initial_capital):
-    reward = np.average(wealths, weights=range(wealths.shape[0])) / (np.sum(buy_amounts) / initial_capital + 1)
-    return reward
 
 def round_to_n(x, n = 2):
     if x == 0: return x
@@ -151,20 +83,91 @@ def floor_to_n(x, n = 2):
     res = int(res) if abs(res) >= 10**(n - 1) else res
     return res
 
-def calc_metrics(reward, wealths, buy_amounts, sell_amounts, initial_capital, first_price, last_price):
-    metrics = {}
-    metrics['reward'] = reward
-    metrics['profit'] = wealths[-1]
-    metrics['max_profit'] = np.max(wealths)
-    metrics['min_profit'] = np.min(wealths)
-    metrics['buys'] = np.sum(buy_amounts) / initial_capital
-    metrics['sells'] = np.sum(sell_amounts) / initial_capital
-    metrics['benchmark_profit'] = last_price / first_price - 1
-    for key, value in metrics.items():
-        metrics[key] = round_to_n(value)
-    return metrics
 
 def get_time(filename):
     split1 = filename.split('/')
     split2 = split1[2].split('.')
     return int(split2[0])
+
+
+def get_obs_input(X, inputs, params):
+    obs = []
+
+    if 'ma' not in inputs:
+        raise ValueError('"ma" must be included in the parameters in order to normalize the prices')
+    else:
+        ma_window_min_max = params['ma_window_min_max']
+        if inputs['ma'] == 0:
+            window_sizes = ma_window_min_max[1:]
+        else:
+            window_sizes = np.round(
+                np.linspace(ma_window_min_max[0], ma_window_min_max[1], inputs['ma'] + 1)
+            ).astype(int)
+
+        tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
+        ma_ref = sma(tp, window_sizes[-1])
+
+        N = ma_ref.shape[0]
+
+        for w in window_sizes[:-1]:
+            ma = sma(tp, w)[-N:] / ma_ref
+            obs.append(ma)
+
+    if 'price' in inputs:
+        prices = X[-N:, :inputs['price']]
+        tmp = np.split(prices, inputs['price'], axis = 1)
+        for i in range(len(tmp)):
+            tmp[i] = tmp[i].reshape(-1) / ma_ref
+        obs.extend(tmp)
+
+    if 'mus' in inputs:
+        returns = X[1:, 0] / X[:-1, 0] - 1
+
+        r = returns
+
+        for i in range(inputs['mus']):
+            r = smoothed_returns(np.cumprod(r + 1).reshape(-1, 1), alpha = params['alpha'])
+            obs.append(r[-N:])
+
+    if 'std' in inputs:
+        std_window_min_max = params['std_window_min_max']
+        window_sizes = np.round(
+            np.linspace(std_window_min_max[0], std_window_min_max[1], inputs['std'])
+        ).astype(int)
+
+        for w in window_sizes:
+            sd = std(tp, w)[-N:] / ma_ref
+            obs.append(sd)
+
+    if 'ha' in inputs:
+        ha = heikin_ashi(X)[-N:, :inputs['ha']]
+        tmp = np.split(ha, inputs['ha'], axis = 1)
+        for i in range(len(tmp)):
+            tmp[i] = tmp[i].reshape(-1) / ma_ref
+        obs.extend(tmp)
+
+    obs = np.stack(obs, axis = 1)
+    obs = torch.from_numpy(obs).type(torch.float32)
+
+    #print(obs.shape)
+
+    return obs, N
+
+def init_state(inputs, batch_size):
+    state = []
+
+    capital_usd = 1.0
+    state.append(capital_usd)
+
+    capital_coin = 0.0
+    state.append(capital_coin)
+
+    timedelta = -1.0
+    state.append(timedelta)
+
+    buy_price = -1.0
+    state.append(buy_price)
+
+    state = torch.tensor(state).view(1, -1).repeat(batch_size, 1).type(torch.float32)
+
+    return state
