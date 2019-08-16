@@ -48,21 +48,40 @@ def objective_function(buys, X, initial_usd, initial_coin):
     )
     return -wealths[-1]
 
-def get_optimal_strategy(filenames, batch_size = 30, verbose = False):
-    X_all = load_all_data(filenames)
+def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename = None):
+    X_all = load_all_data(coin_filenames)
 
-    i = 0
+    i_start = 0
 
-    capital_usd = 1000
+    initial_capital = 1000
+    capital_usd = initial_capital
     capital_coin = 0
 
     buys_out = []
 
-    for i in tqdm(range(0, X_all.shape[0], batch_size)):
+    if filename is not None:
+        df = pd.read_csv(filename, index_col = 0, header = None)
+        if not improve:
+            i_start = len(df)
+            buys = df.values.reshape(-1)
+            sells = 1 - buys
+            buys_out.append(buys)
+
+            _, capital_usd, capital_coin, _, _ = get_wealths(
+                X_all[:len(df), :], buys, sells, capital_usd, capital_coin
+            )
+
+            print('Wealth: {}'.format((capital_usd + capital_coin * X_all[len(df) - 1, 0]) / initial_capital))
+
+
+    for i in tqdm(range(i_start, X_all.shape[0], batch_size)):
         X = X_all[i:i+batch_size, :]
         bounds = Bounds(np.zeros(X.shape[0]), np.ones(X.shape[0]))
-        # TODO: load previous optima
-        x0 = np.random.rand(X.shape[0])
+
+        if improve and i + batch_size <= len(df):
+            x0 = df.values.reshape(-1)[i:i+batch_size]
+        else:
+            x0 = np.random.rand(X.shape[0])
 
         result = minimize(
             fun = objective_function,
@@ -109,7 +128,7 @@ def save_optimum(coin, buys, dir):
     filename = dir + coin + '.csv'
     ser.to_csv(filename, header=False)
 
-def save_optima(coin = None):
+def save_optima(coin = None, improve = False, batch_size = 30, verbose = False):
     if coin is None:
         coin_dir_list = glob.glob('data/*/')
     else:
@@ -126,10 +145,16 @@ def save_optima(coin = None):
                 os.mkdir(dir)
 
             if not os.path.exists(filename):
-                filenames = glob.glob(coin_dirname + '*.json')
-                X, buys = get_optimal_strategy(filenames)
+                coin_filenames = glob.glob(coin_dirname + '*.json')
+                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, verbose)
                 save_optimum(coin, buys, dir)
                 print(filename, 'processed')
+            else:
+                coin_filenames = glob.glob(coin_dirname + '*.json')
+                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename)
+                save_optimum(coin, buys, dir)
+                print(filename, 'processed')
+
 
 
 def visualize_optimum(X, buys):
@@ -143,6 +168,10 @@ def visualize_optimum(X, buys):
     plt.show()
 
 if __name__ == '__main__':
+    improve = False
+    batch_size = 30 * 4
+    verbose = False
+
     start_time = time.time()
-    save_optima()
+    save_optima(improve = improve, batch_size = batch_size, verbose = verbose)
     print('Time taken:', round_to_n(time.time() - start_time), 'seconds')
