@@ -8,6 +8,7 @@ import time
 from utils import round_to_n, get_time
 import os
 from tqdm import tqdm
+import copy
 
 def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
     if sells is None:
@@ -41,14 +42,46 @@ def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, com
 
     return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
 
-def objective_function(buys, X, initial_usd, initial_coin):
+def objective_function(buys, X, initial_usd, initial_coin, commissions):
     sells = 1 - buys
     wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-        X, buys, sells, initial_usd, initial_coin
+        X, buys, sells, initial_usd, initial_coin, commissions
     )
     return -wealths[-1]
 
-def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename = None):
+def filter_buys(X, buys, commissions):
+    res = copy.deepcopy(np.round(buys))
+
+    diffs = np.diff(np.concatenate([np.array([0]), res, np.array([0])]))
+    idx = np.arange(buys.shape[0] + 1)
+    buys_idx = idx[diffs == 1]
+    sells_idx = idx[diffs == -1]
+
+    for i in range(buys_idx.shape[0]):
+        buy_i = min(buys_idx[i], X.shape[0] - 1)
+        sell_i = min(sells_idx[i], X.shape[0] - 1)
+
+        profit = X[sell_i, 0] / X[buy_i, 0] - 1 - commissions * 2
+
+        if profit < 0:
+            res[buy_i:sell_i] = 0
+
+    diffs = np.diff(np.concatenate([np.array([0]), res, np.array([0])]))
+    buys_idx = idx[diffs == 1]
+    sells_idx = idx[diffs == -1]
+
+    for i in range(buys_idx.shape[0] - 1):
+        buy_i = min(buys_idx[i + 1], X.shape[0] - 1)
+        sell_i = min(sells_idx[i], X.shape[0] - 1)
+
+        lost_profit = X[buy_i, 0] / X[sell_i, 0] - 1 + commissions * 2
+
+        if lost_profit > 0:
+            res[sell_i:buy_i] = 1
+
+    return res
+
+def get_optimal_strategy(coin_filenames, improve, batch_size, commissions, verbose, filename = None):
     X_all = load_all_data(coin_filenames)
 
     i_start = 0
@@ -59,7 +92,7 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename 
 
     buys_out = []
 
-    if filename is not None:
+    if filename is not None and os.path.exists(filename):
         df = pd.read_csv(filename, index_col = 0, header = None)
         if not improve:
             i_start = len(df)
@@ -72,7 +105,8 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename 
             )
 
             print('Wealth: {}'.format((capital_usd + capital_coin * X_all[len(df) - 1, 0]) / initial_capital))
-
+    else:
+        improve = False
 
     for i in tqdm(range(i_start, X_all.shape[0], batch_size)):
         X = X_all[i:i+batch_size, :]
@@ -86,7 +120,7 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename 
         result = minimize(
             fun = objective_function,
             x0 = x0,
-            args = (X, capital_usd, capital_coin),
+            args = (X, capital_usd, capital_coin, commissions),
             bounds = bounds
         )
 
@@ -94,7 +128,7 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename 
             result = minimize(
                 fun = objective_function,
                 x0 = result.x,
-                args = (X, capital_usd, capital_coin),
+                args = (X, capital_usd, capital_coin, commissions),
                 bounds = bounds
             )
 
@@ -113,11 +147,12 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename 
 
     buys_out = np.concatenate(buys_out)
 
-    wealths, _, _, _, _ = get_wealths(
-        X_all, buys_out
-    )
+    buys_out = filter_buys(X_all, buys_out, commissions)
 
     if verbose:
+        wealths, _, _, _, _ = get_wealths(
+            X_all, buys_out
+        )
         print(wealths[-1], X_all[-1, 0] / X_all[0, 0] - 1)
 
     return X_all, buys_out
@@ -128,7 +163,7 @@ def save_optimum(coin, buys, dir):
     filename = dir + coin + '.csv'
     ser.to_csv(filename, header=False)
 
-def save_optima(coin = None, improve = False, batch_size = 30, verbose = False):
+def save_optima(coin = None, improve = False, batch_size = 30, commissions = 0.00075, verbose = False):
     if coin is None:
         coin_dir_list = glob.glob('data/*/')
     else:
@@ -146,12 +181,12 @@ def save_optima(coin = None, improve = False, batch_size = 30, verbose = False):
 
             if not os.path.exists(filename):
                 coin_filenames = glob.glob(coin_dirname + '*.json')
-                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, verbose)
+                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, commissions, verbose)
                 save_optimum(coin, buys, dir)
                 print(filename, 'processed')
             else:
                 coin_filenames = glob.glob(coin_dirname + '*.json')
-                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, verbose, filename)
+                X, buys = get_optimal_strategy(coin_filenames, improve, batch_size, commissions, verbose, filename)
                 save_optimum(coin, buys, dir)
                 print(filename, 'processed')
 
@@ -163,15 +198,25 @@ def visualize_optimum(X, buys):
         X, buys, sells
     )
 
-    plt.plot(range(X.shape[0]), X[:, 0] / X[0, 0])
-    plt.plot(range(X.shape[0]), wealths + 1)
+    plt.style.use('seaborn')
+    plt.plot(X[:, 0] / X[0, 0])
+    plt.plot(wealths + 1)
     plt.show()
 
 if __name__ == '__main__':
-    improve = False
-    batch_size = 30 * 4
+    #coin = None
+    coin = 'ETH'
+    improve = True
+    batch_size = 30 * 1
+    commissions = 0.001
     verbose = False
 
     start_time = time.time()
-    save_optima(improve = improve, batch_size = batch_size, verbose = verbose)
+    save_optima(
+        coin = coin,
+        improve = improve,
+        batch_size = batch_size,
+        commissions = commissions,
+        verbose = verbose
+    )
     print('Time taken:', round_to_n(time.time() - start_time), 'seconds')

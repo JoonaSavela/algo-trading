@@ -7,17 +7,39 @@ import pandas as pd
 import json
 import glob
 import matplotlib.pyplot as plt
-from model import RelationalMemory, FFN
-from data import load_data
-from utils import calc_actions, calc_reward, calc_metrics
+from model import *
+from data import load_all_data
 from utils import *
 from sklearn.model_selection import train_test_split
-from evaluate import evaluate
 import copy
 import torch
 import torch.nn as nn
 from optimize import get_wealths
 
+def plot_labels(files, coin, n = 200):
+    X = load_all_data(files)
+
+    df = pd.read_csv(
+        'data/labels/' + coin + '.csv',
+        index_col = 0,
+        header = None,
+        nrows = n,
+    )
+
+    buys_optim = df.values.reshape(-1)
+
+    wealths, _, _, _, _ = get_wealths(
+        X[:n, :], buys_optim
+    )
+
+    print(wealths[-1])
+
+    plt.style.use('seaborn')
+    plt.plot(buys_optim, label='buys')
+    plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
+    plt.plot(wealths * 100, label='wealth')
+    plt.legend()
+    plt.show()
 
 def train(files, model, n_epochs, lr):
     X = load_all_data(files)
@@ -43,7 +65,8 @@ if __name__ == '__main__':
     n_epochs = 20
     print_step = 1#max(n_epochs // 20, 1)
 
-    dir = 'data/ETH/'
+    coin = 'ETH'
+    dir = 'data/{}/'.format(coin)
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
@@ -53,3 +76,5 @@ if __name__ == '__main__':
         n_epochs = n_epochs,
         lr = lr,
     )
+
+    plot_labels(files, coin)
