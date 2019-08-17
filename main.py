@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from utils import stochastic_oscillator, heikin_ashi, sma, std
-from model import RelationalMemory
 from data import get_and_save_all, load_data, load_all_data
 import numpy as np
 import json
@@ -55,7 +54,7 @@ def main():
 
     returns = X[1:, 0] / X[:-1, 0] - 1
 
-    alpha = 0.92
+    alpha = 0.8
     mus = []
 
     r = returns
@@ -88,8 +87,12 @@ def main():
     i = 0
     j = 0
 
+    new_buys = []
+    new_sells = []
+
     while i < buys.shape[0] and j < sells.shape[0]:
-        break # TODO: filter some buys and sells out
+        new_buys.append(buys[i])
+        i += 1
 
 
     #mus1 = smoothed_returns(X, alpha = alpha * 2 - alpha ** 2)

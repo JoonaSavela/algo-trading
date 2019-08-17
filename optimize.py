@@ -207,7 +207,7 @@ if __name__ == '__main__':
     #coin = None
     coin = 'ETH'
     improve = True
-    batch_size = 30 * 1
+    batch_size = 30 * 3
     commissions = 0.00125
     verbose = False
 

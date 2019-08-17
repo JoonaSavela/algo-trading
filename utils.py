@@ -146,12 +146,25 @@ def get_obs_input(X, inputs, params):
             tmp[i] = tmp[i].reshape(-1) / ma_ref
         obs.extend(tmp)
 
+    if 'stoch' in inputs:
+        stoch_window_min_max = params['stoch_window_min_max']
+        window_sizes = np.round(
+            np.linspace(stoch_window_min_max[0], stoch_window_min_max[1], inputs['stoch'])
+        ).astype(int)
+
+        for w in window_sizes:
+            stoch = stochastic_oscillator(X, w)[-N:]
+            obs.append(stoch)
+
+
     obs = np.stack(obs, axis = 1)
     obs = torch.from_numpy(obs).type(torch.float32)
 
+    ma_ref = torch.from_numpy(ma_ref).type(torch.float32)
+
     #print(obs.shape)
 
-    return obs, N
+    return obs, N, ma_ref
 
 def init_state(inputs, batch_size):
     state = []
