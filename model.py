@@ -5,12 +5,16 @@ import numpy as np
 from math import ceil
 import hashlib
 import json
+from collections import namedtuple, deque
+import random
 
 class FFN(nn.Module):
-    def __init__(self, inputs, batch_size, n_hidden_layers = 4, decay_per_layer = 0.85):
+    def __init__(self, inputs, batch_size, use_lstm = True, Qlearn = False, n_hidden_layers = 4, decay_per_layer = 0.85):
         super(FFN, self).__init__()
         self.n_inputs = sum(list(inputs.values()))# - 4
         self.batch_size = batch_size
+        self.use_lstm = use_lstm
+        self.Qlearn = Qlearn
 
         hash_object = hashlib.md5(json.dumps(inputs).encode())
         self.name = hash_object.hexdigest()
@@ -18,8 +22,9 @@ class FFN(nn.Module):
 
         self.dropout = nn.Dropout(0.25)
 
-        self.lstm = nn.LSTM(self.n_inputs, self.n_inputs)
-        self.state = (torch.randn(1, self.batch_size, self.n_inputs), torch.randn(1, self.batch_size, self.n_inputs))
+        if self.use_lstm:
+            self.lstm = nn.LSTM(self.n_inputs, self.n_inputs)
+            self.state = (torch.randn(1, self.batch_size, self.n_inputs), torch.randn(1, self.batch_size, self.n_inputs))
 
         self.hidden_layers = nn.ModuleList([nn.Linear(ceil(self.n_inputs * decay_per_layer ** i), ceil(self.n_inputs * decay_per_layer ** (i + 1))) for i in range(n_hidden_layers)])
 
@@ -30,12 +35,37 @@ class FFN(nn.Module):
             batch_size = self.batch_size
         self.state = (torch.randn(1, batch_size, self.n_inputs), torch.randn(1, batch_size, self.n_inputs))
 
-    # TODO: have different outputs depending on the type of training
     def forward(self, x):
-        hidden, self.state = self.lstm(x, self.state)
+        if self.use_lstm:
+            hidden, self.state = self.lstm(x, self.state)
+        else:
+            hidden = x
+
         for layer in self.hidden_layers:
             hidden = self.dropout(layer(hidden))
             hidden = F.leaky_relu(hidden)
+
         output = self.output_layer(hidden)
-        output = F.softmax(output, dim=-1)
+        if not self.Qlearn:
+            output = F.softmax(output, dim=-1)
+
         return output
+
+
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'next_state', 'reward'))
+
+
+class ReplayMemory(object):
+    def __init__(self, capacity):
+        self.memory = deque(maxlen=capacity)
+
+    def push(self, *args):
+        """Saves a transition."""
+        self.memory.append(Transition(*args))
+
+    def sample(self, batch_size):
+        return random.sample(self.memory, batch_size)
+
+    def __len__(self):
+        return len(self.memory)

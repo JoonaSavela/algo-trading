@@ -166,13 +166,13 @@ def get_obs_input(X, inputs, params):
 
     return obs, N, ma_ref
 
-def init_state(inputs, batch_size):
+def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
     state = []
 
-    capital_usd = 1.0
+    capital_usd = initial_usd
     state.append(capital_usd)
 
-    capital_coin = 0.0
+    capital_coin = initial_coin
     state.append(capital_coin)
 
     timedelta = -1.0

@@ -15,8 +15,8 @@ import copy
 import torch
 import torch.nn as nn
 from optimize import get_wealths
+import math
 
-# TODO: make labels skewed to the right
 # TODO: reduce repetition
 # TODO: get the capitals as well, feed them to the initial states
 #       - get also buy prices and timedeltas?
@@ -121,7 +121,6 @@ def get_labels(files, coin, n = None, l = 75, c = 2, skew = 0.8, separate = Fals
     return labels
 
 
-
 def plot_labels(files, coin, n = 600):
     X = load_all_data(files)
 
@@ -164,23 +163,19 @@ def plot_labels(files, coin, n = 600):
     plt.show()
 
 
-def update_state(out, state, price, ma_ref, commissions, eps = 0.1):
+
+BUY, SELL, DO_NOTHING = 0, 1, 2
+
+def update_state(action, state, price, ma_ref, commissions):
     capital_usd = state[:, 0]
     capital_coin = state[:, 1]
     timedelta = state[:, 2]
     buy_price = state[:, 3]
 
-    BUY = out[:, 0]
-    SELL = out[:, 1]
-    DO_NOTHING = out[:, 2]
+    li1 = (action == BUY) & (buy_price == -1)
+    li2 = (action == SELL) & (buy_price != -1)
 
-    capital_coin_in_usd = capital_coin * price
-    total_wealth = capital_usd + capital_coin_in_usd
-
-    li1 = (DO_NOTHING < 1 - eps) & (capital_usd / total_wealth > eps) & (BUY * capital_usd > SELL * capital_coin_in_usd)
-    li2 = (DO_NOTHING < 1 - eps) & (capital_coin_in_usd / total_wealth > eps) & (BUY * capital_usd < SELL * capital_coin_in_usd)
     li3 = timedelta != -1
-
     timedelta[li3] += 1
 
     timedelta[li1] = 0
@@ -189,24 +184,21 @@ def update_state(out, state, price, ma_ref, commissions, eps = 0.1):
     timedelta[li2] = -1
     buy_price[li2] = -1
 
-    amount_usd_buy = capital_usd * BUY
-    amount_coin_buy = amount_usd_buy / price * (1 - commissions)
+    capital_coin[li1] = capital_usd[li1] / price[li1] * (1 - commissions)
+    capital_usd[li1] = 0
 
-    amount_coin_sell = capital_coin * SELL
-    amount_usd_sell = amount_coin_sell * price * (1 - commissions)
-
-    capital_coin += amount_coin_buy - amount_coin_sell
-    capital_usd += amount_usd_sell - amount_usd_buy
+    capital_usd[li2] = capital_coin[li2] * price[li2] * (1 - commissions)
+    capital_coin[li2] = 0
 
     state = torch.stack([capital_usd, capital_coin, timedelta, buy_price], dim = 1)
 
     return state
 
 
-# TODO: pretrain on MLE, then train with Q-learning?
-# TODO: take turns training in MLE and in Q-learning?
 def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions):
     X = load_all_data(files)
+
+    initial_usd = 1000
 
     obs, N, ma_ref = get_obs_input(X, inputs, params)
     X = X[-N:, :]
@@ -226,7 +218,8 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     prices = prices[:-N_discard]
     N -= N_discard
 
-    N_test = sequence_length
+    # Get a test set
+    N_test = sequence_length * 2
     # print('N test: {}'.format(N_test))
     N -= N_test
 
@@ -240,82 +233,67 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for e in range(n_epochs):
-        i = torch.randint(N - sequence_length, (batch_size,))
-        # i = torch.zeros(batch_size).long()# + 1
+        t = torch.randint(N - sequence_length, (batch_size,))
+        # t = torch.zeros(batch_size).long()# + 1
 
-        # state = init_state(inputs, batch_size = batch_size)
-        model.init_state()
+        state = init_state(inputs, batch_size, initial_usd = initial_usd)
 
+        profits = []
         losses = []
 
-        optimizer.zero_grad()
+        for seq_i in range(sequence_length):
+            profits.append(((state[:, 0] + state[:, 1] * prices[t + seq_i]) / initial_usd).prod() ** (1 / batch_size))
+            optimizer.zero_grad()
 
-        # for j in range(sequence_length):
+            inp = torch.cat([state, obs[t + seq_i, :]], dim = 1).detach()
 
-        inp = []
-        for ii in i:
-            inp.append(obs[ii:ii+sequence_length, :])
-        inp = torch.stack(inp, dim=1).detach()
-        # inp = torch.cat([state, obs[i + j, :]], dim = -1).unsqueeze(0).detach()
+            out = model(inp)
+            target = labels[t + seq_i, :]
 
-        out = model(inp)
-        # target = labels[i + j, :]
-        target = []
-        for ii in i:
-            target.append(labels[ii:ii+sequence_length, :])
-        target = torch.stack(target, dim=1)
+            loss = criterion(out, target)
 
-        loss = criterion(out, target)
+            loss.backward()
+            losses.append(loss.item())
 
-        loss.backward()
-        losses.append(loss.item())
+            optimizer.step()
 
-        # state = update_state(out.detach(), state.detach(), prices[i + j], ma_ref[i + j], commissions)
+            action = out.max(dim = 1)[1].view(-1)
+            state = update_state(action, state, prices[t + seq_i], ma_ref[t + seq_i], commissions)
 
-        optimizer.step()
+        profits = torch.stack(profits)
 
         if e % print_step == 0:
-            benchmark_profits = []
-            profits = []
-            # optim_profits = []
-
-            for b in range(batch_size):
-                benchmark_profits.append(X[i[b] + sequence_length - 1, 0] / X[i[b], 0])
-
-                buys = out[:, b, 0].detach().numpy()
-                sells = out[:, b, 1].detach().numpy()
-                wealths, _, _, _, _ = get_wealths(
-                    X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
-                )
-                profits.append(wealths[-1] + 1)
-
             n_round = 4
 
-            # print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
-            #     e,
-            #     n_epochs,
-            #     round_to_n(torch.tensor(losses).mean().item(), n_round),
-            #     round_to_n(state[:, :2].sum(dim = 1).prod().item() ** (1 / batch_size), n_round),
-            #     round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
-            # ))
-            print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
+            print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}]'.format(
                 e,
                 n_epochs,
                 round_to_n(torch.tensor(losses).mean().item(), n_round),
-                round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round),
-                round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
+                round_to_n(profits[-1].item(), n_round),
             ))
-            # print(out[0])
 
     model.eval()
-    model.init_state(1)
-    inp = obs_test.unsqueeze(1)
-    out = model(inp)
+    state = init_state(inputs, 1, initial_usd = initial_usd)
 
-    buys = out[:, 0, 0].detach().numpy()
-    sells = out[:, 0, 1].detach().numpy()
+    profits = []
+    actions = []
 
-    initial_usd = 1000
+    for seq_i in range(N_test):
+        profits.append(((state[:, 0] + state[:, 1] * prices_test[seq_i]) / initial_usd).prod())
+
+        inp = torch.cat([state, obs_test[seq_i, :].view(1, -1)], dim = 1).detach()
+
+        out = model(inp)
+
+        action = out.max(dim = 1)[1].view(-1)
+        actions.append(action)
+        state = update_state(action, state, prices_test[seq_i].view(-1), ma_ref_test[seq_i].view(-1), commissions)
+
+    profits = torch.stack(profits).numpy()
+    actions = torch.stack(actions).numpy()
+
+    buys = actions == 0
+    sells = actions == 1
 
     wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
         X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
@@ -335,6 +313,238 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     ax[1].legend()
     plt.show()
 
+    # buys = buys > np.percentile(buys, 75)
+    # sells = (sells > np.percentile(sells, 75)) & ~buys
+    # buys = buys.astype(float)
+    # sells = sells.astype(float)
+    #
+    # wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
+    #     X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
+    # )
+    #
+    # print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+    #
+    # fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+    #
+    # ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
+    # ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
+    # ax[0].legend()
+    #
+    # ax[1].plot(buys, c='g', alpha=0.5, label='buy')
+    # ax[1].plot(sells, c='r', alpha=0.5, label='sell')
+    # ax[1].legend()
+    # plt.show()
+
+
+
+
+def Qlearn(policy_net, target_net, coin, files, inputs, params, n_epochs, lr, batch_size, sequence_length, print_step, commissions):
+    # TODO: move outside of the function?
+    # TODO: to lower cpas
+    GAMMA = 0.999
+    EPS_START = 0.9
+    EPS_END = 0.01
+    EPS_DECAY = 200 * sequence_length
+    TARGET_UPDATE = 10
+    initial_usd = 1000
+    n_actions = 3
+
+    target_net.load_state_dict(policy_net.state_dict())
+    target_net.eval()
+
+    memory = ReplayMemory(10000) # TODO: capacity as parameter
+
+    X = load_all_data(files)
+
+    obs, N, ma_ref = get_obs_input(X, inputs, params)
+    X = X[-N:, :]
+
+    prices = torch.from_numpy(X[:, 0]).type(torch.float32)
+
+    # Get a test set
+    N_test = sequence_length * 2
+    N -= N_test
+
+    obs, obs_test = obs[:N, :], obs[N:, :]
+    X, X_test = X[:N, :], X[N:, :]
+    ma_ref, ma_ref_test = ma_ref[:N], ma_ref[N:]
+    prices, prices_test = prices[:N], prices[N:]
+
+    optimizer = torch.optim.Adam(policy_net.parameters(), lr=lr)
+
+    steps_done = 0
+
+    def select_action(state, steps_done):
+        sample = torch.rand(batch_size)
+        eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+            math.exp(-1. * steps_done / EPS_DECAY)
+        steps_done += 1
+
+        li = sample > eps_threshold
+
+        action = torch.randint(n_actions, (batch_size,))
+        if li.any():
+            action[li] = policy_net(state[li, :]).max(1)[1].view(-1)
+
+        return action, steps_done
+
+    def optimize_model():
+        if len(memory) < batch_size:
+            return
+        transitions = memory.sample(batch_size)
+
+        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+        # detailed explanation). This converts batch-array of Transitions
+        # to Transition of batch-arrays.
+        batch = Transition(*zip(*transitions))
+
+        # Compute a mask of non-final states and concatenate the batch elements
+        # (a final state would've been the one after which simulation ended)
+        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
+                                              batch.next_state)), dtype=torch.uint8)
+        if non_final_mask.any():
+            non_final_next_states = torch.stack([s for s in batch.next_state
+                                                        if s is not None])
+        state_batch = torch.stack(batch.state)
+        action_batch = torch.stack(batch.action)
+        reward_batch = torch.stack(batch.reward)
+
+
+        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+        # columns of actions taken. These are the actions which would've been taken
+        # for each batch state according to policy_net
+        state_action_values = policy_net(state_batch)[:, action_batch].diag()
+
+        # Compute V(s_{t+1}) for all next states.
+        # Expected values of actions for non_final_next_states are computed based
+        # on the "older" target_net; selecting their best reward with max(1)[0].
+        # This is merged based on the mask, such that we'll have either the expected
+        # state value or 0 in case the state was final.
+        next_state_values = torch.zeros(batch_size)
+        if non_final_mask.any():
+            next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
+        # Compute the expected Q values
+        expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+        # Compute Huber loss
+        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+
+        # Optimize the model
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        return loss.item()
+
+    for e in range(n_epochs):
+        sub_state = init_state(inputs, batch_size, initial_usd)
+
+        t = torch.randint(N - sequence_length, (batch_size,))
+        # t = torch.zeros(batch_size).long()# + 1
+
+        state = torch.cat([sub_state, obs[t, :]], dim = 1)
+        profits = []
+
+        for seq_i in range(sequence_length):
+            # Select and perform an action
+            action, steps_done = select_action(state, steps_done)
+
+            # Calculate reward
+            reward = (sub_state[:, 0] + sub_state[:, 1] * prices[t + seq_i]) / initial_usd
+            profits.append(reward.prod() ** (1 / batch_size))
+            reward = torch.log(reward)
+
+            # Observe new state
+            if seq_i < sequence_length - 1:
+                sub_state = update_state(action, sub_state, prices[t + seq_i], ma_ref[t + seq_i], commissions)
+                next_state = torch.cat([sub_state, obs[t + seq_i, :]], dim = 1)
+            else:
+                next_state = None
+
+            # Store the transitions in memory
+            for b in range(batch_size):
+                memory.push(
+                    state[b],
+                    action[b],
+                    next_state[b] if next_state is not None else None,
+                    reward[b]
+                )
+
+            # Move to the next state
+            state = next_state
+
+            # Perform one step of the optimization (on the target network)
+            loss = optimize_model()
+
+        # Update the target network, copying all weights and biases in DQN
+        if e % TARGET_UPDATE == 0:
+            target_net.load_state_dict(policy_net.state_dict())
+
+        profits = torch.stack(profits)
+
+        if e % print_step == 0:
+            n_round = 4
+
+            print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Eps: {}]'.format(
+                e,
+                n_epochs,
+                round_to_n(loss, n_round),
+                round_to_n(profits[-1].item(), n_round),
+                round_to_n(EPS_END + (EPS_START - EPS_END) * \
+                    math.exp(-1. * steps_done / EPS_DECAY))
+            ))
+
+    policy_net.eval()
+    sub_state = init_state(inputs, 1, initial_usd)
+
+    state = torch.cat([sub_state, obs_test[0, :].view(1, -1)], dim = 1)
+    profits = []
+    actions = []
+
+    for seq_i in range(N_test):
+        # Select and perform an action
+        action = policy_net(state).max(1)[1].view(-1)
+        actions.append(action)
+
+        # Calculate reward
+        reward = (sub_state[:, 0] + sub_state[:, 1] * prices_test[seq_i]) / initial_usd
+        profits.append(reward.prod())
+
+        # print(prices_test[seq_i], prices_test[seq_i].shape)
+        # Observe new state
+        if seq_i < N_test - 1:
+            sub_state = update_state(action, sub_state, prices_test[seq_i].view(-1), ma_ref_test[seq_i].view(-1), commissions)
+            next_state = torch.cat([sub_state, obs_test[seq_i, :].view(1, -1)], dim = 1)
+        else:
+            next_state = None
+
+        # Move to the next state
+        state = next_state
+
+
+    profits = torch.stack(profits).numpy()
+    actions = torch.stack(actions).numpy()
+
+    plt.style.use('seaborn')
+
+    plt.plot(X_test[:, 0] / X_test[0, 0], label='price')
+    plt.plot(profits, label='profit')
+    plt.legend()
+    plt.show()
+
+    counts = [
+        (actions == BUY).astype(float).sum(),
+        (actions == SELL).astype(float).sum(),
+        (actions == DO_NOTHING).astype(float).sum(),
+    ]
+
+    ticks = ['BUY', 'SELL', 'DO_NOTHING']
+    x_pos = np.arange(3)
+
+    plt.bar(x_pos, counts, align='center', alpha=0.75)
+    plt.xticks(x_pos, ticks)
+    plt.ylabel('Count')
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -357,16 +567,16 @@ if __name__ == '__main__':
     #       - ha
     inputs = {
         # states
-        # 'capital_usd': 1,
-        # 'capital_coin': 1,
-        # 'timedelta': 1,
-        # 'buy_price': 1,
+        'capital_usd': 1,
+        'capital_coin': 1,
+        'timedelta': 1,
+        'buy_price': 1,
         # obs
-        'price': 1,
+        'price': 4,
         'mus': 3,
         'std': 3,
         'ma': 3,
-        'ha': 3,
+        'ha': 4,
         'stoch': 3,
     }
 
@@ -377,15 +587,16 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 500
+    sequence_length = 200
 
     lr = 0.0005
-    batch_size = 32
+    batch_size = 128
 
     # NN model definition
-    model = FFN(inputs, batch_size)
+    policy_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = False)
+    target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 1500
+    n_epochs = 500
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -402,7 +613,24 @@ if __name__ == '__main__':
         files = files,
         inputs = inputs,
         params = params,
-        model = model,
+        model = policy_net,
+        n_epochs = n_epochs,
+        lr = lr,
+        batch_size = batch_size,
+        sequence_length = sequence_length,
+        print_step = print_step,
+        commissions = commissions,
+    )
+
+    policy_net.Qlearn = True
+
+    Qlearn(
+        policy_net = policy_net,
+        target_net = target_net,
+        coin = coin,
+        files = files,
+        inputs = inputs,
+        params = params,
         n_epochs = n_epochs,
         lr = lr,
         batch_size = batch_size,
