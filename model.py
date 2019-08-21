@@ -11,7 +11,7 @@ import random
 class FFN(nn.Module):
     def __init__(self, inputs, batch_size, use_lstm = True, Qlearn = False, n_hidden_layers = 4, decay_per_layer = 0.85):
         super(FFN, self).__init__()
-        self.n_inputs = sum(list(inputs.values()))# - 4
+        self.n_inputs = sum(list(inputs.values())) 
         self.batch_size = batch_size
         self.use_lstm = use_lstm
         self.Qlearn = Qlearn

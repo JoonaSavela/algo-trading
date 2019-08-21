@@ -206,12 +206,21 @@ def visualize_optimum(X, buys):
 if __name__ == '__main__':
     #coin = None
     coin = 'ETH'
-    improve = True
-    batch_size = 30 * 3
+    improve = False
+    batch_size = 30 * 1
     commissions = 0.00125
     verbose = False
 
     start_time = time.time()
+    save_optima(
+        coin = coin,
+        improve = improve,
+        batch_size = batch_size,
+        commissions = commissions,
+        verbose = verbose
+    )
+    improve = True
+    batch_size = 30 * 3
     save_optima(
         coin = coin,
         improve = improve,
