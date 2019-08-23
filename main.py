@@ -54,45 +54,21 @@ def main():
 
     returns = X[1:, 0] / X[:-1, 0] - 1
 
-    alpha = 0.8
+    alpha = 0.6
+    alpha1 = alpha * 2 - alpha ** 2#0.75
     mus = []
 
     r = returns
 
-    N = 3
+    N = 2
     for i in range(N):
         r = smoothed_returns(np.cumprod(r + 1).reshape(-1, 1), alpha = alpha)
         mus.append(r)
 
+    mus1 = smoothed_returns(np.cumprod(returns + 1).reshape(-1, 1), alpha = alpha1)
+
     n = mus[-1].shape[0]
-    buys = []
-    sells = []
-
-    for i in range(N - 1):
-        buys.append(np.cumprod(mus[i][-n:] + 1) > np.cumprod(mus[i + 1][-n:] + 1))
-        sells.append(np.cumprod(mus[i][-n:] + 1) < np.cumprod(mus[i + 1][-n:] + 1))
-
-    buys = np.stack(buys)
-    sells = np.stack(sells)
-
-    buys = np.all(buys, axis=0)
-    sells = np.all(sells, axis=0)
-
-    buys = np.diff(buys)
-    sells = np.diff(sells)
-    idx = np.arange(1, n)
-    buys = idx[buys]
-    sells = idx[sells]
-
-    i = 0
-    j = 0
-
-    new_buys = []
-    new_sells = []
-
-    while i < buys.shape[0] and j < sells.shape[0]:
-        new_buys.append(buys[i])
-        i += 1
+    mus1 = mus1[-n:]
 
 
     #mus1 = smoothed_returns(X, alpha = alpha * 2 - alpha ** 2)
@@ -103,15 +79,18 @@ def main():
     #plt.axhline(c='k', alpha=0.5)
     plt.plot(X[-n:, 0] / X[0, 0] - 1, c='k', alpha = 0.3, label='price')
 
-    for i in range(N):
+    approx_price = np.cumprod(mus1 + 1)
+    plt.plot(approx_price / approx_price[0] - 1, alpha=0.7, label='0')
+
+    for i in range(N - 1, N):
         approx_price = np.cumprod(mus[i][-n:] + 1)
-        plt.plot(approx_price / approx_price[0] - 1, label=str(i))
+        plt.plot(approx_price / approx_price[0] - 1, alpha=0.7, label=str(i))
 
-    for x in buys:
-        plt.axvline(x, c='g', alpha=0.5)
+    #for x in buys:
+    #    plt.axvline(x, c='g', alpha=0.5)
 
-    for x in sells:
-        plt.axvline(x, c='r', alpha=0.5)
+    #for x in sells:
+    #    plt.axvline(x, c='r', alpha=0.5)
 
     plt.legend()
     plt.show()

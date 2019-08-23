@@ -271,7 +271,7 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 # TODO: train an ensemble?
-def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save):
     X = load_all_data(files)
 
     obs, N, ma_ref = get_obs_input(X, inputs, params)
@@ -419,7 +419,8 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     ax[1].legend()
     plt.show()
 
-
+    if save:
+        torch.save(model.state_dict(), 'models/' + model.name + '.pt')
 
 
 def Qlearn(policy_net, target_net, coin, files, inputs, params, n_epochs, lr, batch_size, sequence_length, print_step, commissions):
@@ -705,6 +706,7 @@ if __name__ == '__main__':
         sequence_length = sequence_length,
         print_step = print_step,
         commissions = commissions,
+        save = True,
     )
 
     policy_net.Qlearn = True
