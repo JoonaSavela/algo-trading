@@ -5,16 +5,23 @@ from utils import *
 from data import *
 from model import *
 import numpy as np
+from optimize import get_wealths
 import matplotlib.pyplot as plt
 
 def plot_peaks(coin, files, inputs, params, model, sequence_length):
     X = load_all_data(files)
 
+    alpha = 0.65
+    mus = smoothed_returns(X, alpha=alpha)
+    mus = smoothed_returns(np.cumprod(mus + 1).reshape(-1, 1), alpha=alpha)
+
     obs, N, _ = get_obs_input(X, inputs, params)
     X = X[-N:, :]
+    mus = mus[-N:]
 
     X = X[:sequence_length, :]
     obs = obs[:sequence_length, :]
+    mus = mus[:sequence_length]
 
     model.init_state()
 
@@ -34,7 +41,29 @@ def plot_peaks(coin, files, inputs, params, model, sequence_length):
 
     sell_peaks, _ = find_peaks(sells, distance=15, prominence=0.05)
     buy_peaks, _ = find_peaks(1 - sells, distance=15, prominence=0.05)
-    print(buy_peaks[-1])
+
+    action1 = np.zeros((sequence_length,))
+
+    action1[buy_peaks] = 1
+    action1[sell_peaks] = -1
+
+    owns1 = np.cumsum(action1)
+
+    buys1 = owns1 == 1
+    sells1 = owns1 == 0
+
+    buys2 = mus > 0
+    sells2 = mus < 0
+
+    buys1 = buys1 & buys2
+    sells1 = sells1 & sells2
+
+    buys1 = buys1.astype(float)
+    sells1 = sells1.astype(float)
+
+    wealths, _, _, _, _ = get_wealths(
+        X, buys1, sells1
+    )
 
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
@@ -42,6 +71,8 @@ def plot_peaks(coin, files, inputs, params, model, sequence_length):
     ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
     ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks')
     ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks')
+    ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
+    ax[0].plot(wealths + 1, alpha=0.7, label='wealth')
     ax[0].legend()
 
     #ax[1].plot(buys, c='g', alpha=0.5, label='buy')
@@ -50,8 +81,6 @@ def plot_peaks(coin, files, inputs, params, model, sequence_length):
     ax[1].plot(buy_peaks, sells[buy_peaks], 'go', alpha=0.7, label='buy peaks')
     ax[1].legend()
     plt.show()
-
-
 
 
 if __name__ == '__main__':
