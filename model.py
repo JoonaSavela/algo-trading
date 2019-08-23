@@ -33,7 +33,7 @@ class FFN(nn.Module):
     def init_state(self, batch_size = None):
         if batch_size is None:
             batch_size = self.batch_size
-        self.state = (torch.randn(1, batch_size, self.n_inputs), torch.randn(1, batch_size, self.n_inputs))
+        self.state = (torch.zeros(1, batch_size, self.n_inputs), torch.zeros(1, batch_size, self.n_inputs))
 
     def forward(self, x):
         if self.use_lstm:

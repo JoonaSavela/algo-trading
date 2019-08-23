@@ -11,15 +11,19 @@ import matplotlib.pyplot as plt
 def plot_peaks(coin, files, inputs, params, model, sequence_length):
     X = load_all_data(files)
 
-    alpha = 0.65
+    alpha = 0.#35
     mus = smoothed_returns(X, alpha=alpha)
     mus = smoothed_returns(np.cumprod(mus + 1).reshape(-1, 1), alpha=alpha)
 
+    ha = heikin_ashi(X)
+
     obs, N, _ = get_obs_input(X, inputs, params)
     X = X[-N:, :]
+    ha = ha[-N:, :]
     mus = mus[-N:]
 
     X = X[:sequence_length, :]
+    ha = ha[:sequence_length, :]
     obs = obs[:sequence_length, :]
     mus = mus[:sequence_length]
 
@@ -39,21 +43,26 @@ def plot_peaks(coin, files, inputs, params, model, sequence_length):
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
 
-    sell_peaks, _ = find_peaks(sells, distance=15, prominence=0.05)
-    buy_peaks, _ = find_peaks(1 - sells, distance=15, prominence=0.05)
+    prominence = 0.0125
+    distance = 30
+    sell_peaks, _ = find_peaks(sells, distance=distance, prominence=prominence)
+    buy_peaks, _ = find_peaks(1 - sells, distance=distance, prominence=prominence)
 
-    action1 = np.zeros((sequence_length,))
+    owns1 = np.zeros((sequence_length,))
 
-    action1[buy_peaks] = 1
-    action1[sell_peaks] = -1
+    for peak in buy_peaks:
+        sell_peak = sell_peaks[sell_peaks > peak]
+        sell_peak = sell_peak[0] if len(sell_peak) > 0 else sequence_length
+        owns1[peak:sell_peak] = 1
 
-    owns1 = np.cumsum(action1)
-
+    # TODO: handle the situation when there are 2 or more buys or sells in a row
     buys1 = owns1 == 1
     sells1 = owns1 == 0
 
     buys2 = mus > 0
     sells2 = mus < 0
+    #buys2 = ha[:, 1] == ha[:, 3]
+    #sells2 = ha[:, 1] == ha[:, 2]
 
     buys1 = buys1 & buys2
     sells1 = sells1 & sells2
@@ -65,13 +74,15 @@ def plot_peaks(coin, files, inputs, params, model, sequence_length):
         X, buys1, sells1
     )
 
+    print(wealths[-1] + 1)
+
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
     ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
     ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks')
     ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks')
-    ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
+    #ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
     ax[0].plot(wealths + 1, alpha=0.7, label='wealth')
     ax[0].legend()
 
@@ -107,7 +118,7 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 700
+    sequence_length = 20000
 
     model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
     model.load_state_dict(torch.load('models/' + model.name + '.pt'))
