@@ -41,14 +41,16 @@ def get_peaks(sells, prominence = 0.0125, distance = 30):
 
     return buy_peaks, sell_peaks
 
-def get_approx_peaks(sells, w = 60, th = 0.05):
-    sells = sells.reshape(-1, 1)
+def get_approx_peaks(sells, w = 15, th = 0.1):
+    diffs = np.diff(sells)
+    sells = sells[1:].reshape(-1, 1)
     sells = np.repeat(sells, 4, axis = 1)
 
     stoch = stochastic_oscillator(sells, w)
+    diffs = diffs[-stoch.shape[0]:]
     idx = np.arange(stoch.shape[0])
 
-    return idx[stoch < th], idx[stoch > 1 - th], stoch
+    return idx[(stoch < th) & (diffs > 0)], idx[(stoch > 1 - th) & (diffs < 0)], stoch
 
 
 def plot_peaks(files, inputs, params, model, sequence_length):
@@ -78,12 +80,19 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
 
-    buy_peaks, sell_peaks = get_peaks(sells)
-
     buy_peaks_approx, sell_peaks_approx, stoch = get_approx_peaks(sells)
 
+    N = stoch.shape[0]
+
+    X = X[-N:, :]
+    mus = mus[-N:]
+    sells = sells[-N:]
+
+    buy_peaks, sell_peaks = get_peaks(sells)
+
+    sequence_length = min(sequence_length, N)
+
     X = X[:sequence_length, :]
-    obs = obs[:sequence_length, :]
     mus = mus[:sequence_length]
     sells = sells[:sequence_length]
     stoch = stoch[:sequence_length]
@@ -96,7 +105,6 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
 
-    # TODO: fix
     buy_peaks = buy_peaks[buy_peaks < sequence_length]
     sell_peaks = sell_peaks[sell_peaks < sequence_length]
     buy_peaks_approx = buy_peaks_approx[buy_peaks_approx < sequence_length]
@@ -207,7 +215,7 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 500
+    sequence_length = 20000
 
     model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
     model.load_state_dict(torch.load('models/' + model.name + '.pt'))
