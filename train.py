@@ -51,19 +51,18 @@ def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = Fals
         buy_i = buys_idx[i]
 
         start_i = max(0, buy_i - l)
-        end_i = min(n - 1, buy_i + l)
+        end_i = min(n, buy_i + l)
 
         if i > 0:
             start_i = max(start_i, (buy_i + buys_idx[i - 1]) // 2)
             start_i = max(start_i, sells_idx[i - 1])
 
         if i < buys_idx.shape[0] - 1:
-            end_i = min(end_i, (buy_i + buys_idx[i + 1]) // 2)
             end_i = min(end_i, (buy_i + sells_idx[i]) // 2)
 
         nearby_idx = np.arange(start_i, end_i)
         nearby_prices = X[nearby_idx, 0]
-        min_i = np.argmin(nearby_prices)
+        min_i = min(buy_i - start_i, end_i - start_i - 1)
         min_price = nearby_prices[min_i]
         max_price = np.max(nearby_prices)
 
@@ -71,23 +70,27 @@ def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = Fals
         values = np.exp(- c * (max_price / min_price - 1) * values ** 2)
         buys_li[start_i:end_i] = values
 
+    # print(sells_idx[-3:])
+    # print(buys_idx[-3:])
+
     for i in range(sells_idx.shape[0]):
         sell_i = sells_idx[i]
 
         start_i = max(0, sell_i - l)
-        end_i = min(n - 1, sell_i + l)
+        end_i = min(n, sell_i + l)
 
         if i > 0:
             start_i = max(start_i, (sell_i + sells_idx[i - 1]) // 2)
             start_i = max(start_i, buys_idx[i])
 
         if i < sells_idx.shape[0] - 1:
-            end_i = min(end_i, (sell_i + sells_idx[i + 1]) // 2)
             end_i = min(end_i, (sell_i + buys_idx[i + 1]) // 2)
 
+        # print(start_i, end_i)
         nearby_idx = np.arange(start_i, end_i)
         nearby_prices = X[nearby_idx, 0]
-        max_i = np.argmax(nearby_prices)
+        max_i = min(sell_i - start_i, end_i - start_i - 1)
+        # print(start_i, end_i, sell_i, sells_idx.shape[0], i)
         max_price = nearby_prices[max_i]
         min_price = np.min(nearby_prices)
 
@@ -119,6 +122,78 @@ def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = Fals
     labels = np.stack([buy, sell, do_nothing], axis = 1)
 
     return labels
+
+
+
+def get_labels_test(files, coin, n = None, end_val = 0.001, separate = False):
+    X = load_all_data(files)
+
+    if n is None:
+        n = X.shape[0]
+
+    df = pd.read_csv(
+        'data/labels/' + coin + '.csv',
+        index_col = 0,
+        header = None,
+        nrows = n,
+    )
+
+    buys_optim = df.values.reshape(-1)
+
+    diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
+    idx = np.arange(n + 1)
+
+    buys_li = diffs == 1
+    sells_li = diffs == -1
+
+    buys_idx = idx[buys_li]
+    sells_idx = idx[sells_li]
+
+    buys_li = buys_li.astype(float)
+    sells_li = sells_li.astype(float)
+
+    for i in range(buys_idx.shape[0]):
+        buy_i = buys_idx[i]
+
+        start_i = buy_i
+        end_i = sells_idx[i]
+
+        nearby_idx = np.arange(start_i, end_i)
+
+        c = - np.log(end_val) / ((end_i - start_i) ** 2)
+
+        values = np.exp(- c * (nearby_idx - start_i) ** 2)
+        buys_li[start_i:end_i] = values
+
+    # print(sells_idx[-3:])
+    # print(buys_idx[-3:])
+
+    for i in range(sells_idx.shape[0]):
+        sell_i = sells_idx[i]
+
+        start_i = sell_i
+        end_i = buys_idx[i + 1] if i < buys_idx.shape[0] - 1 else n
+
+        nearby_idx = np.arange(start_i, end_i)
+
+        c = - np.log(end_val) / ((end_i - start_i) ** 2)
+
+        values = np.exp(- c * (nearby_idx - start_i) ** 2)
+        sells_li[start_i:end_i] = values
+
+    buy = buys_li[:-1]
+    sell = sells_li[:-1]
+
+    do_nothing = 1 - buy - sell
+
+    if separate:
+        return buy, sell, do_nothing
+
+    labels = np.stack([buy, sell, do_nothing], axis = 1)
+
+    return labels
+
+
 
 
 def plot_labels(files, coin, n = 600):
@@ -282,13 +357,6 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
 
             n_round = 4
 
-            # print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
-            #     e,
-            #     n_epochs,
-            #     round_to_n(torch.tensor(losses).mean().item(), n_round),
-            #     round_to_n(state[:, :2].sum(dim = 1).prod().item() ** (1 / batch_size), n_round),
-            #     round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
-            # ))
             print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
                 e,
                 n_epochs,
@@ -296,7 +364,6 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                 round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round),
                 round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
             ))
-            # print(out[0])
 
     model.eval()
     model.init_state(1)

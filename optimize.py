@@ -79,6 +79,32 @@ def filter_buys(X, buys, commissions):
         if lost_profit > 0:
             res[sell_i:buy_i] = 1
 
+    diffs = np.diff(np.concatenate([np.array([0]), res, np.array([0])]))
+    buys_idx = idx[diffs == 1]
+    sells_idx = idx[diffs == -1]
+
+    for i in range(buys_idx.shape[0]):
+        start_i = sells_idx[i - 1] if i > 0 else 0
+        end_i = sells_idx[i] if i < sells_idx.shape[0] else X.shape[0] - 1
+
+        min_i = np.argmin(X[start_i:end_i, 0]) + start_i
+
+        res[start_i:min_i] = 0
+        res[min_i:end_i] = 1
+
+    diffs = np.diff(np.concatenate([np.array([0]), res, np.array([0])]))
+    buys_idx = idx[diffs == 1]
+    sells_idx = idx[diffs == -1]
+
+    for i in range(sells_idx.shape[0]):
+        start_i = buys_idx[i]
+        end_i = buys_idx[i + 1] if i < buys_idx.shape[0] - 1 else X.shape[0] - 1
+
+        max_i = np.argmax(X[start_i:end_i, 0]) + start_i
+
+        res[start_i:max_i] = 1
+        res[max_i:end_i] = 0
+
     return res
 
 def get_optimal_strategy(coin_filenames, improve, batch_size, commissions, verbose, filename = None):
