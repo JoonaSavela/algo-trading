@@ -43,14 +43,13 @@ def get_peaks(sells, prominence = 0.0125, distance = 30):
 
 def get_approx_peaks(sells, w = 15, th = 0.1):
     diffs = np.diff(sells)
-    sells = sells[1:].reshape(-1, 1)
-    sells = np.repeat(sells, 4, axis = 1)
 
-    stoch = stochastic_oscillator(sells, w)
-    diffs = diffs[-stoch.shape[0]:]
-    idx = np.arange(stoch.shape[0])
+    buy_li = (diffs[1:] > 0) & (diffs[:-1] < 0)
+    sell_li = (diffs[1:] < 0) & (diffs[:-1] > 0)
 
-    return idx[(stoch < th) & (diffs > 0)], idx[(stoch > 1 - th) & (diffs < 0)], stoch
+    idx = np.arange(2, sells.shape[0])
+
+    return idx[buy_li], idx[sell_li]
 
 
 def plot_peaks(files, inputs, params, model, sequence_length):
@@ -80,13 +79,7 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
 
-    buy_peaks_approx, sell_peaks_approx, stoch = get_approx_peaks(sells)
-
-    N = stoch.shape[0]
-
-    X = X[-N:, :]
-    mus = mus[-N:]
-    sells = sells[-N:]
+    buy_peaks_approx, sell_peaks_approx = get_approx_peaks(sells)
 
     buy_peaks, sell_peaks = get_peaks(sells)
 
@@ -95,7 +88,6 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     X = X[:sequence_length, :]
     mus = mus[:sequence_length]
     sells = sells[:sequence_length]
-    stoch = stoch[:sequence_length]
 
     max_buy = buys.max()
     min_buy = buys.min()
@@ -186,7 +178,6 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     #ax[1].plot(buy_peaks, sells[buy_peaks], 'go', alpha=0.7, label='buy peaks')
     ax[1].plot(buy_peaks_approx, sells[buy_peaks_approx], 'go', alpha=0.5, label='buy peaks approx')
     ax[1].plot(sell_peaks_approx, sells[sell_peaks_approx], 'ro', alpha=0.5, label='sell peaks approx')
-    #ax[1].plot(stoch, 'b', alpha=0.5, label='signal')
     ax[1].legend()
     plt.show()
 
@@ -215,7 +206,7 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 20000
+    sequence_length = 2000
 
     model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
     model.load_state_dict(torch.load('models/' + model.name + '.pt'))

@@ -682,7 +682,7 @@ if __name__ == '__main__':
     policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False)
     target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 350
+    n_epochs = 500
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
