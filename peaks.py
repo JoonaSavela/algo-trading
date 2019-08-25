@@ -1,5 +1,6 @@
 import torch
-from scipy.signal import find_peaks
+import torch.nn as nn
+from scipy.signal import find_peaks, peak_prominences
 import glob
 from utils import *
 from data import *
@@ -41,26 +42,74 @@ def get_peaks(sells, prominence = 0.0125, distance = 30):
 
     return buy_peaks, sell_peaks
 
-def get_approx_peaks(sells, w = 15, th = 0.1):
-    diffs = np.diff(sells)
+def get_left_prominence(x, wlen = None):
+    if wlen is None:
+        wlen = x.shape[0]
+    wlen = min(wlen, x.shape[0])
 
-    buy_li = (diffs[1:] > 0) & (diffs[:-1] < 0)
-    sell_li = (diffs[1:] < 0) & (diffs[:-1] > 0)
+    x = x[-wlen:]
 
-    idx = np.arange(2, sells.shape[0])
+    end_i = wlen - 1
 
-    return idx[buy_li], idx[sell_li]
+    li = x >= x[end_i]
+
+    start_i = end_i
+
+    while li[start_i] and start_i > 0:
+        start_i -= 1
+
+    while not li[start_i] and start_i > 0:
+        start_i -= 1
+
+    prominence = x[end_i] - np.min(x[start_i:end_i + 1])
+
+    return prominence
+
+def get_left_prominences(x, wlen = 60):
+    N = x.shape[0] - wlen + 1
+    prominences = np.zeros(N)
+
+    for i in range(N):
+        prominences[i] = get_left_prominence(x[i:i+wlen])
+
+    return prominences
+
+
+def get_approx_peaks(sells):
+    lag = 40
+    threshold = 0.1
+    influence = 0.125
+    result = thresholding_algo(sells, lag, threshold, influence)
+    diffs = np.diff(sells, 2)
+
+    wlen = 60
+    th = 0.1
+    sell_prominences = get_left_prominences(sells, wlen = wlen)
+    buy_prominences = get_left_prominences(1 - sells, wlen = wlen)
+
+    # buy_li = (result['signals'][2:] == -1) & (diffs[0:] > 0) #& (diffs[:-1] < 0)
+    # sell_li = (result['signals'][2:] == 1) & (diffs[0:] < 0) #& (diffs[:-1] > 0)
+
+    buy_li = (buy_prominences > th) & (result['signals'][wlen - 1:] == -1) & (diffs[wlen - 1 - 2:] > 0)
+    sell_li = (sell_prominences > th) & (result['signals'][wlen - 1:] == 1) & (diffs[wlen - 1 - 2:] < 0)
+
+    # idx = np.arange(2, sells.shape[0])
+    idx = np.arange(wlen - 1, sells.shape[0])
+
+    return idx[~sell_li & buy_li], idx[~buy_li & sell_li]
 
 
 def plot_peaks(files, inputs, params, model, sequence_length):
     X = load_all_data(files)
+    returns = X[1:, 0] / X[:-1, 0] - 1
 
-    alpha = 0.#35
+    alpha = 0.#85
     mus = smoothed_returns(X, alpha=alpha)
     mus = smoothed_returns(np.cumprod(mus + 1).reshape(-1, 1), alpha=alpha)
 
     obs, N, _ = get_obs_input(X, inputs, params)
     X = X[-N:, :]
+    returns = returns[-N:]
     mus = mus[-N:]
 
     model.init_state()
@@ -86,6 +135,7 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     sequence_length = min(sequence_length, N)
 
     X = X[:sequence_length, :]
+    returns = returns[:sequence_length]
     mus = mus[:sequence_length]
     sells = sells[:sequence_length]
 
@@ -97,6 +147,9 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
 
+    d = 0
+    buy_peaks += d
+    sell_peaks += d
     buy_peaks = buy_peaks[buy_peaks < sequence_length]
     sell_peaks = sell_peaks[sell_peaks < sequence_length]
     buy_peaks_approx = buy_peaks_approx[buy_peaks_approx < sequence_length]
@@ -112,8 +165,8 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys1 = owns1 == 1
     sells1 = owns1 == 0
 
-    buys2 = mus > 0
-    sells2 = mus < 0
+    buys2 = returns > 0
+    sells2 = returns < 0
 
     buys1 = buys1 & buys2
     sells1 = sells1 & sells2
@@ -159,27 +212,193 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     #buys_approx = result['signals']
     #print(buys_approx.shape, buy_peaks.shape)
 
+
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
     ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-    #ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks')
-    #ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks')
+    ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'mo', alpha=0.7, label='sell peaks')
+    ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'co', alpha=0.7, label='buy peaks')
     ax[0].plot(sell_peaks_approx, X[sell_peaks_approx, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks approx')
     ax[0].plot(buy_peaks_approx, X[buy_peaks_approx, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks approx')
-    #ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
+    # ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
     ax[0].plot(wealths1 + 1, alpha=0.7, label='wealth1')
     ax[0].plot(wealths2 + 1, alpha=0.7, label='wealth2')
     ax[0].legend()
 
     #ax[1].plot(buys, c='g', alpha=0.5, label='buy')
     ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    #ax[1].plot(sell_peaks, sells[sell_peaks], 'ro', alpha=0.7, label='sell peaks')
-    #ax[1].plot(buy_peaks, sells[buy_peaks], 'go', alpha=0.7, label='buy peaks')
+    ax[1].plot(sell_peaks, sells[sell_peaks], 'mo', alpha=0.7, label='sell peaks')
+    ax[1].plot(buy_peaks, sells[buy_peaks], 'co', alpha=0.7, label='buy peaks')
+    #ax[1].plot(np.arange(wlen - 1, sequence_length), sell_prominences, 'k', alpha=0.6, label='sell prominences')
+    #ax[1].plot(np.arange(wlen - 1, sequence_length), buy_prominences, 'g', alpha=0.6, label='buy prominences')
     ax[1].plot(buy_peaks_approx, sells[buy_peaks_approx], 'go', alpha=0.5, label='buy peaks approx')
     ax[1].plot(sell_peaks_approx, sells[sell_peaks_approx], 'ro', alpha=0.5, label='sell peaks approx')
     ax[1].legend()
     plt.show()
+
+
+def get_labels(sells):
+    returns_dict = {
+        -9: 1.0919042700491126,
+        -8: 1.2247738109953097,
+        -7: 1.490936256673261,
+        -6: 1.70637431678199,
+        -5: 2.0100570566933804,
+        -4: 2.110587760602813,
+        -3: 2.1718015504678863,
+        -2: 2.1546475450636637,
+        -1: 2.0275320009700644,
+        0: 1.862710155114335,
+        1: 1.4483548475933,
+        2: 1.1213635900726804,
+        3: 1.0507336634485362,
+    }
+
+    buy_peaks, sell_peaks = get_peaks(sells)
+
+    N = sells.shape[0]
+
+    buy_labels = np.zeros(N)
+    sell_labels = np.zeros(N)
+
+    max_profit = max(list(returns_dict.values()))
+    #print(max_profit)
+
+    for peak in buy_peaks:
+        for k, v in returns_dict.items():
+            if peak + k < N:
+                buy_labels[peak + k] = (v - 1) / (max_profit - 1)
+
+    for peak in sell_peaks:
+        for k, v in returns_dict.items():
+            if peak + k < N:
+                sell_labels[peak + k] = (v - 1) / (max_profit - 1)
+
+    diffs_labels = buy_labels - sell_labels
+
+    buy = np.zeros(N)
+    sell = np.zeros(N)
+
+    li = diffs_labels > 0
+    buy[li] = diffs_labels[li]
+
+    #print(buy.mean())
+
+    li = diffs_labels < 0
+    sell[li] = -diffs_labels[li]
+
+    do_nothing = 1 - buy - sell
+
+    labels = np.stack([buy, sell, do_nothing], axis = 1)
+
+    return labels
+
+def train(files, inputs, params, model, signal_model, sequence_length, n_epochs, batch_size, lr, commissions, print_step):
+    X = load_all_data(files)
+
+    obs, N, _ = get_obs_input(X, inputs, params)
+    X = X[-N:, :]
+
+    signal_model.init_state()
+
+    inp = obs.unsqueeze(1)
+    signal_out = signal_model(inp).squeeze(1)
+
+    buys = signal_out[:, 0].detach().numpy()
+    sells = signal_out[:, 1].detach().numpy()
+
+    labels = get_labels(sells)
+    labels = torch.from_numpy(labels).type(torch.float32)
+
+    N_test = sequence_length
+    N -= N_test
+
+    signal_out, signal_out_test = signal_out[:N, :], signal_out[N:, :]
+    labels, labels_test = labels[:N, :], labels[N:, :]
+    X, X_test = X[:N, :], X[N:, :]
+
+    criterion = nn.BCELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    for e in range(n_epochs):
+        t = torch.randint(N - sequence_length, (batch_size,))
+        #t = torch.zeros(batch_size).long()
+
+        model.init_state()
+
+        losses = []
+
+        optimizer.zero_grad()
+
+        inp = []
+        for tt in t:
+            inp.append(signal_out[tt:tt+sequence_length, :])
+        inp = torch.stack(inp, dim=1).detach()
+
+        out = model(inp)
+
+        target = []
+        for tt in t:
+            target.append(labels[tt:tt+sequence_length, :])
+        target = torch.stack(target, dim=1)
+
+        loss = criterion(out, target)
+
+        loss.backward()
+        losses.append(loss.item())
+
+        optimizer.step()
+
+        if e % print_step == 0:
+            profits = []
+
+            for b in range(batch_size):
+                buys = out[:, b, 0].detach().numpy()
+                sells = out[:, b, 1].detach().numpy()
+                wealths, _, _, _, _ = get_wealths(
+                    X[t[b]:t[b]+sequence_length, :], buys, sells, commissions = commissions
+                )
+                profits.append(wealths[-1] + 1)
+
+            n_round = 4
+
+            print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}]'.format(
+                e,
+                n_epochs,
+                round_to_n(torch.tensor(losses).mean().item(), n_round),
+                round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round),
+            ))
+
+    model.eval()
+    model.init_state(1)
+    inp = signal_out_test.unsqueeze(1)
+    out = model(inp)
+
+    buys = out[:, 0, 0].detach().numpy()
+    sells = out[:, 0, 1].detach().numpy()
+
+    initial_usd = 1000
+
+    wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
+        X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
+    )
+
+    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
+
+    plt.style.use('seaborn')
+    fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+
+    ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
+    ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
+    ax[0].legend()
+
+    ax[1].plot(signal_out_test[:, 1].detach().numpy(), c='k', alpha=0.5, label='signal')
+    ax[1].plot(buys, c='g', alpha=0.5, label='buy')
+    ax[1].plot(sells, c='r', alpha=0.5, label='sell')
+    ax[1].legend()
+    plt.show()
+
 
 
 if __name__ == '__main__':
@@ -206,15 +425,39 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 2000
+    sequence_length = 1000
 
-    model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
-    model.load_state_dict(torch.load('models/' + model.name + '.pt'))
-    model.eval()
+    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
+    signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
+    signal_model.eval()
 
     coin = 'ETH'
     dir = 'data/{}/'.format(coin)
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    plot_peaks(files, inputs, params, model, sequence_length)
+    plot_peaks(files, inputs, params, signal_model, sequence_length)
+
+    batch_size = 128
+    hidden_size = 6
+    n_epochs = 1000
+    print_step = max(n_epochs // 20, 1)
+    lr = 0.0005
+    sequence_length = 500
+    commissions = 0.00075
+
+    model = FFN(dict(n_inputs=3), batch_size, hidden_size = hidden_size)
+
+    # train(
+    #     files = files,
+    #     inputs = inputs,
+    #     params = params,
+    #     model = model,
+    #     signal_model = signal_model,
+    #     sequence_length = sequence_length,
+    #     n_epochs = n_epochs,
+    #     batch_size = batch_size,
+    #     lr = lr,
+    #     commissions = commissions,
+    #     print_step = print_step,
+    # )
