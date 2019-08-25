@@ -79,22 +79,25 @@ def get_approx_peaks(sells):
     lag = 40
     threshold = 0.1
     influence = 0.125
-    result = thresholding_algo(sells, lag, threshold, influence)
-    diffs = np.diff(sells, 2)
+    # result = thresholding_algo(sells, lag, threshold, influence)
+    # diffs = np.diff(sells, 2)
 
     wlen = 60
     th = 0.1
-    sell_prominences = get_left_prominences(sells, wlen = wlen)
-    buy_prominences = get_left_prominences(1 - sells, wlen = wlen)
+    # sell_prominences = get_left_prominences(sells, wlen = wlen)
+    # buy_prominences = get_left_prominences(1 - sells, wlen = wlen)
 
     # buy_li = (result['signals'][2:] == -1) & (diffs[0:] > 0) #& (diffs[:-1] < 0)
     # sell_li = (result['signals'][2:] == 1) & (diffs[0:] < 0) #& (diffs[:-1] > 0)
 
-    buy_li = (buy_prominences > th) & (result['signals'][wlen - 1:] == -1) & (diffs[wlen - 1 - 2:] > 0)
-    sell_li = (sell_prominences > th) & (result['signals'][wlen - 1:] == 1) & (diffs[wlen - 1 - 2:] < 0)
+    # buy_li = (buy_prominences > th) & (result['signals'][wlen - 1:] == -1) & (diffs[wlen - 1 - 2:] > 0)
+    # sell_li = (sell_prominences > th) & (result['signals'][wlen - 1:] == 1) & (diffs[wlen - 1 - 2:] < 0)
 
-    # idx = np.arange(2, sells.shape[0])
-    idx = np.arange(wlen - 1, sells.shape[0])
+    sell_li = sells == 1
+    buy_li = sells == 0
+
+    idx = np.arange(0, sells.shape[0])
+    # idx = np.arange(wlen - 1, sells.shape[0])
 
     return idx[~sell_li & buy_li], idx[~buy_li & sell_li]
 
@@ -119,6 +122,14 @@ def plot_peaks(files, inputs, params, model, sequence_length):
 
     buys = out[:, 0].detach().numpy()
     sells = out[:, 1].detach().numpy()
+
+    w = 45
+    buys = stochastic_oscillator(np.repeat(buys.reshape(-1, 1), 4, axis = 1), w)
+    sells = stochastic_oscillator(np.repeat(sells.reshape(-1, 1), 4, axis = 1), w)
+    N = sells.shape[0]
+    X = X[-N:, :]
+    returns = returns[-N:]
+    mus = mus[-N:]
 
     max_buy = buys.max()
     min_buy = buys.min()
@@ -425,7 +436,7 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 1000
+    sequence_length = 5000
 
     signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
