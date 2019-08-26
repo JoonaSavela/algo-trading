@@ -83,7 +83,6 @@ def get_approx_peaks(sells):
     # diffs = np.diff(sells, 2)
 
     wlen = 60
-    th = 0.1
     # sell_prominences = get_left_prominences(sells, wlen = wlen)
     # buy_prominences = get_left_prominences(1 - sells, wlen = wlen)
 
@@ -93,13 +92,20 @@ def get_approx_peaks(sells):
     # buy_li = (buy_prominences > th) & (result['signals'][wlen - 1:] == -1) & (diffs[wlen - 1 - 2:] > 0)
     # sell_li = (sell_prominences > th) & (result['signals'][wlen - 1:] == 1) & (diffs[wlen - 1 - 2:] < 0)
 
-    sell_li = sells == 1
-    buy_li = sells == 0
+    w = 60*12
+    sells = stochastic_oscillator(np.repeat(sells.reshape(-1, 1), 4, axis = 1), w)
+    N = sells.shape[0]
 
-    idx = np.arange(0, sells.shape[0])
+    th = 0.1
+    sell_li = sells >= 1 - th
+    buy_li = sells <= th
+
+    waiting_time = 0
+
+    idx = np.arange(0, sells.shape[0]) + waiting_time
     # idx = np.arange(wlen - 1, sells.shape[0])
 
-    return idx[~sell_li & buy_li], idx[~buy_li & sell_li]
+    return idx[~sell_li & buy_li], idx[~buy_li & sell_li], N
 
 
 def plot_peaks(files, inputs, params, model, sequence_length):
@@ -123,13 +129,13 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     buys = out[:, 0].detach().numpy()
     sells = out[:, 1].detach().numpy()
 
-    w = 45
-    buys = stochastic_oscillator(np.repeat(buys.reshape(-1, 1), 4, axis = 1), w)
-    sells = stochastic_oscillator(np.repeat(sells.reshape(-1, 1), 4, axis = 1), w)
-    N = sells.shape[0]
+    buy_peaks_approx, sell_peaks_approx, N = get_approx_peaks(sells)
+
     X = X[-N:, :]
     returns = returns[-N:]
     mus = mus[-N:]
+    sells = sells[-N:]
+    buys = buys[-N:]
 
     max_buy = buys.max()
     min_buy = buys.min()
@@ -138,8 +144,6 @@ def plot_peaks(files, inputs, params, model, sequence_length):
 
     buys = (buys - min_buy) / (max_buy - min_buy)
     sells = (sells - min_sell) / (max_sell - min_sell)
-
-    buy_peaks_approx, sell_peaks_approx = get_approx_peaks(sells)
 
     buy_peaks, sell_peaks = get_peaks(sells)
 
@@ -436,7 +440,7 @@ if __name__ == '__main__':
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 5000
+    sequence_length = 500000
 
     signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
@@ -447,7 +451,7 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    plot_peaks(files, inputs, params, signal_model, sequence_length)
+    plot_peaks(files[:5], inputs, params, signal_model, sequence_length)
 
     batch_size = 128
     hidden_size = 6
