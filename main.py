@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from utils import stochastic_oscillator, heikin_ashi, sma, std
 from data import get_and_save_all, load_data, load_all_data
 import numpy as np
 import json
@@ -10,7 +9,8 @@ import pandas as pd
 import time
 import torch
 import copy
-from utils import get_time, round_to_n, smoothed_returns
+from utils import *
+from model import *
 
 def main():
     plt.style.use('seaborn')
@@ -18,82 +18,91 @@ def main():
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    # idx = np.array([2, 4, 5, -1])
     # idx = np.array([0, 1, 2, 3])
-    idx = np.arange(1)
+    idx = np.arange(2)
     test_files = np.array(test_files)[idx]
     X = load_all_data(test_files)
-    X = X[:1200, :]
+    # X = X[:1200, :]
 
-    # tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-    # c = 70
-    # lips = sma(tp, 5 * c)
-    # teeth = sma(tp, 8 * c)
-    # jaws = sma(tp, 13 * c)
-    #
-    # sequence_length = jaws.shape[0]
-    #
-    # X = X[-sequence_length:, :]
-    # lips = lips[-sequence_length:]
-    # teeth = teeth[-sequence_length:]
-    # jaws = jaws[-sequence_length:]
-    #
-    # up = (lips > teeth) & (teeth > jaws)
-    # down = (lips < teeth) & (teeth < jaws)
-    # neutral = ~(up | down)
-    #
-    # t = np.arange(sequence_length)
-    #
-    # plt.plot(t[up], X[up, 0], 'g.')
-    # plt.plot(t[down], X[down, 0], 'r.')
-    # plt.plot(t[neutral], X[neutral, 0], 'b.')
-    # plt.plot(np.arange(sequence_length), lips[-sequence_length:], 'g')
-    # plt.plot(np.arange(sequence_length) + 0 * c, teeth[-sequence_length:], 'r')
-    # plt.plot(np.arange(sequence_length) + 0 * c, jaws[-sequence_length:], 'b')
-    # plt.show()
+    inputs = {
+        # states
+        # 'capital_usd': 1,
+        # 'capital_coin': 1,
+        # 'timedelta': 1,
+        # 'buy_price': 1,
+        # obs
+        'price': 4,
+        'mus': 3,
+        'std': 3,
+        'ma': 3,
+        'ha': 4,
+        'stoch': 3,
+    }
+
+    params = {
+        'alpha': 0.8,
+        'std_window_min_max': [30, 2000],
+        'ma_window_min_max': [30, 2000],
+        'stoch_window_min_max': [30, 2000],
+    }
+
+    sequence_length = 60
+
+    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False)
+    signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
+    signal_model.eval()
 
     returns = X[1:, 0] / X[:-1, 0] - 1
 
-    alpha = 0.6
-    alpha1 = alpha * 2 - alpha ** 2#0.75
-    mus = []
+    obs, N, _ = get_obs_input(X, inputs, params)
+    X = X[-N:, :]
+    returns = returns[-N:]
 
-    r = returns
+    signal_model.init_state()
 
-    N = 2
-    for i in range(N):
-        r = smoothed_returns(np.cumprod(r + 1).reshape(-1, 1), alpha = alpha)
-        mus.append(r)
+    inp = obs.unsqueeze(1)
+    out = signal_model(inp).squeeze(1)
 
-    mus1 = smoothed_returns(np.cumprod(returns + 1).reshape(-1, 1), alpha = alpha1)
+    buys = out[:, 0].detach().numpy()
+    sells = out[:, 1].detach().numpy()
 
-    n = mus[-1].shape[0]
-    mus1 = mus1[-n:]
+    sequence_length = min(sequence_length, N)
 
+    X = X[:sequence_length, :]
+    returns = returns[:sequence_length]
+    sells = sells[:sequence_length]
+    buys = buys[:sequence_length]
 
-    #mus1 = smoothed_returns(X, alpha = alpha * 2 - alpha ** 2)
+    max_buy = buys.max()
+    min_buy = buys.min()
+    max_sell = sells.max()
+    min_sell = sells.min()
 
+    buys = (buys - min_buy) / (max_buy - min_buy)
+    sells = (sells - min_sell) / (max_sell - min_sell)
 
-    #plt.plot(returns, label='returns')
-    #plt.plot(mus, label='mean')
-    #plt.axhline(c='k', alpha=0.5)
-    plt.plot(X[-n:, 0] / X[0, 0] - 1, c='k', alpha = 0.3, label='price')
+    n = 10
+    # start = 5
+    for start in range(15, 25):
+        x = np.arange(start, start + n)
+        y = sells[start:start+n]
 
-    approx_price = np.cumprod(mus1 + 1)
-    plt.plot(approx_price / approx_price[0] - 1, alpha=0.7, label='0')
+        z = np.polyfit(x, y, 2)
+        a, b, c = tuple(z)
+        print(start, round(- b / (2 * a)))
 
-    for i in range(N - 1, N):
-        approx_price = np.cumprod(mus[i][-n:] + 1)
-        plt.plot(approx_price / approx_price[0] - 1, alpha=0.7, label=str(i))
+        fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
-    #for x in buys:
-    #    plt.axvline(x, c='g', alpha=0.5)
+        ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
+        ax[0].legend()
 
-    #for x in sells:
-    #    plt.axvline(x, c='r', alpha=0.5)
-
-    plt.legend()
-    plt.show()
+        #ax[1].plot(buys, c='g', alpha=0.5, label='buy')
+        ax[1].plot(sells, c='r', alpha=0.5, label='sell')
+        ax[1].plot(x, y, 'ko', alpha=0.5, label='y')
+        x = np.arange(start, start + n * 3 // 2)
+        ax[1].plot(x, np.polyval(z, x), c='b', alpha=0.5, label='poly')
+        ax[1].legend()
+        plt.show()
 
 
 if __name__ == "__main__":
