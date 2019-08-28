@@ -20,7 +20,7 @@ import math
 # TODO: reduce repetition
 # TODO: get the capitals as well, feed them to the initial states
 #       - get also buy prices and timedeltas?
-def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = False):
+def get_labels(files, coin, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False):
     X = load_all_data(files)
 
     if n is None:
@@ -102,6 +102,9 @@ def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = Fals
 
     diffs_li = buys_li - sells_li
 
+    if use_tanh:
+        return diffs_li[:-1].reshape((-1, 1))
+
     buy = np.zeros(diffs_li.shape[0])
     sell = np.zeros(diffs_li.shape[0])
 
@@ -125,7 +128,7 @@ def get_labels(files, coin, n = None, l = 75, c = 1, skew = 0.4, separate = Fals
 
 
 
-def get_labels_test(files, coin, n = None, end_val = 0.001, separate = False):
+def get_labels_test(files, coin, use_tanh = False, n = None, end_val = 0.001, separate = False):
     X = load_all_data(files)
 
     if n is None:
@@ -217,7 +220,7 @@ def plot_labels(files, coin, n = 600):
 
     idx = np.arange(n)
 
-    buy, sell, do_nothing = get_labels(files, coin, n, separate = True)
+    buy, sell, do_nothing = get_labels(files, coin, n = n, separate = True)
 
     plt.style.use('seaborn')
     #plt.plot(buys_optim, label='buys')
@@ -271,13 +274,13 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 # TODO: train an ensemble?
-def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh):
     X = load_all_data(files)
 
     obs, N, ma_ref = get_obs_input(X, inputs, params)
     X = X[-N:, :]
 
-    labels = get_labels(files, coin)
+    labels = get_labels(files, coin, use_tanh)
 
     labels = torch.from_numpy(labels[-N:, :]).type(torch.float32)
 
@@ -292,7 +295,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     prices = prices[:-N_discard]
     N -= N_discard
 
-    N_test = sequence_length
+    N_test = sequence_length * 4
     # print('N test: {}'.format(N_test))
     N -= N_test
 
@@ -302,7 +305,10 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     ma_ref, ma_ref_test = ma_ref[:N], ma_ref[N:]
     prices, prices_test = prices[:N], prices[N:]
 
-    criterion = nn.BCELoss()
+    if use_tanh:
+        criterion = nn.MSELoss()
+    else:
+        criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for e in range(n_epochs):
@@ -345,11 +351,24 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
             profits = []
             # optim_profits = []
 
+            out = out.detach().numpy()
+
             for b in range(batch_size):
                 benchmark_profits.append(X[i[b] + sequence_length - 1, 0] / X[i[b], 0])
 
-                buys = out[:, b, 0].detach().numpy()
-                sells = out[:, b, 1].detach().numpy()
+                if use_tanh:
+                    buys = np.zeros(sequence_length)
+                    sells = np.zeros(sequence_length)
+
+                    li = out[:, b, 0] > 0
+                    buys[li] = out[li, b, 0]
+
+                    li = out[:, b, 0] < 0
+                    sells[li] = -out[li, b, 0]
+
+                else:
+                    buys = out[:, b, 0]
+                    sells = out[:, b, 1]
                 wealths, _, _, _, _ = get_wealths(
                     X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
                 )
@@ -368,10 +387,21 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     model.eval()
     model.init_state(1)
     inp = obs_test.unsqueeze(1)
-    out = model(inp)
+    out = model(inp).detach().numpy()
 
-    buys = out[:, 0, 0].detach().numpy()
-    sells = out[:, 0, 1].detach().numpy()
+    if use_tanh:
+        buys = np.zeros(N_test)
+        sells = np.zeros(N_test)
+
+        li = out[:, 0, 0] > 0
+        buys[li] = out[li, 0, 0]
+
+        li = out[:, 0, 0] < 0
+        sells[li] = -out[li, 0, 0]
+
+    else:
+        buys = out[:, 0, 0]
+        sells = out[:, 0, 1]
 
     initial_usd = 1000
 
@@ -407,7 +437,6 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
 
     print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
 
-    plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
     ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
@@ -677,12 +706,13 @@ if __name__ == '__main__':
 
     lr = 0.0005
     batch_size = 128
+    use_tanh = True
 
     # NN model definition
-    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False)
-    target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
+    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh)
+    # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 500
+    n_epochs = 1000
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -707,10 +737,11 @@ if __name__ == '__main__':
         print_step = print_step,
         commissions = commissions,
         save = True,
+        use_tanh = use_tanh,
     )
 
-    policy_net.Qlearn = True
-
+    # policy_net.Qlearn = True
+    #
     # Qlearn(
     #     policy_net = policy_net,
     #     target_net = target_net,

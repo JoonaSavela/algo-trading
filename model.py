@@ -9,12 +9,13 @@ from collections import namedtuple, deque
 import random
 
 class FFN(nn.Module):
-    def __init__(self, inputs, batch_size, use_lstm = True, Qlearn = False, n_hidden_layers = 4, decay_per_layer = 0.85, hidden_size = None):
+    def __init__(self, inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = True, n_hidden_layers = 4, decay_per_layer = 0.85, hidden_size = None):
         super(FFN, self).__init__()
         self.n_inputs = sum(list(inputs.values()))
         self.batch_size = batch_size
         self.use_lstm = use_lstm
         self.Qlearn = Qlearn
+        self.use_tanh = use_tanh
 
         if hidden_size is None:
             hidden_size = self.n_inputs
@@ -33,7 +34,7 @@ class FFN(nn.Module):
 
         self.hidden_layers = nn.ModuleList([nn.Linear(ceil(self.hidden_size * decay_per_layer ** i), ceil(self.hidden_size * decay_per_layer ** (i + 1))) for i in range(n_hidden_layers)])
 
-        self.output_layer = nn.Linear(ceil(self.hidden_size * decay_per_layer ** n_hidden_layers), 3)
+        self.output_layer = nn.Linear(ceil(self.hidden_size * decay_per_layer ** n_hidden_layers), 1 if self.use_tanh and not self.Qlearn else 3)
 
     def init_state(self, batch_size = None):
         if batch_size is None:
@@ -52,7 +53,10 @@ class FFN(nn.Module):
 
         output = self.output_layer(hidden)
         if not self.Qlearn:
-            output = F.softmax(output, dim=-1)
+            if self.use_tanh:
+                output = torch.tanh(output)
+            else:
+                output = F.softmax(output, dim=-1)
 
         return output
 
