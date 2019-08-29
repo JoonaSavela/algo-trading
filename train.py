@@ -274,7 +274,7 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 # TODO: train an ensemble?
-def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps):
     X = load_all_data(files)
 
     obs, N, ma_ref = get_obs_input(X, inputs, params)
@@ -338,6 +338,11 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
         target = torch.stack(target, dim=1)
 
         loss = criterion(out, target)
+        starts = torch.randint(sequence_length // 2, (batch_size,))
+        stds = []
+        for b in range(batch_size):
+            stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :].std(dim = 0))
+        loss += eps / (torch.stack(stds).mean() + eps)
 
         loss.backward()
         losses.append(loss.item())
@@ -402,6 +407,9 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     else:
         buys = out[:, 0, 0]
         sells = out[:, 0, 1]
+
+    print(buys.max(), buys.min())
+    print(sells.max(), sells.min())
 
     initial_usd = 1000
 
@@ -706,7 +714,8 @@ if __name__ == '__main__':
 
     lr = 0.0005
     batch_size = 128
-    use_tanh = True
+    use_tanh = False
+    eps = 1e-2
 
     # NN model definition
     policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh)
@@ -738,6 +747,7 @@ if __name__ == '__main__':
         commissions = commissions,
         save = True,
         use_tanh = use_tanh,
+        eps = eps,
     )
 
     # policy_net.Qlearn = True
