@@ -273,6 +273,8 @@ def update_state(action, state, price, ma_ref, commissions):
     return state
 
 
+
+
 # TODO: train an ensemble?
 def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps):
     X = load_all_data(files)
@@ -338,11 +340,10 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
         target = torch.stack(target, dim=1)
 
         loss = criterion(out, target)
-        starts = torch.randint(sequence_length // 2, (batch_size,))
-        stds = []
-        for b in range(batch_size):
-            stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :].std(dim = 0))
-        loss += eps / (torch.stack(stds).mean() + eps)
+
+        loss += std_loss(out, sequence_length, batch_size, eps)
+
+        loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
 
         loss.backward()
         losses.append(loss.item())
@@ -696,11 +697,11 @@ if __name__ == '__main__':
         # 'buy_price': 1,
         # obs
         'price': 4,
-        'mus': 3,
-        'std': 3,
-        'ma': 3,
+        'mus': 4,
+        'std': 4,
+        'ma': 4,
         'ha': 4,
-        'stoch': 3,
+        'stoch': 4,
     }
 
     params = {
@@ -716,9 +717,10 @@ if __name__ == '__main__':
     batch_size = 128
     use_tanh = False
     eps = 1e-2
+    hidden_size = sum(list(inputs.values())) * 2
 
     # NN model definition
-    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh)
+    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
     n_epochs = 1000

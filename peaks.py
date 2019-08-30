@@ -36,12 +36,6 @@ def thresholding_algo(y, lag, threshold, influence):
                 avgFilter = np.asarray(avgFilter),
                 stdFilter = np.asarray(stdFilter))
 
-def get_peaks(sells, prominence = 0.0125, distance = 30):
-    sell_peaks, _ = find_peaks(sells, distance=distance, prominence=prominence)
-    buy_peaks, _ = find_peaks(1 - sells, distance=distance, prominence=prominence)
-
-    return buy_peaks, sell_peaks
-
 def get_left_prominence(x, wlen = None):
     if wlen is None:
         wlen = x.shape[0]
@@ -282,7 +276,7 @@ def get_labels(sells, use_tanh):
     max_profit = max(list(returns_dict.values()))
     #print(max_profit)
 
-    d = 5
+    d = 3
 
     for peak in buy_peaks:
         for k, v in returns_dict.items():
@@ -326,8 +320,6 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
     inp = obs.unsqueeze(1)
     signal_out = signal_model(inp).squeeze(1)
 
-    # TODO: are these needed?
-    buys = signal_out[:, 0].detach().numpy()
     sells = signal_out[:, 1].detach().numpy()
 
     labels = get_labels(sells, use_tanh)
@@ -369,11 +361,10 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
         target = torch.stack(target, dim=1)
 
         loss = criterion(out, target)
-        starts = torch.randint(sequence_length // 2, (batch_size,))
-        stds = []
-        for b in range(batch_size):
-            stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :].std(dim = 0))
-        loss += eps / (torch.stack(stds).mean() + eps)
+
+        loss += std_loss(out, sequence_length, batch_size, eps)
+
+        loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
 
         loss.backward()
         losses.append(loss.item())
@@ -510,20 +501,25 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
 
 if __name__ == '__main__':
 
+    # inputs = {
+    #     'price': 4,
+    #     'mus': 3,
+    #     'std': 3,
+    #     'ma': 3,
+    #     'ha': 4,
+    #     'stoch': 3,
+    # }
+
     inputs = {
-        # states
-        # 'capital_usd': 1,
-        # 'capital_coin': 1,
-        # 'timedelta': 1,
-        # 'buy_price': 1,
-        # obs
         'price': 4,
-        'mus': 3,
-        'std': 3,
-        'ma': 3,
+        'mus': 4,
+        'std': 4,
+        'ma': 4,
         'ha': 4,
-        'stoch': 3,
+        'stoch': 4,
     }
+    hidden_size = sum(list(inputs.values())) * 2
+
 
     params = {
         'alpha': 0.8,
@@ -534,7 +530,7 @@ if __name__ == '__main__':
 
     sequence_length = 500000
 
-    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False)
+    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False, hidden_size = hidden_size)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
     signal_model.eval()
 

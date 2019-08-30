@@ -1,10 +1,61 @@
 import numpy as np
 import pandas as pd
 from math import log10, floor
+from scipy.signal import find_peaks
 try:
     import torch
 except ImportError as e:
     print(e)
+
+
+def get_peaks(sells, prominence = 0.0125, distance = 30):
+    sell_peaks, _ = find_peaks(sells, distance=distance, prominence=prominence)
+    buy_peaks, _ = find_peaks(1 - sells, distance=distance, prominence=prominence)
+
+    return buy_peaks, sell_peaks
+
+def std_loss(out, sequence_length, batch_size, eps):
+    starts = torch.randint(sequence_length // 2, (batch_size,))
+    stds = []
+    for b in range(batch_size):
+        stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :].std(dim = 0))
+    return eps / (torch.stack(stds).mean() + eps)
+
+def diff_loss(out, batch_size, use_tanh, e, n_epochs):
+    diffs = []
+
+    for b in range(batch_size):
+        if use_tanh:
+            sells = -out[:, b, 0].detach().numpy()
+        else:
+            sells = out[:, b, 1].detach().numpy()
+
+        max_sell = sells.max()
+        min_sell = sells.min()
+
+        sells = (sells - min_sell) / (max_sell - min_sell)
+
+        buy_peaks, sell_peaks = get_peaks(sells)
+        buy_peaks = torch.from_numpy(buy_peaks)
+        sell_peaks = torch.from_numpy(sell_peaks)
+
+        if use_tanh:
+            tmp1 = 1 - out[buy_peaks, b, 0]
+            tmp2 = out[sell_peaks, b, 0] + 1
+
+            # tmp1 = out[buy_peaks, b, 0].std()
+            # tmp2 = out[sell_peaks, b, 0].std()
+        else:
+            tmp1 = out[buy_peaks, b, 1]
+            tmp2 = 1 - out[sell_peaks, b, 1]
+
+            # tmp1 = out[buy_peaks, b, 1].std()
+            # tmp2 = out[sell_peaks, b, 1].std()
+
+        diffs.append(tmp1)
+        diffs.append(tmp2)
+
+    return torch.cat(diffs).mean() * (1 - 0.99 ** (e / n_epochs))
 
 def aggregate(X, n = 5):
     aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))

@@ -26,20 +26,24 @@ def main():
     X = load_all_data(test_files)
     # X = X[:1200, :]
 
+    # inputs = {
+    #     'price': 4,
+    #     'mus': 3,
+    #     'std': 3,
+    #     'ma': 3,
+    #     'ha': 4,
+    #     'stoch': 3,
+    # }
+
     inputs = {
-        # states
-        # 'capital_usd': 1,
-        # 'capital_coin': 1,
-        # 'timedelta': 1,
-        # 'buy_price': 1,
-        # obs
         'price': 4,
-        'mus': 3,
-        'std': 3,
-        'ma': 3,
+        'mus': 4,
+        'std': 4,
+        'ma': 4,
         'ha': 4,
-        'stoch': 3,
+        'stoch': 4,
     }
+    hidden_size = sum(list(inputs.values())) * 2
 
     params = {
         'alpha': 0.8,
@@ -50,7 +54,7 @@ def main():
 
     sequence_length = 8000
 
-    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False)
+    signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False, hidden_size = hidden_size)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
     signal_model.eval()
 
