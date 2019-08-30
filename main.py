@@ -12,6 +12,7 @@ import copy
 from utils import *
 from model import *
 from optimize import get_wealths
+from peaks import get_peaks
 
 def main():
     plt.style.use('seaborn')
@@ -47,7 +48,7 @@ def main():
         'stoch_window_min_max': [30, 2000],
     }
 
-    sequence_length = 750
+    sequence_length = 8000
 
     signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
@@ -57,7 +58,7 @@ def main():
     model.load_state_dict(torch.load('models/' + model.name + '.pt'))
     model.eval()
 
-    alpha = 0.#75
+    alpha = 0.#5
     mus = smoothed_returns(X, alpha=alpha)
     mus = smoothed_returns(np.cumprod(mus + 1).reshape(-1, 1), alpha=alpha)
 
@@ -76,6 +77,8 @@ def main():
 
     inp = obs.unsqueeze(1)
     signal_out = signal_model(inp)
+
+    buy_peaks, sell_peaks = get_peaks(signal_out[:, 0, 1].detach().numpy())
 
     out = model(signal_out).detach().numpy()
 
@@ -103,21 +106,21 @@ def main():
 
     th = 0.5
     buys_li = (buys[1:] > th) & (np.diff(buys) < 0)
-    buy_peaks = idx[buys_li]
+    buy_peaks_approx = idx[buys_li]
 
     sells_li = (sells[1:] > th) & (np.diff(sells) < 0)
-    sell_peaks = idx[sells_li]
+    sell_peaks_approx = idx[sells_li]
 
     d = 0
-    buy_peaks += d
-    sell_peaks += d
-    buy_peaks = buy_peaks[buy_peaks < sequence_length]
-    sell_peaks = sell_peaks[sell_peaks < sequence_length]
+    buy_peaks_approx += d
+    sell_peaks_approx += d
+    buy_peaks_approx = buy_peaks_approx[buy_peaks_approx < sequence_length]
+    sell_peaks_approx = sell_peaks_approx[sell_peaks_approx < sequence_length]
 
     owns1 = np.zeros((sequence_length,))
 
-    for peak in buy_peaks:
-        sell_peak = sell_peaks[sell_peaks > peak]
+    for peak in buy_peaks_approx:
+        sell_peak = sell_peaks_approx[sell_peaks_approx > peak]
         sell_peak = sell_peak[0] if len(sell_peak) > 0 else sequence_length
         owns1[peak:sell_peak] = 1
 
@@ -145,16 +148,21 @@ def main():
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
     ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-    ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks')
-    ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks')
+    ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'mo', ms=12.0, alpha=0.7, label='sell peaks')
+    ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'co', ms=12.0, alpha=0.7, label='buy peaks')
+    ax[0].plot(sell_peaks_approx, X[sell_peaks_approx, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks approx')
+    ax[0].plot(buy_peaks_approx, X[buy_peaks_approx, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks approx')
     ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
     ax[0].legend()
 
-    ax[1].plot(signal_out[:, 0, 1].detach().numpy(), c='k', alpha=0.5, label='signal')
+    signal_sells = signal_out[:, 0, 1].detach().numpy()
+    ax[1].plot(signal_sells, c='k', alpha=0.5, label='signal')
     ax[1].plot(buys, c='g', alpha=0.5, label='buy')
     ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    ax[1].plot(sell_peaks, sells[sell_peaks], 'ro', alpha=0.7, label='sell peaks')
-    ax[1].plot(buy_peaks, buys[buy_peaks], 'go', alpha=0.7, label='buy peaks')
+    ax[1].plot(sell_peaks, signal_sells[sell_peaks], 'mv', alpha=0.7, label='sell peaks')
+    ax[1].plot(buy_peaks, signal_sells[buy_peaks], 'c^', alpha=0.7, label='buy peaks')
+    ax[1].plot(sell_peaks_approx, sells[sell_peaks_approx], 'ro', alpha=0.7, label='sell peaks approx')
+    ax[1].plot(buy_peaks_approx, buys[buy_peaks_approx], 'go', alpha=0.7, label='buy peaks approx')
     ax[1].legend()
     plt.show()
 

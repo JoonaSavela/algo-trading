@@ -282,15 +282,17 @@ def get_labels(sells, use_tanh):
     max_profit = max(list(returns_dict.values()))
     #print(max_profit)
 
+    d = 5
+
     for peak in buy_peaks:
         for k, v in returns_dict.items():
-            if peak + k < N:
-                buy_labels[peak + k] = (v - 1) / (max_profit - 1)
+            if peak + k + d < N:
+                buy_labels[peak + k + d] = (v - 1) / (max_profit - 1)
 
     for peak in sell_peaks:
         for k, v in returns_dict.items():
-            if peak + k < N:
-                sell_labels[peak + k] = (v - 1) / (max_profit - 1)
+            if peak + k + d < N:
+                sell_labels[peak + k + d] = (v - 1) / (max_profit - 1)
 
     diffs_labels = buy_labels - sell_labels
     if use_tanh:
