@@ -22,7 +22,7 @@ def main():
 
     # idx = np.array([0, 1, 2, 3])
     # idx = np.arange(2)
-    test_files = np.array(test_files)[:10]
+    test_files = np.array(test_files)[:1000]
     X = load_all_data(test_files)
     # X = X[:1200, :]
 
@@ -43,16 +43,18 @@ def main():
         'ha': 4,
         'stoch': 4,
     }
-    hidden_size = sum(list(inputs.values())) * 2
+    hidden_size = sum(list(inputs.values())) * 1
+
+    N = 1500
 
     params = {
         'alpha': 0.8,
-        'std_window_min_max': [30, 2000],
-        'ma_window_min_max': [30, 2000],
-        'stoch_window_min_max': [30, 2000],
+        'std_window_min_max': [30, N],
+        'ma_window_min_max': [30, N],
+        'stoch_window_min_max': [30, N],
     }
 
-    sequence_length = 8000
+    sequence_length = 800000
 
     signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False, hidden_size = hidden_size)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))

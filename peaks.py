@@ -8,6 +8,7 @@ from model import *
 import numpy as np
 from optimize import get_wealths
 import matplotlib.pyplot as plt
+import train as tr
 
 def thresholding_algo(y, lag, threshold, influence):
     signals = np.zeros(len(y))
@@ -227,8 +228,8 @@ def plot_peaks(files, inputs, params, model, sequence_length):
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
     ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-    ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'mo', alpha=0.7, label='sell peaks')
-    ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'co', alpha=0.7, label='buy peaks')
+    ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'mo', ms=12.0, alpha=0.7, label='sell peaks')
+    ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'co', ms=12.0, alpha=0.7, label='buy peaks')
     ax[0].plot(sell_peaks_approx, X[sell_peaks_approx, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks approx')
     ax[0].plot(buy_peaks_approx, X[buy_peaks_approx, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks approx')
     # ax[0].plot(np.cumprod(mus + 1), alpha=0.7, label='smoothed price')
@@ -238,8 +239,8 @@ def plot_peaks(files, inputs, params, model, sequence_length):
 
     #ax[1].plot(buys, c='g', alpha=0.5, label='buy')
     ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    ax[1].plot(sell_peaks, sells[sell_peaks], 'mo', alpha=0.7, label='sell peaks')
-    ax[1].plot(buy_peaks, sells[buy_peaks], 'co', alpha=0.7, label='buy peaks')
+    ax[1].plot(sell_peaks, sells[sell_peaks], 'mo', ms=12.0, alpha=0.7, label='sell peaks')
+    ax[1].plot(buy_peaks, sells[buy_peaks], 'co', ms=12.0, alpha=0.7, label='buy peaks')
     #ax[1].plot(np.arange(wlen - 1, sequence_length), sell_prominences, 'k', alpha=0.6, label='sell prominences')
     #ax[1].plot(np.arange(wlen - 1, sequence_length), buy_prominences, 'g', alpha=0.6, label='buy prominences')
     ax[1].plot(buy_peaks_approx, sells[buy_peaks_approx], 'go', alpha=0.5, label='buy peaks approx')
@@ -249,65 +250,87 @@ def plot_peaks(files, inputs, params, model, sequence_length):
 
 
 def get_labels(sells, use_tanh):
-    # TODO: calculate these; save into file or something
-    returns_dict = {
-        -9: 1.0919042700491126,
-        -8: 1.2247738109953097,
-        -7: 1.490936256673261,
-        -6: 1.70637431678199,
-        -5: 2.0100570566933804,
-        -4: 2.110587760602813,
-        -3: 2.1718015504678863,
-        -2: 2.1546475450636637,
-        -1: 2.0275320009700644,
-        0: 1.862710155114335,
-        1: 1.4483548475933,
-        2: 1.1213635900726804,
-        3: 1.0507336634485362,
-    }
+    n = sells.shape[0]
+
+    max_sell = sells.max()
+    min_sell = sells.min()
+
+    sells = (sells - min_sell) / (max_sell - min_sell)
 
     buy_peaks, sell_peaks = get_peaks(sells)
 
-    N = sells.shape[0]
-
-    buy_labels = np.zeros(N)
-    sell_labels = np.zeros(N)
-
-    max_profit = max(list(returns_dict.values()))
-    #print(max_profit)
-
-    d = 3
+    buys_optim = np.zeros((n,))
 
     for peak in buy_peaks:
-        for k, v in returns_dict.items():
-            if peak + k + d < N:
-                buy_labels[peak + k + d] = (v - 1) / (max_profit - 1)
+        sell_peak = sell_peaks[sell_peaks > peak]
+        sell_peak = sell_peak[0] if len(sell_peak) > 0 else n
+        buys_optim[peak:sell_peak] = 1
 
-    for peak in sell_peaks:
-        for k, v in returns_dict.items():
-            if peak + k + d < N:
-                sell_labels[peak + k + d] = (v - 1) / (max_profit - 1)
+    buys_optim = buys_optim.astype(float)
 
-    diffs_labels = buy_labels - sell_labels
-    if use_tanh:
-        return diffs_labels.reshape((-1, 1))
-
-    buy = np.zeros(N)
-    sell = np.zeros(N)
-
-    li = diffs_labels > 0
-    buy[li] = diffs_labels[li]
-
-    #print(buy.mean())
-
-    li = diffs_labels < 0
-    sell[li] = -diffs_labels[li]
-
-    do_nothing = 1 - buy - sell
-
-    labels = np.stack([buy, sell, do_nothing], axis = 1)
+    labels = tr.get_labels(sells, buys_optim, use_tanh = use_tanh, l = 50, c = 5, skew = 0.4, use_percentage = False)
 
     return labels
+
+    # TODO: calculate these; save into file or something
+    # returns_dict = {
+    #     -9: 1.0919042700491126,
+    #     -8: 1.2247738109953097,
+    #     -7: 1.490936256673261,
+    #     -6: 1.70637431678199,
+    #     -5: 2.0100570566933804,
+    #     -4: 2.110587760602813,
+    #     -3: 2.1718015504678863,
+    #     -2: 2.1546475450636637,
+    #     -1: 2.0275320009700644,
+    #     0: 1.862710155114335,
+    #     1: 1.4483548475933,
+    #     2: 1.1213635900726804,
+    #     3: 1.0507336634485362,
+    # }
+    #
+    # buy_peaks, sell_peaks = get_peaks(sells)
+    #
+    # N = sells.shape[0]
+    #
+    # buy_labels = np.zeros(N)
+    # sell_labels = np.zeros(N)
+    #
+    # max_profit = max(list(returns_dict.values()))
+    # #print(max_profit)
+    #
+    # d = 0
+    #
+    # for peak in buy_peaks:
+    #     for k, v in returns_dict.items():
+    #         if peak + k + d < N:
+    #             buy_labels[peak + k + d] = (v - 1) / (max_profit - 1)
+    #
+    # for peak in sell_peaks:
+    #     for k, v in returns_dict.items():
+    #         if peak + k + d < N:
+    #             sell_labels[peak + k + d] = (v - 1) / (max_profit - 1)
+    #
+    # diffs_labels = buy_labels - sell_labels
+    # if use_tanh:
+    #     return diffs_labels.reshape((-1, 1))
+    #
+    # buy = np.zeros(N)
+    # sell = np.zeros(N)
+    #
+    # li = diffs_labels > 0
+    # buy[li] = diffs_labels[li]
+    #
+    # #print(buy.mean())
+    #
+    # li = diffs_labels < 0
+    # sell[li] = -diffs_labels[li]
+    #
+    # do_nothing = 1 - buy - sell
+    #
+    # labels = np.stack([buy, sell, do_nothing], axis = 1)
+    #
+    # return labels
 
 def train(files, inputs, params, model, signal_model, sequence_length, n_epochs, batch_size, lr, commissions, print_step, use_tanh, eps, save):
     X = load_all_data(files)
@@ -362,9 +385,9 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
 
         loss = criterion(out, target)
 
-        loss += std_loss(out, sequence_length, batch_size, eps)
+        loss += std_loss(out, sequence_length, batch_size, eps, e, n_epochs)
 
-        loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
+        # loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
 
         loss.backward()
         losses.append(loss.item())
@@ -518,17 +541,19 @@ if __name__ == '__main__':
         'ha': 4,
         'stoch': 4,
     }
-    hidden_size = sum(list(inputs.values())) * 2
+    hidden_size = sum(list(inputs.values())) * 1
 
+
+    N = 1500
 
     params = {
         'alpha': 0.8,
-        'std_window_min_max': [30, 2000],
-        'ma_window_min_max': [30, 2000],
-        'stoch_window_min_max': [30, 2000],
+        'std_window_min_max': [30, N],
+        'ma_window_min_max': [30, N],
+        'stoch_window_min_max': [30, N],
     }
 
-    sequence_length = 500000
+    sequence_length = 200000
 
     signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False, hidden_size = hidden_size)
     signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
@@ -539,7 +564,7 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    plot_peaks(files[:200], inputs, params, signal_model, sequence_length)
+    plot_peaks(files[:2], inputs, params, signal_model, sequence_length)
 
     batch_size = 128
     hidden_size = 16

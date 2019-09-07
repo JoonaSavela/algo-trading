@@ -20,20 +20,12 @@ import math
 # TODO: reduce repetition
 # TODO: get the capitals as well, feed them to the initial states
 #       - get also buy prices and timedeltas?
-def get_labels(files, coin, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False):
-    X = load_all_data(files)
-
+def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False, use_percentage = True):
     if n is None:
         n = X.shape[0]
 
-    df = pd.read_csv(
-        'data/labels/' + coin + '.csv',
-        index_col = 0,
-        header = None,
-        nrows = n,
-    )
-
-    buys_optim = df.values.reshape(-1)
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
 
     diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
     idx = np.arange(n + 1)
@@ -66,12 +58,14 @@ def get_labels(files, coin, use_tanh = False, n = None, l = 75, c = 1, skew = 0.
         min_price = nearby_prices[min_i]
         max_price = np.max(nearby_prices)
 
-        values = (nearby_idx - nearby_idx[min_i]) * (1 - skew * (nearby_idx > nearby_idx[min_i]).astype(float))
-        values = np.exp(- c * (max_price / min_price - 1) * values ** 2)
-        buys_li[start_i:end_i] = values
+        if use_percentage:
+            change = (max_price / min_price - 1)
+        else:
+            change = max_price - min_price
 
-    # print(sells_idx[-3:])
-    # print(buys_idx[-3:])
+        values = (nearby_idx - nearby_idx[min_i]) * (1 - skew * (nearby_idx > nearby_idx[min_i]).astype(float))
+        values = np.exp(- c * change * values ** 2)
+        buys_li[start_i:end_i] = values
 
     for i in range(sells_idx.shape[0]):
         sell_i = sells_idx[i]
@@ -86,19 +80,20 @@ def get_labels(files, coin, use_tanh = False, n = None, l = 75, c = 1, skew = 0.
         if i < sells_idx.shape[0] - 1:
             end_i = min(end_i, (sell_i + buys_idx[i + 1]) // 2)
 
-        # print(start_i, end_i)
         nearby_idx = np.arange(start_i, end_i)
         nearby_prices = X[nearby_idx, 0]
         max_i = min(sell_i - start_i, end_i - start_i - 1)
-        # print(start_i, end_i, sell_i, sells_idx.shape[0], i)
         max_price = nearby_prices[max_i]
         min_price = np.min(nearby_prices)
 
-        values = (nearby_idx - nearby_idx[max_i]) * (1 - skew * (nearby_idx > nearby_idx[max_i]).astype(float))
-        values = np.exp(- c * (max_price / min_price - 1) * values ** 2)
-        sells_li[start_i:end_i] = values
+        if use_percentage:
+            change = (max_price / min_price - 1)
+        else:
+            change = max_price - min_price
 
-    # buys_optim = (buys_li == 1)
+        values = (nearby_idx - nearby_idx[max_i]) * (1 - skew * (nearby_idx > nearby_idx[max_i]).astype(float))
+        values = np.exp(- c * change * values ** 2)
+        sells_li[start_i:end_i] = values
 
     diffs_li = buys_li - sells_li
 
@@ -127,78 +122,6 @@ def get_labels(files, coin, use_tanh = False, n = None, l = 75, c = 1, skew = 0.
     return labels
 
 
-
-def get_labels_test(files, coin, use_tanh = False, n = None, end_val = 0.001, separate = False):
-    X = load_all_data(files)
-
-    if n is None:
-        n = X.shape[0]
-
-    df = pd.read_csv(
-        'data/labels/' + coin + '.csv',
-        index_col = 0,
-        header = None,
-        nrows = n,
-    )
-
-    buys_optim = df.values.reshape(-1)
-
-    diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
-    idx = np.arange(n + 1)
-
-    buys_li = diffs == 1
-    sells_li = diffs == -1
-
-    buys_idx = idx[buys_li]
-    sells_idx = idx[sells_li]
-
-    buys_li = buys_li.astype(float)
-    sells_li = sells_li.astype(float)
-
-    for i in range(buys_idx.shape[0]):
-        buy_i = buys_idx[i]
-
-        start_i = buy_i
-        end_i = sells_idx[i]
-
-        nearby_idx = np.arange(start_i, end_i)
-
-        c = - np.log(end_val) / ((end_i - start_i) ** 2)
-
-        values = np.exp(- c * (nearby_idx - start_i) ** 2)
-        buys_li[start_i:end_i] = values
-
-    # print(sells_idx[-3:])
-    # print(buys_idx[-3:])
-
-    for i in range(sells_idx.shape[0]):
-        sell_i = sells_idx[i]
-
-        start_i = sell_i
-        end_i = buys_idx[i + 1] if i < buys_idx.shape[0] - 1 else n
-
-        nearby_idx = np.arange(start_i, end_i)
-
-        c = - np.log(end_val) / ((end_i - start_i) ** 2)
-
-        values = np.exp(- c * (nearby_idx - start_i) ** 2)
-        sells_li[start_i:end_i] = values
-
-    buy = buys_li[:-1]
-    sell = sells_li[:-1]
-
-    do_nothing = 1 - buy - sell
-
-    if separate:
-        return buy, sell, do_nothing
-
-    labels = np.stack([buy, sell, do_nothing], axis = 1)
-
-    return labels
-
-
-
-
 def plot_labels(files, coin, n = 600):
     X = load_all_data(files)
 
@@ -220,7 +143,7 @@ def plot_labels(files, coin, n = 600):
 
     idx = np.arange(n)
 
-    buy, sell, do_nothing = get_labels(files, coin, n = n, separate = True)
+    buy, sell, do_nothing = get_labels(X, buys_optim, n = n, separate = True)
 
     plt.style.use('seaborn')
     #plt.plot(buys_optim, label='buys')
@@ -297,7 +220,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     prices = prices[:-N_discard]
     N -= N_discard
 
-    N_test = sequence_length * 4
+    N_test = sequence_length * 1
     # print('N test: {}'.format(N_test))
     N -= N_test
 
@@ -341,9 +264,9 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
 
         loss = criterion(out, target)
 
-        loss += std_loss(out, sequence_length, batch_size, eps)
+        loss += std_loss(out, sequence_length, batch_size, eps, e, n_epochs)
 
-        loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
+        # loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
 
         loss.backward()
         losses.append(loss.item())
@@ -704,11 +627,13 @@ if __name__ == '__main__':
         'stoch': 4,
     }
 
+    N = 1500
+
     params = {
         'alpha': 0.8,
-        'std_window_min_max': [30, 2000],
-        'ma_window_min_max': [30, 2000],
-        'stoch_window_min_max': [30, 2000],
+        'std_window_min_max': [30, N],
+        'ma_window_min_max': [30, N],
+        'stoch_window_min_max': [30, N],
     }
 
     sequence_length = 500
@@ -717,7 +642,7 @@ if __name__ == '__main__':
     batch_size = 128
     use_tanh = False
     eps = 1e-2
-    hidden_size = sum(list(inputs.values())) * 2
+    hidden_size = sum(list(inputs.values())) * 1
 
     # NN model definition
     policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size)

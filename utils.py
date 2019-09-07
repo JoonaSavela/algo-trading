@@ -14,12 +14,12 @@ def get_peaks(sells, prominence = 0.0125, distance = 30):
 
     return buy_peaks, sell_peaks
 
-def std_loss(out, sequence_length, batch_size, eps):
+def std_loss(out, sequence_length, batch_size, eps, e, n_epochs):
     starts = torch.randint(sequence_length // 2, (batch_size,))
     stds = []
     for b in range(batch_size):
-        stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :].std(dim = 0))
-    return eps / (torch.stack(stds).mean() + eps)
+        stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :2].std(dim = 0))
+    return eps / (torch.stack(stds).mean() + eps) * 0.99 ** (e  / n_epochs)
 
 def diff_loss(out, batch_size, use_tanh, e, n_epochs):
     diffs = []
