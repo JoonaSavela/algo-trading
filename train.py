@@ -18,8 +18,6 @@ from optimize import get_wealths
 import math
 
 # TODO: reduce repetition
-# TODO: get the capitals as well, feed them to the initial states
-#       - get also buy prices and timedeltas?
 def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False, use_percentage = True):
     if n is None:
         n = X.shape[0]
@@ -198,14 +196,23 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 
-# TODO: train an ensemble?
+
 def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps):
     X = load_all_data(files)
 
+    df = pd.read_csv(
+        'data/labels/' + coin + '.csv',
+        index_col = 0,
+        header = None,
+    )
+
+    buys_optim = df.values.reshape(-1)
+
     obs, N, ma_ref = get_obs_input(X, inputs, params)
     X = X[-N:, :]
+    buys_optim = buys_optim[-N:]
 
-    labels = get_labels(files, coin, use_tanh)
+    labels = get_labels(X, buys_optim, use_tanh)
 
     labels = torch.from_numpy(labels[-N:, :]).type(torch.float32)
 
