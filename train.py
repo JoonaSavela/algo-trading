@@ -7,6 +7,7 @@ import pandas as pd
 import json
 import glob
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from model import *
 from data import load_all_data
 from utils import *
@@ -18,148 +19,207 @@ from optimize import get_wealths
 import math
 
 # TODO: reduce repetition
-def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False, use_percentage = True):
+def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False, use_percentage = True, use_behavioral_cloning = False, n_ahead = 30, n_slots = 10, q = 0.99):
     if n is None:
         n = X.shape[0]
 
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
+    if use_behavioral_cloning:
+        min_max_log_returns = None
 
-    diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
-    idx = np.arange(n + 1)
+        if len(X.shape) == 1:
+            X = X.reshape(-1, 1)
 
-    buys_li = diffs == 1
-    sells_li = diffs == -1
+        diffs = np.diff(np.concatenate([np.array([0]), buys_optim, np.array([0])]))
+        idx = np.arange(n + 1)
 
-    buys_idx = idx[buys_li]
-    sells_idx = idx[sells_li]
+        buys_li = diffs == 1
+        sells_li = diffs == -1
 
-    buys_li = buys_li.astype(float)
-    sells_li = sells_li.astype(float)
+        buys_idx = idx[buys_li]
+        sells_idx = idx[sells_li]
 
-    for i in range(buys_idx.shape[0]):
-        buy_i = buys_idx[i]
+        buys_li = buys_li.astype(float)
+        sells_li = sells_li.astype(float)
 
-        start_i = max(0, buy_i - l)
-        end_i = min(n, buy_i + l)
+        for i in range(buys_idx.shape[0]):
+            buy_i = buys_idx[i]
 
-        if i > 0:
-            start_i = max(start_i, (buy_i + buys_idx[i - 1]) // 2)
-            start_i = max(start_i, sells_idx[i - 1])
+            start_i = max(0, buy_i - l)
+            end_i = min(n, buy_i + l)
 
-        if i < buys_idx.shape[0] - 1:
-            end_i = min(end_i, (buy_i + sells_idx[i]) // 2)
+            if i > 0:
+                start_i = max(start_i, (buy_i + buys_idx[i - 1]) // 2)
+                start_i = max(start_i, sells_idx[i - 1])
 
-        nearby_idx = np.arange(start_i, end_i)
-        nearby_prices = X[nearby_idx, 0]
-        min_i = min(buy_i - start_i, end_i - start_i - 1)
-        min_price = nearby_prices[min_i]
-        max_price = np.max(nearby_prices)
+            if i < buys_idx.shape[0] - 1:
+                end_i = min(end_i, (buy_i + sells_idx[i]) // 2)
 
-        if use_percentage:
-            change = (max_price / min_price - 1)
-        else:
-            change = max_price - min_price
+            nearby_idx = np.arange(start_i, end_i)
+            nearby_prices = X[nearby_idx, 0]
+            min_i = min(buy_i - start_i, end_i - start_i - 1)
+            min_price = nearby_prices[min_i]
+            max_price = np.max(nearby_prices)
 
-        values = (nearby_idx - nearby_idx[min_i]) * (1 - skew * (nearby_idx > nearby_idx[min_i]).astype(float))
-        values = np.exp(- c * change * values ** 2)
-        buys_li[start_i:end_i] = values
+            if use_percentage:
+                change = (max_price / min_price - 1)
+            else:
+                change = max_price - min_price
 
-    for i in range(sells_idx.shape[0]):
-        sell_i = sells_idx[i]
+            values = (nearby_idx - nearby_idx[min_i]) * (1 - skew * (nearby_idx > nearby_idx[min_i]).astype(float))
+            values = np.exp(- c * change * values ** 2)
+            buys_li[start_i:end_i] = values
 
-        start_i = max(0, sell_i - l)
-        end_i = min(n, sell_i + l)
+        for i in range(sells_idx.shape[0]):
+            sell_i = sells_idx[i]
 
-        if i > 0:
-            start_i = max(start_i, (sell_i + sells_idx[i - 1]) // 2)
-            start_i = max(start_i, buys_idx[i])
+            start_i = max(0, sell_i - l)
+            end_i = min(n, sell_i + l)
 
-        if i < sells_idx.shape[0] - 1:
-            end_i = min(end_i, (sell_i + buys_idx[i + 1]) // 2)
+            if i > 0:
+                start_i = max(start_i, (sell_i + sells_idx[i - 1]) // 2)
+                start_i = max(start_i, buys_idx[i])
 
-        nearby_idx = np.arange(start_i, end_i)
-        nearby_prices = X[nearby_idx, 0]
-        max_i = min(sell_i - start_i, end_i - start_i - 1)
-        max_price = nearby_prices[max_i]
-        min_price = np.min(nearby_prices)
+            if i < sells_idx.shape[0] - 1:
+                end_i = min(end_i, (sell_i + buys_idx[i + 1]) // 2)
 
-        if use_percentage:
-            change = (max_price / min_price - 1)
-        else:
-            change = max_price - min_price
+            nearby_idx = np.arange(start_i, end_i)
+            nearby_prices = X[nearby_idx, 0]
+            max_i = min(sell_i - start_i, end_i - start_i - 1)
+            max_price = nearby_prices[max_i]
+            min_price = np.min(nearby_prices)
 
-        values = (nearby_idx - nearby_idx[max_i]) * (1 - skew * (nearby_idx > nearby_idx[max_i]).astype(float))
-        values = np.exp(- c * change * values ** 2)
-        sells_li[start_i:end_i] = values
+            if use_percentage:
+                change = (max_price / min_price - 1)
+            else:
+                change = max_price - min_price
 
-    diffs_li = buys_li - sells_li
+            values = (nearby_idx - nearby_idx[max_i]) * (1 - skew * (nearby_idx > nearby_idx[max_i]).astype(float))
+            values = np.exp(- c * change * values ** 2)
+            sells_li[start_i:end_i] = values
 
-    if use_tanh:
-        return diffs_li[:-1].reshape((-1, 1))
+        diffs_li = buys_li - sells_li
 
-    buy = np.zeros(diffs_li.shape[0])
-    sell = np.zeros(diffs_li.shape[0])
+        if use_tanh:
+            return diffs_li[:-1].reshape((-1, 1))
 
-    li = diffs_li > 0
-    buy[li] = diffs_li[li]
+        buy = np.zeros(diffs_li.shape[0])
+        sell = np.zeros(diffs_li.shape[0])
 
-    li = diffs_li < 0
-    sell[li] = -diffs_li[li]
+        li = diffs_li > 0
+        buy[li] = diffs_li[li]
 
-    buy = buy[:-1]
-    sell = sell[:-1]
+        li = diffs_li < 0
+        sell[li] = -diffs_li[li]
 
-    do_nothing = 1 - buy - sell
+        buy = buy[:-1]
+        sell = sell[:-1]
 
-    if separate:
-        return buy, sell, do_nothing
+        do_nothing = 1 - buy - sell
 
-    labels = np.stack([buy, sell, do_nothing], axis = 1)
+        if separate:
+            return buy, sell, do_nothing
 
-    return labels
+        labels = np.stack([buy, sell, do_nothing], axis = 1)
+
+    else:
+        n = min(n, X.shape[0] - n_ahead)
+        labels = np.zeros((n, n_ahead, n_slots))
+        min_max_log_returns = np.zeros((n_ahead, 2))
+
+        for i in range(1, n_ahead + 1):
+            returns = X[i:, 0] / X[:-i, 0]
+            log_returns = np.log(returns)
+
+            min_log_r = np.quantile(log_returns, 1 - q)
+            max_log_r = np.quantile(log_returns, q)
+            min_max_log_returns[i - 1, :] = np.array([min_log_r, max_log_r])
+
+            inv_block_size = n_slots / (max_log_r - min_log_r)
+
+            idx = np.floor((log_returns - min_log_r) * inv_block_size)
+
+            idx = np.clip(idx, 0, n_slots - 1)[:n]
+
+            b = np.zeros((n, n_slots))
+            b[np.arange(n), idx.astype(int)] = 1
+
+            labels[:, i - 1, :] = b
+
+    return labels, n, min_max_log_returns
 
 
-def plot_labels(files, coin, n = 600):
+
+
+def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ahead = 30):
     X = load_all_data(files)
 
     if n is None:
         n = X.shape[0]
 
-    df = pd.read_csv(
-        'data/labels/' + coin + '.csv',
-        index_col = 0,
-        header = None,
-        nrows = n,
-    )
+    if use_behavioral_cloning:
+        df = pd.read_csv(
+            'data/labels/' + coin + '.csv',
+            index_col = 0,
+            header = None,
+            nrows = n,
+        )
 
-    buys_optim = df.values.reshape(-1)
+        buys_optim = df.values.reshape(-1)
 
-    wealths, _, _, _, _ = get_wealths(
-        X[:n, :], buys_optim
-    )
+        wealths, _, _, _, _ = get_wealths(
+            X[:n, :], buys_optim
+        )
 
-    idx = np.arange(n)
+        idx = np.arange(n)
 
-    buy, sell, do_nothing = get_labels(X, buys_optim, n = n, separate = True)
+        buy, sell, do_nothing = get_labels(X, buys_optim, n = n, separate = True)
 
-    plt.style.use('seaborn')
-    #plt.plot(buys_optim, label='buys')
-    # plt.plot(X[:n, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-    # plt.plot(wealths + 1, c='b', alpha=0.5, label='wealth')
-    plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
-    plt.plot(wealths * 100, c='b', alpha=0.5, label='wealth')
+        plt.style.use('seaborn')
+        #plt.plot(buys_optim, label='buys')
+        # plt.plot(X[:n, 0] / X[0, 0], c='k', alpha=0.5, label='price')
+        # plt.plot(wealths + 1, c='b', alpha=0.5, label='wealth')
+        plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
+        plt.plot(wealths * 100, c='b', alpha=0.5, label='wealth')
 
-    plt.plot(idx, buy, c='g', alpha=0.5)
-    plt.plot(idx, sell, c='r', alpha=0.5)
+        plt.plot(idx, buy, c='g', alpha=0.5)
+        plt.plot(idx, sell, c='r', alpha=0.5)
 
-    plt.axhline(0.5, c='k', linestyle=':', alpha=0.75)
+        plt.axhline(0.5, c='k', linestyle=':', alpha=0.75)
 
-    #plt.plot(idx, buys_li - sells_li, c='m', alpha=0.5)
+        #plt.plot(idx, buys_li - sells_li, c='m', alpha=0.5)
 
-    # plt.yscale('log')
-    plt.legend()
-    plt.show()
+        # plt.yscale('log')
+        plt.legend()
+        plt.show()
+
+    else:
+        labels, n, min_max_log_returns = get_labels(X, None, n = n, use_behavioral_cloning = False, n_ahead = n_ahead, n_slots = n_slots)
+        labels = torch.from_numpy(labels).type(torch.float32)
+        min_max_log_returns = torch.from_numpy(min_max_log_returns).type(torch.float32)
+
+        expected_profits, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(labels.unsqueeze(1), min_max_log_returns)
+
+        buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx)
+
+        wealths, _, _, _, _ = get_wealths(
+            X[:n, :], buy_li, sell_li
+        )
+
+        print(wealths[-1] + 1)
+
+        plt.style.use('seaborn')
+
+        fig, ax = plt.subplots(ncols = 2)
+
+        ax[0].plot(X[:n+n_ahead, 0] / X[0, 0], c='k', alpha=0.5, label='price')
+        ax[0].plot(wealths + 1, c='b', alpha=0.7, label='wealth')
+        ax[0].plot(buys, X[buys, 0] / X[0, 0], 'go', alpha=0.7, label='buys')
+        ax[0].plot(sells, X[sells, 0] / X[0, 0], 'ro', alpha=0.7, label='sells')
+        ax[0].legend()
+
+        ax[1].imshow(expected_profits[:, 0, :], cmap = cm.plasma)
+
+        plt.show()
 
 
 
@@ -197,47 +257,51 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 
-def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps, use_behavioral_cloning, n_ahead, n_slots):
     X = load_all_data(files)
 
-    df = pd.read_csv(
-        'data/labels/' + coin + '.csv',
-        index_col = 0,
-        header = None,
-    )
-
-    buys_optim = df.values.reshape(-1)
-
-    obs, N, ma_ref = get_obs_input(X, inputs, params)
+    obs, N, _ = get_obs_input(X, inputs, params)
     X = X[-N:, :]
-    buys_optim = buys_optim[-N:]
 
-    labels = get_labels(X, buys_optim, use_tanh)
+    if use_behavioral_cloning:
+        df = pd.read_csv(
+            'data/labels/' + coin + '.csv',
+            index_col = 0,
+            header = None,
+        )
+
+        buys_optim = df.values.reshape(-1)
+
+        buys_optim = buys_optim[-N:]
+    else:
+        buys_optim = None
+
+    labels, N, min_max_log_returns = get_labels(X, buys_optim, use_tanh = use_tanh, use_behavioral_cloning = use_behavioral_cloning, n_ahead = n_ahead, n_slots = n_slots)
+
+    X = X[:N, :]
+    obs = obs[:N, :]
 
     labels = torch.from_numpy(labels[-N:, :]).type(torch.float32)
+    if min_max_log_returns is not None:
+        min_max_log_returns = torch.from_numpy(min_max_log_returns).type(torch.float32)
 
-    prices = torch.from_numpy(X[:, 0]).type(torch.float32)
-
-    # discard some of the last values; their labels are bad
-    N_discard = 20
-    obs = obs[:-N_discard, :]
-    labels = labels[:-N_discard, :]
-    X = X[:-N_discard, :]
-    ma_ref = ma_ref[:-N_discard]
-    prices = prices[:-N_discard]
-    N -= N_discard
+    if use_behavioral_cloning:
+        # discard some of the last values; their labels are bad
+        N_discard = 20
+        obs = obs[:-N_discard, :]
+        labels = labels[:-N_discard, :]
+        X = X[:-N_discard, :]
+        N -= N_discard
 
     N_test = sequence_length * 1
     # print('N test: {}'.format(N_test))
     N -= N_test
 
     obs, obs_test = obs[:N, :], obs[N:, :]
-    labels, labels_test = labels[:N, :], labels[N:, :]
+    labels, labels_test = labels[:N], labels[N:]
     X, X_test = X[:N, :], X[N:, :]
-    ma_ref, ma_ref_test = ma_ref[:N], ma_ref[N:]
-    prices, prices_test = prices[:N], prices[N:]
 
-    if use_tanh:
+    if use_tanh and use_behavioral_cloning:
         criterion = nn.MSELoss()
     else:
         criterion = nn.BCELoss()
@@ -247,145 +311,221 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
         i = torch.randint(N - sequence_length, (batch_size,))
         # i = torch.zeros(batch_size).long()# + 1
 
-        # state = init_state(inputs, batch_size = batch_size)
         model.init_state()
 
         losses = []
 
         optimizer.zero_grad()
 
-        # for j in range(sequence_length):
-
         inp = []
         for ii in i:
             inp.append(obs[ii:ii+sequence_length, :])
         inp = torch.stack(inp, dim=1).detach()
-        # inp = torch.cat([state, obs[i + j, :]], dim = -1).unsqueeze(0).detach()
 
         out = model(inp)
-        # target = labels[i + j, :]
         target = []
         for ii in i:
-            target.append(labels[ii:ii+sequence_length, :])
+            target.append(labels[ii:ii+sequence_length])
         target = torch.stack(target, dim=1)
 
         loss = criterion(out, target)
 
-        loss += std_loss(out, sequence_length, batch_size, eps, e, n_epochs)
+        if use_behavioral_cloning:
+            loss += std_loss(out, sequence_length, batch_size, eps, e, n_epochs)
 
-        # loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
+            # loss += diff_loss(out, batch_size, use_tanh, e, n_epochs)
 
         loss.backward()
         losses.append(loss.item())
 
-        # state = update_state(out.detach(), state.detach(), prices[i + j], ma_ref[i + j], commissions)
-
         optimizer.step()
 
         if e % print_step == 0:
-            benchmark_profits = []
-            profits = []
-            # optim_profits = []
+            if use_behavioral_cloning:
+                benchmark_profits = []
+                profits = []
+                # optim_profits = []
 
-            out = out.detach().numpy()
+                out = out.detach().numpy()
 
-            for b in range(batch_size):
-                benchmark_profits.append(X[i[b] + sequence_length - 1, 0] / X[i[b], 0])
+                for b in range(batch_size):
+                    benchmark_profits.append(X[i[b] + sequence_length - 1, 0] / X[i[b], 0])
 
-                if use_tanh:
-                    buys = np.zeros(sequence_length)
-                    sells = np.zeros(sequence_length)
+                    if use_tanh:
+                        buys = np.zeros(sequence_length)
+                        sells = np.zeros(sequence_length)
 
-                    li = out[:, b, 0] > 0
-                    buys[li] = out[li, b, 0]
+                        li = out[:, b, 0] > 0
+                        buys[li] = out[li, b, 0]
 
-                    li = out[:, b, 0] < 0
-                    sells[li] = -out[li, b, 0]
+                        li = out[:, b, 0] < 0
+                        sells[li] = -out[li, b, 0]
 
-                else:
-                    buys = out[:, b, 0]
-                    sells = out[:, b, 1]
-                wealths, _, _, _, _ = get_wealths(
-                    X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
-                )
-                profits.append(wealths[-1] + 1)
+                    else:
+                        buys = out[:, b, 0]
+                        sells = out[:, b, 1]
+                    wealths, _, _, _, _ = get_wealths(
+                        X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
+                    )
+                    profits.append(wealths[-1] + 1)
 
-            n_round = 4
+                n_round = 4
 
-            print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
-                e,
-                n_epochs,
-                round_to_n(torch.tensor(losses).mean().item(), n_round),
-                round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round),
-                round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
-            ))
+                print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Benchmark Profit: {}]'.format(
+                    e,
+                    n_epochs,
+                    round_to_n(torch.tensor(losses).mean().item(), n_round),
+                    round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round),
+                    round_to_n(torch.tensor(benchmark_profits).prod().item() ** (1 / batch_size), n_round),
+                ))
+            else:
+                profits = []
+                optim_profits = []
 
-    model.eval()
-    model.init_state(1)
-    inp = obs_test.unsqueeze(1)
-    out = model(inp).detach().numpy()
+                expected_profits, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(out.detach(), min_max_log_returns)
 
-    if use_tanh:
-        buys = np.zeros(N_test)
-        sells = np.zeros(N_test)
+                for b in range(batch_size):
+                    buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx[:, b], expected_max_profit, expected_max_profit_idx[:, b])
 
-        li = out[:, 0, 0] > 0
-        buys[li] = out[li, 0, 0]
+                    wealths, _, _, _, _ = get_wealths(
+                        X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
+                    )
 
-        li = out[:, 0, 0] < 0
-        sells[li] = -out[li, 0, 0]
+                    profits.append(wealths[-1] + 1)
+
+                expected_profits, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(target.detach(), min_max_log_returns)
+
+                for b in range(batch_size):
+                    buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx[:, b], expected_max_profit, expected_max_profit_idx[:, b])
+
+                    wealths, _, _, _, _ = get_wealths(
+                        X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
+                    )
+
+                    optim_profits.append(wealths[-1] + 1)
+
+                n_round = 4
+
+                print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Optim. Profit: {}]'.format(
+                    e,
+                    n_epochs,
+                    round_to_n(torch.tensor(losses).mean().item(), n_round),
+                    round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round * 2),
+                    round_to_n(torch.tensor(optim_profits).prod().item() ** (1 / batch_size), n_round),
+                ))
+
+    if use_behavioral_cloning:
+        model.eval()
+        model.init_state(1)
+        inp = obs_test.unsqueeze(1)
+        out = model(inp).detach().numpy()
+
+        if use_tanh:
+            buys = np.zeros(N_test)
+            sells = np.zeros(N_test)
+
+            li = out[:, 0, 0] > 0
+            buys[li] = out[li, 0, 0]
+
+            li = out[:, 0, 0] < 0
+            sells[li] = -out[li, 0, 0]
+
+        else:
+            buys = out[:, 0, 0]
+            sells = out[:, 0, 1]
+
+        print(buys.max(), buys.min())
+        print(sells.max(), sells.min())
+
+        initial_usd = 1000
+
+        wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
+            X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
+        )
+
+        print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+
+        plt.style.use('seaborn')
+        fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+
+        ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
+        ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
+        ax[0].legend()
+
+        ax[1].plot(buys, c='g', alpha=0.5, label='buy')
+        ax[1].plot(sells, c='r', alpha=0.5, label='sell')
+        ax[1].legend()
+        plt.show()
+
+        max_buy = buys.max()
+        min_buy = buys.min()
+        max_sell = sells.max()
+        min_sell = sells.min()
+
+        buys = (buys - min_buy) / (max_buy - min_buy)
+        sells = (sells - min_sell) / (max_sell - min_sell)
+
+        wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
+            X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
+        )
+
+        print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+
+        fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+
+        ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
+        ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
+        ax[0].legend()
+
+        ax[1].plot(buys, c='g', alpha=0.5, label='buy')
+        ax[1].plot(sells, c='r', alpha=0.5, label='sell')
+        ax[1].legend()
+        plt.show()
 
     else:
-        buys = out[:, 0, 0]
-        sells = out[:, 0, 1]
+        model.eval()
+        model.init_state(1)
+        inp = obs_test.unsqueeze(1)
+        out = model(inp).detach()
 
-    print(buys.max(), buys.min())
-    print(sells.max(), sells.min())
+        expected_profits, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(out, min_max_log_returns)
 
-    initial_usd = 1000
+        buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx)
 
-    wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-        X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
-    )
+        wealths, _, _, _, _ = get_wealths(
+            X_test, buy_li, sell_li
+        )
 
-    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+        expected_profits_optim, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(labels_test.unsqueeze(1), min_max_log_returns)
 
-    plt.style.use('seaborn')
-    fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+        buys_optim, sells_optim, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx)
 
-    ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
-    ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
-    ax[0].legend()
+        wealths_optim, _, _, _, _ = get_wealths(
+            X_test, buy_li, sell_li
+        )
 
-    ax[1].plot(buys, c='g', alpha=0.5, label='buy')
-    ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    ax[1].legend()
-    plt.show()
+        print(wealths[-1] + 1, wealths_optim[-1] + 1)
 
-    max_buy = buys.max()
-    min_buy = buys.min()
-    max_sell = sells.max()
-    min_sell = sells.min()
+        plt.style.use('seaborn')
 
-    buys = (buys - min_buy) / (max_buy - min_buy)
-    sells = (sells - min_sell) / (max_sell - min_sell)
+        fig, ax = plt.subplots(ncols = 3)
 
-    wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-        X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
-    )
+        ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
+        ax[0].plot(wealths + 1, c='b', alpha=0.7, label='wealth')
+        ax[0].plot(wealths_optim + 1, c='m', alpha=0.7, label='optim. wealth')
+        ax[0].plot(buys_optim, X_test[buys_optim, 0] / X_test[0, 0], 'co', alpha=0.7, label='optim. buys')
+        ax[0].plot(sells_optim, X_test[sells_optim, 0] / X_test[0, 0], 'mo', alpha=0.7, label='optim. sells')
+        ax[0].plot(buys, X_test[buys, 0] / X_test[0, 0], 'go', alpha=0.7, label='buys')
+        ax[0].plot(sells, X_test[sells, 0] / X_test[0, 0], 'ro', alpha=0.7, label='sells')
+        ax[0].legend()
 
-    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+        n = 50
+        ax[1].imshow(expected_profits_optim[:n, 0, :], cmap = cm.plasma)
+        ax[2].imshow(expected_profits[:n, 0, :], cmap = cm.plasma)
 
-    fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
+        plt.show()
 
-    ax[0].plot(X_test[:, 0] / X_test[0, 0], c='k', alpha=0.5, label='price')
-    ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
-    ax[0].legend()
 
-    ax[1].plot(buys, c='g', alpha=0.5, label='buy')
-    ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    ax[1].legend()
-    plt.show()
 
     if save:
         torch.save(model.state_dict(), 'models/' + model.name + '.pt')
@@ -644,18 +784,21 @@ if __name__ == '__main__':
     }
 
     sequence_length = 500
+    n_ahead = 10
+    n_slots = 5
 
     lr = 0.0005
     batch_size = 128
     use_tanh = False
     eps = 1e-2
     hidden_size = sum(list(inputs.values())) * 1
+    use_behavioral_cloning = False
 
     # NN model definition
-    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size)
+    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 1000
+    n_epochs = 500
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -663,7 +806,8 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    plot_labels(files, coin)
+    plot_labels(files, coin, use_behavioral_cloning, n = 50, n_slots = n_slots, n_ahead = n_ahead)
+    plot_labels(files, coin, use_behavioral_cloning, n = 100_000, n_slots = n_slots, n_ahead = n_ahead)
 
     start_time = time.time()
 
@@ -682,6 +826,9 @@ if __name__ == '__main__':
         save = True,
         use_tanh = use_tanh,
         eps = eps,
+        use_behavioral_cloning = False,
+        n_ahead = n_ahead,
+        n_slots = n_slots,
     )
 
     # policy_net.Qlearn = True

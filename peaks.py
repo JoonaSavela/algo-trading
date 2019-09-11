@@ -268,7 +268,7 @@ def get_labels(sells, use_tanh):
 
     buys_optim = buys_optim.astype(float)
 
-    labels = tr.get_labels(sells, buys_optim, use_tanh = use_tanh, l = 50, c = 5, skew = 0.4, use_percentage = False)
+    labels, _, _ = tr.get_labels(sells, buys_optim, use_tanh = use_tanh, l = 50, c = 5, skew = 0.4, use_percentage = False)
 
     return labels
 
