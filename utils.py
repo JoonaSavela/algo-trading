@@ -8,6 +8,33 @@ except ImportError as e:
     print(e)
 
 
+def get_ad(X, w, cumulative = True):
+    lows = pd.Series(X[:, 0]).rolling(w).min().dropna().values
+    highs = pd.Series(X[:, 0]).rolling(w).max().dropna().values
+
+    N = lows.shape[0]
+
+    cmfv = ((X[-N:, 0] - lows) - (highs - X[-N:, 0])) / (highs - lows) * X[-N:, 5]
+
+    if cumulative:
+        return np.cumsum(cmfv)
+
+    return cmfv
+
+def get_obv(X, cumulative = True, use_sign = True):
+    log_returns = np.log(X[1:, 0] / X[:-1, 0])
+
+    if use_sign:
+        log_returns = np.sign(log_returns)
+
+    signed_volumes = X[1:, 5] * log_returns
+
+    if cumulative:
+        return np.cumsum(signed_volumes)
+
+    return signed_volumes
+
+
 def get_peaks(sells, prominence = 0.0125, distance = 30):
     sell_peaks, _ = find_peaks(sells, distance=distance, prominence=prominence)
     buy_peaks, _ = find_peaks(1 - sells, distance=distance, prominence=prominence)
@@ -71,17 +98,17 @@ def aggregate(X, n = 5):
 
     return aggregated_X
 
-def smoothed_returns(X, alpha = 0.75):
-    returns = X[1:, 0] / X[:-1, 0] - 1
+def ema(X, alpha, mu_prior = 0.0):
+    if len(X.shape) > 1:
+        X = X[:, 0]
 
     mus = []
-    mu_prior = 0.0
 
-    for i in range(returns.shape[0]):
+    for i in range(X.shape[0]):
         if i > 0:
             mu_prior = mu_posterior
 
-        mu_posterior = alpha * mu_prior + (1 - alpha) * returns[i]
+        mu_posterior = alpha * mu_prior + (1 - alpha) * X[i]
 
         mus.append(mu_posterior)
 
@@ -89,10 +116,24 @@ def smoothed_returns(X, alpha = 0.75):
 
     return mus
 
+
+def smoothed_returns(X, alpha = 0.75, n = 1):
+    returns = X[1:, 0] / X[:-1, 0] - 1
+    # returns = np.log(X[1:, 0] / X[:-1, 0])
+
+    for i in range(n):
+        returns = ema(returns, alpha = alpha)
+
+    return returns
+
 def std(X, window_size):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 
 def sma(X, window_size):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
 
 def stochastic_oscillator(X, window_size = 3 * 14, k = 1, latency = 0):
@@ -168,7 +209,7 @@ def get_obs_input(X, inputs, params):
         prices = X[-N:, :inputs['price']]
         tmp = np.split(prices, inputs['price'], axis = 1)
         for i in range(len(tmp)):
-            tmp[i] = tmp[i].reshape(-1) / ma_ref
+            tmp[i] = tmp[i].reshape(-1) / (ma_ref if i < 4 else 1)
         obs.extend(tmp)
 
     if 'mus' in inputs:
