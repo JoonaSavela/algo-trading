@@ -380,12 +380,12 @@ class Main_Strategy(Base_Strategy):
 
         self.buy_or_criteria.extend([
             self.stochastic_criterion,
-            self.bollinger_squeeze_criterion
+            # self.bollinger_squeeze_criterion
         ])
 
         self.sell_or_criteria.extend([
             self.stochastic_criterion,
-            self.bollinger_squeeze_criterion,
+            # self.bollinger_squeeze_criterion,
             self.alligator_criterion
         ])
 

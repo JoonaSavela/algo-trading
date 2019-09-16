@@ -122,8 +122,10 @@ def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 
         labels = np.stack([buy, sell, do_nothing], axis = 1)
 
     else:
+        alpha = 0.1
         n = min(n, X.shape[0] - n_ahead)
-        labels = np.zeros((n, n_ahead, n_slots))
+        labels = np.ones((n, n_ahead, n_slots))
+        labels *= alpha / n_slots
         min_max_log_returns = np.zeros((n_ahead, 2))
 
         for i in range(1, n_ahead + 1):
@@ -141,9 +143,9 @@ def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 
             idx = np.clip(idx, 0, n_slots - 1)[:n]
 
             b = np.zeros((n, n_slots))
-            b[np.arange(n), idx.astype(int)] = 1
+            b[np.arange(n), idx.astype(int)] = 1 - alpha
 
-            labels[:, i - 1, :] = b
+            labels[:, i - 1, :] += b
 
     return labels, n, min_max_log_returns
 
@@ -257,7 +259,7 @@ def update_state(action, state, price, ma_ref, commissions):
 
 
 
-def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps, use_behavioral_cloning, n_ahead, n_slots):
+def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps, use_behavioral_cloning, n_ahead, n_slots, q):
     X = load_all_data(files)
 
     obs, N, _ = get_obs_input(X, inputs, params)
@@ -276,7 +278,9 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     else:
         buys_optim = None
 
-    labels, N, min_max_log_returns = get_labels(X, buys_optim, use_tanh = use_tanh, use_behavioral_cloning = use_behavioral_cloning, n_ahead = n_ahead, n_slots = n_slots)
+    labels, N, min_max_log_returns = get_labels(X, buys_optim, use_tanh = use_tanh, use_behavioral_cloning = use_behavioral_cloning, n_ahead = n_ahead, n_slots = n_slots, q = q)
+    for i in range(n_slots):
+        print(i + 1, labels[:, :, i].sum(axis = 0) / N)
 
     X = X[:N, :]
     obs = obs[:N, :]
@@ -406,13 +410,22 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
 
                 n_round = 4
 
-                print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Optim. Profit: {}]'.format(
+                # counts = out.max(-1)[1] == target.max(-1)[1]
+                out_max_idx = out.max(-1)[1]
+                target_max_idx = target.max(-1)[1]
+                accuracy = (out_max_idx == target_max_idx).float().mean()
+
+                print('[Epoch: {}/{}] [Loss: {}] [Avg. Profit: {}] [Optim. Profit: {}] [Acc: {}]'.format(
                     e,
                     n_epochs,
                     round_to_n(torch.tensor(losses).mean().item(), n_round),
                     round_to_n(torch.tensor(profits).prod().item() ** (1 / batch_size), n_round * 2),
                     round_to_n(torch.tensor(optim_profits).prod().item() ** (1 / batch_size), n_round),
+                    round_to_n(accuracy.item(), n_round)
                 ))
+
+                for i in range(n_slots):
+                    print(i, (out_max_idx == i).sum(), (target_max_idx == i).sum())
 
     if use_behavioral_cloning:
         model.eval()
@@ -766,7 +779,7 @@ if __name__ == '__main__':
         # 'timedelta': 1,
         # 'buy_price': 1,
         # obs
-        'price': 4,
+        'price': 6,
         'mus': 4,
         'std': 4,
         'ma': 4,
@@ -784,8 +797,9 @@ if __name__ == '__main__':
     }
 
     sequence_length = 500
-    n_ahead = 10
-    n_slots = 5
+    n_ahead = 1
+    n_slots = 3
+    q = 0.9
 
     lr = 0.0005
     batch_size = 128
@@ -798,7 +812,7 @@ if __name__ == '__main__':
     policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 500
+    n_epochs = 600
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -829,6 +843,7 @@ if __name__ == '__main__':
         use_behavioral_cloning = False,
         n_ahead = n_ahead,
         n_slots = n_slots,
+        q = q,
     )
 
     # policy_net.Qlearn = True

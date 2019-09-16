@@ -67,11 +67,12 @@ class FFN(nn.Module):
         else:
             output = output.view(x.shape[0], x.shape[1], self.n_ahead, self.n_slots)
             output = F.softmax(output, dim = -1)
+            # output = torch.sigmoid(output)
 
         return output
 
 
-def get_expected_min_max_profits(out, min_max_log_returns):
+def get_expected_min_max_profits(out, min_max_log_returns, use_max = True):
     n_slots = out.size(-1)
     n_ahead = out.size(-2)
     batch_size = out.size(1)
@@ -85,6 +86,9 @@ def get_expected_min_max_profits(out, min_max_log_returns):
     log_returns = (torch.arange(n_slots) + 0.5).float().unsqueeze(0) * block_sizes.unsqueeze(1)
     log_returns += min_log_rs.unsqueeze(1)
     # log_returns = log_returns.float()
+
+    if use_max:
+        out = F.one_hot(out.max(-1)[1], n_slots).float()
 
     expected_profits = torch.exp((out * log_returns).sum(dim = -1))
     expected_profits = torch.cat([torch.ones(sequence_length, batch_size, 1), expected_profits], dim = -1)
