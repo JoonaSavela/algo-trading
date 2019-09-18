@@ -184,8 +184,9 @@ def optimise_smoothing_strategy(coin, files, strategy_class, stop_loss_take_prof
     print(optimizer.max)
 
 
-def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
+def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p):
     X = load_all_data(files)
+    X = X[:round(p * X.shape[0]), :]
 
     if restrictive:
         starts = [0, X.shape[0] // 2]
@@ -335,6 +336,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 if __name__ == '__main__':
     n_runs = 800
     kappa = 1
+    p = 0.9
     strategy_class = Main_Strategy
     stop_loss_take_profit = True
     restrictive = True
@@ -346,5 +348,5 @@ if __name__ == '__main__':
     files.sort(key = get_time)
     # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
 
-    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs)
+    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p)
     # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
