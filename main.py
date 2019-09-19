@@ -22,90 +22,160 @@ def main():
 
     # idx = np.array([0, 1, 2, 3])
     # idx = np.arange(2)
-    test_files = np.array(test_files)[:30]
+    test_files = np.array(test_files)[-2:]
     X = load_all_data(test_files)
+    # X = X[:1000, :]
     # X = X[:1200, :]
 
-    cumulative = True
-    signed_volumes1 = get_obv(X, cumulative, True)
-    signed_volumes2 = get_obv(X, cumulative, False)
+    # min alpha: 0.9
+    alpha = 0.975
 
-    # fig, ax = plt.subplots(ncols = 3)
+    emaX = ema(X, alpha, mu_prior = X[0, 0])
 
-    # ax[0].plot(X[1:, 0])
-    # ax[1].plot(signed_volumes1)
-    # ax[2].plot(signed_volumes2)
+    # tmp = np.log(X[:, 0] / emaX)
+    tmp = X[:, 0] / emaX
+    stoch = stochastic_oscillator(tmp, 500)
+
+    th = 0.2
+    th1 = -np.log((1 - th) / th)
+    # print(th1)
+
+    # min alpha1: 0.99
+    alpha1 = 0.995
+    emaX1 = ema(X, alpha1, mu_prior = X[0, 0])
+    _emaX = emaX1[1:] / emaX1[:-1]
+
+    # plt.hist(_emaX)
     # plt.show()
 
-    cmfv = get_ad(X, 300, False)
+    _emaX = np.log(_emaX)
+    _emaX_std = std(_emaX, 500)
 
-    mus = smoothed_returns(X, alpha = 0.7, n = 4)
-    smoothed_X = np.exp(np.cumsum(mus))
+    N = _emaX_std.shape[0]
+    _emaX = _emaX[-N:]
 
-    w = 15
-    mins = pd.Series(smoothed_X).rolling(w).min().dropna().values
-    maxs = pd.Series(smoothed_X).rolling(w).max().dropna().values
-    ranges = np.log(maxs / mins)
+    _emaX /= _emaX_std + 10 ** (-5)
+    # _emaX = np.exp(_emaX)
 
-    # stds = std(smoothed_X, 5) ** 0.5
-    # stds = std(X, 5) ** 0.5
-    stds = std(mus, 30) ** 0.5
-    # print(stds.min())
-    # print(stds)
+    # _emaX -= 1
+    # _emaX /= np.std(_emaX)
+    # _emaX += 1
 
-    N = min(cmfv.shape[0], smoothed_X.shape[0], stds.shape[0], ranges.shape[0])
+    # _emaX = () ** 2000
 
-    modified_mus = mus[-N:] / (stds[-N:] + 0.025)
-    modified_smoothed_X = np.exp(np.cumsum(modified_mus))
+    buy_ths = 1 / (1 + np.exp(-(th1 + _emaX)))
+    sell_ths = 1 / (1 + np.exp(-(-th1 + _emaX)))
 
-    commissions = 0.0015
+    # plt.hist(_emaX)
+    # plt.show()
+    #
+    # plt.hist(buy_ths)
+    # plt.show()
+    #
+    # plt.hist(sell_ths)
+    # plt.show()
 
-    th = 0.01
-    buys1 = modified_mus > th
-    sells1 = modified_mus <= 0
+    # print(buy_ths)
 
-    buys1 = buys1[-N:]
-    sells1 = sells1[-N:]
+    N = min(stoch.shape[0], N)
+    X = X[-N:, :]
+    emaX = emaX[-N:]
+    emaX1 = emaX1[-N:]
+    buy_ths = buy_ths[-N:]
+    sell_ths = sell_ths[-N:]
 
-    buys2 = ranges > np.log(1 + commissions)
-    sells2 = buys2
+    fig, ax = plt.subplots(ncols = 2)
 
-    buys2 = buys2[-N:]
-    sells2 = sells2[-N:]
+    ax[0].plot(X[:, 0])
+    ax[0].plot(emaX)
+    ax[0].plot(emaX1)
 
-    buys3 = cmfv > 0
-    sells3 = cmfv <= 0
+    ax[1].plot(stoch)
+    ax[1].plot(buy_ths)
+    ax[1].plot(sell_ths)
 
-    buys3 = buys3[-N:]
-    sells3 = sells3[-N:]
-
-    # buys = buys1 & buys2 & buys3
-    # sells = sells1 & sells2 & sells3
-
-    buys = buys1 & buys3
-    sells = sells1 & sells3
-
-    initial_usd = 1000
-
-    wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-        X[-N:, :], buys, sells, initial_usd = initial_usd, #commissions = 0
-    )
-
-    print(wealths[-1] + 1)
-
-    fig, ax = plt.subplots(ncols = 2, nrows = 2)
-
-    ax[0, 0].plot(X[-N:, 0] / X[0, 0], c='k', alpha=0.5)
-    ax[0, 0].plot(smoothed_X[-N:], c='b', alpha=0.7)
-    ax[0, 0].plot(wealths[-N:] + 1, alpha=0.7)
-    ax[0, 1].plot(np.cumsum(cmfv[-N:]))
-    ax[1, 0].plot(stds[-N:])
-    ax[1, 0].plot(ranges[-N:])
-    ax[1, 0].axhline(np.log(1 + commissions))
-    # ax[1, 0].plot(modified_mus[-N:])
-    ax[1, 1].plot(modified_smoothed_X[-N:])
-    ax[1, 1].plot(smoothed_X[-N:] ** 6)
     plt.show()
+
+    # cumulative = True
+    # signed_volumes1 = get_obv(X, cumulative, True)
+    # signed_volumes2 = get_obv(X, cumulative, False)
+    #
+    # # fig, ax = plt.subplots(ncols = 3)
+    #
+    # # ax[0].plot(X[1:, 0])
+    # # ax[1].plot(signed_volumes1)
+    # # ax[2].plot(signed_volumes2)
+    # # plt.show()
+    #
+    # cmfv = get_ad(X, 300, False)
+    #
+    # mus = smoothed_returns(X, alpha = 0.7, n = 4)
+    # smoothed_X = np.exp(np.cumsum(mus))
+    #
+    # w = 15
+    # mins = pd.Series(smoothed_X).rolling(w).min().dropna().values
+    # maxs = pd.Series(smoothed_X).rolling(w).max().dropna().values
+    # ranges = np.log(maxs / mins)
+    #
+    # # stds = std(smoothed_X, 5) ** 0.5
+    # # stds = std(X, 5) ** 0.5
+    # stds = std(mus, 30) ** 0.5
+    # # print(stds.min())
+    # # print(stds)
+    #
+    # N = min(cmfv.shape[0], smoothed_X.shape[0], stds.shape[0], ranges.shape[0])
+    #
+    # modified_mus = mus[-N:] / (stds[-N:] + 0.025)
+    # modified_smoothed_X = np.exp(np.cumsum(modified_mus))
+    #
+    # commissions = 0.0015
+    #
+    # th = 0.01
+    # buys1 = modified_mus > th
+    # sells1 = modified_mus <= 0
+    #
+    # buys1 = buys1[-N:]
+    # sells1 = sells1[-N:]
+    #
+    # buys2 = ranges > np.log(1 + commissions)
+    # sells2 = buys2
+    #
+    # buys2 = buys2[-N:]
+    # sells2 = sells2[-N:]
+    #
+    # buys3 = cmfv > 0
+    # sells3 = cmfv <= 0
+    #
+    # buys3 = buys3[-N:]
+    # sells3 = sells3[-N:]
+    #
+    # # buys = buys1 & buys2 & buys3
+    # # sells = sells1 & sells2 & sells3
+    #
+    # buys = buys1 & buys3
+    # sells = sells1 & sells3
+    #
+    # initial_usd = 1000
+    #
+    # wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
+    #     X[-N:, :], buys, sells, initial_usd = initial_usd, #commissions = 0
+    # )
+    #
+    # print(wealths[-1] + 1)
+    #
+    # fig, ax = plt.subplots(ncols = 2, nrows = 2)
+    #
+    # ax[0, 0].plot(X[-N:, 0] / X[0, 0], c='k', alpha=0.5)
+    # ax[0, 0].plot(smoothed_X[-N:], c='b', alpha=0.7)
+    # ax[0, 0].plot(wealths[-N:] + 1, alpha=0.7)
+    # ax[0, 1].plot(np.cumsum(cmfv[-N:]))
+    # ax[1, 0].plot(stds[-N:])
+    # ax[1, 0].plot(ranges[-N:])
+    # ax[1, 0].axhline(np.log(1 + commissions))
+    # # ax[1, 0].plot(modified_mus[-N:])
+    # ax[1, 1].plot(modified_smoothed_X[-N:])
+    # ax[1, 1].plot(smoothed_X[-N:] ** 6)
+    # plt.show()
 
 
 

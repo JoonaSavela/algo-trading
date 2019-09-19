@@ -137,6 +137,8 @@ def sma(X, window_size):
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
 
 def stochastic_oscillator(X, window_size = 3 * 14, k = 1, latency = 0):
+    if len(X.shape) == 1:
+        X = np.repeat(X.reshape((-1, 1)), 4, axis = 1)
     res = []
     for i in range(X.shape[0] - window_size + 1 - latency):
         max_price = np.max(X[i:i + window_size, 1])
