@@ -8,6 +8,72 @@ except ImportError as e:
     print(e)
 
 
+def risk_management(X, buys, sells, risk_args):
+    if 'base_stop_loss' in risk_args:
+        base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
+        profit_fraction = risk_args['profit_fraction']
+        increment = np.log(1.005)
+        trailing_alpha = risk_args['trailing_alpha']
+
+        if 'steam_th' in risk_args:
+            steam_th = risk_args['steam_th']
+
+    i = 0
+    N = X.shape[0]
+
+    buy_price = None
+    buy_time = None
+
+    idx = np.arange(N)
+    buy_peaks = idx[buys]
+    sell_peaks = idx[sells]
+
+    risk_sells = np.zeros((N,)).astype(bool)
+
+    while i < N:
+        if buy_price is None and buy_time is None:
+            next_buys = buy_peaks[buy_peaks >= i]
+            i = next_buys[0] if len(next_buys) > 0 else N
+            if i < N:
+                buy_price = X[i, 0]
+                buy_time = i
+                # print(buy_time)
+                if 'base_stop_loss' in risk_args:
+                    stop_loss = base_stop_loss
+                    trailing_level = 0.0
+
+        else:
+            # print(i, (i - buy_time) * (np.log(X[i, 0] / buy_price) - trailing_level))
+            if 'base_stop_loss' in risk_args:
+                log_return = np.log(X[i, 0] / buy_price)
+                if log_return < stop_loss:
+                    risk_sells[i] = True
+                elif log_return > - profit_fraction * base_stop_loss:
+                    risk_sells[i] = True
+                elif (i - buy_time) * (log_return - trailing_level) < steam_th:
+                    risk_sells[i] = True
+                elif log_return > trailing_level + increment:
+                    trailing_level += increment
+                    # print(trailing_level)
+                    stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
+
+
+
+            if sells[i]:
+                risk_sells[i] = True
+
+            if risk_sells[i]:
+                # print(i)
+                buy_price = None
+                buy_time = None
+
+
+        i += 1
+
+
+    return risk_sells
+
+
 def get_ad(X, w, cumulative = True):
     lows = pd.Series(X[:, 0]).rolling(w).min().dropna().values
     highs = pd.Series(X[:, 0]).rolling(w).max().dropna().values
@@ -99,6 +165,10 @@ def aggregate(X, n = 5):
     return aggregated_X
 
 def ema(X, alpha, mu_prior = 0.0):
+    alpha_is_not_float = not type(alpha) is float
+    if alpha_is_not_float:
+        alphas = alpha
+
     if len(X.shape) > 1:
         X = X[:, 0]
 
@@ -108,6 +178,8 @@ def ema(X, alpha, mu_prior = 0.0):
         if i > 0:
             mu_prior = mu_posterior
 
+        if alpha_is_not_float:
+            alpha = alphas[i]
         mu_posterior = alpha * mu_prior + (1 - alpha) * X[i]
 
         mus.append(mu_posterior)
@@ -118,8 +190,8 @@ def ema(X, alpha, mu_prior = 0.0):
 
 
 def smoothed_returns(X, alpha = 0.75, n = 1):
-    returns = X[1:, 0] / X[:-1, 0] - 1
-    # returns = np.log(X[1:, 0] / X[:-1, 0])
+    # returns = X[1:, 0] / X[:-1, 0] - 1
+    returns = np.log(X[1:, 0] / X[:-1, 0])
 
     for i in range(n):
         returns = ema(returns, alpha = alpha)

@@ -14,48 +14,87 @@ from model import *
 from optimize import get_wealths
 from peaks import get_peaks
 
+# TODO:
+#   - make a "time since buy * price relative to buy price" risk management thing
+#   - make a function which applies risk management (stop loss etc.) to the
+#     generated buy and sell signals
+
 def main():
     plt.style.use('seaborn')
 
+    prices = np.arange(0.0, np.log(1.05), np.log(1.005))
+    prices = np.exp(prices)
+    stop_losses = np.zeros(*prices.shape)
+
+    base_stop_loss = 1 - 0.05
+    trailing_alpha = 0.75
+
+    for i in range(len(prices)):
+        stop_losses[i] = base_stop_loss
+        if i + 1 < len(prices):
+            base_stop_loss = np.exp(np.log(prices[i + 1]) * (1 - trailing_alpha) + trailing_alpha * np.log(base_stop_loss))
+
+    x = np.arange(len(prices))
+    # print(prices)
+    # print(stop_losses)
+    #
+    # plt.step(x, prices, where='post')
+    # plt.step(x, stop_losses, where='post')
+    # plt.show()
+
+
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
+    # print('Number of months:', round_to_n(len(test_files) * 2000 / (60 * 24 * 30), 3))
 
     # idx = np.array([0, 1, 2, 3])
     # idx = np.arange(2)
-    test_files = np.array(test_files)[-2:]
+    test_files = np.array(test_files)[:2]
     X = load_all_data(test_files)
-    # X = X[:1000, :]
-    # X = X[:1200, :]
+
+    mus = smoothed_returns(X, alpha = 0.75, n = 2)
+    ad = get_ad(X, 500, False)
+    N = ad.shape[0]
+
+    # print(np.log(X[1:, 0] / X[:-1, 0]))
+
+    # plt.hist(np.log(X[1:, 0] / X[:-1, 0]))
+    # plt.show()
+    #
+    # plt.hist(np.exp(np.abs(np.log(X[1:, 0] / X[:-1, 0]))))
+    # plt.show()
 
     # min alpha: 0.9
-    alpha = 0.975
+    alpha = 0.9
 
     emaX = ema(X, alpha, mu_prior = X[0, 0])
 
     # tmp = np.log(X[:, 0] / emaX)
     tmp = X[:, 0] / emaX
-    stoch = stochastic_oscillator(tmp, 500)
+    stoch = stochastic_oscillator(tmp, 600)
 
     th = 0.2
     th1 = -np.log((1 - th) / th)
     # print(th1)
 
-    # min alpha1: 0.99
-    alpha1 = 0.995
-    emaX1 = ema(X, alpha1, mu_prior = X[0, 0])
+    # min alpha1: 0.98
+    alpha1 = 0.985 #- (np.exp(np.abs(np.log(X[1:, 0] / X[:-1, 0]))) - 1) * 10
+    emaX1 = ema(X[1:, :], alpha1, mu_prior = X[0, 0])
     _emaX = emaX1[1:] / emaX1[:-1]
 
     # plt.hist(_emaX)
     # plt.show()
 
     _emaX = np.log(_emaX)
-    _emaX_std = std(_emaX, 500)
+    _emaX_std = std(_emaX, 1000)
 
-    N = _emaX_std.shape[0]
+    N = min(_emaX_std.shape[0], N)
     _emaX = _emaX[-N:]
 
-    _emaX /= _emaX_std + 10 ** (-5)
+    _emaX /= _emaX_std + 10 ** (-3)
+    # _emaX *= 50000
     # _emaX = np.exp(_emaX)
+    # print(_emaX)
 
     # _emaX -= 1
     # _emaX /= np.std(_emaX)
@@ -83,12 +122,71 @@ def main():
     emaX1 = emaX1[-N:]
     buy_ths = buy_ths[-N:]
     sell_ths = sell_ths[-N:]
+    stoch = stoch[-N:]
+    mus = mus[-N:]
+    ad = ad[-N:]
+
+    buy_lis = buy_ths > stoch
+    sell_lis = sell_ths < stoch
+
+    owns = np.zeros((N,))
+
+    idx = np.arange(N)
+    buy_peaks = idx[buy_lis]
+    sell_peaks = idx[sell_lis]
+
+    for peak in buy_peaks:
+        sell_peak = sell_peaks[sell_peaks >= peak]
+        sell_peak = sell_peak[0] if len(sell_peak) > 0 else N
+        owns[peak:sell_peak] = 1
+
+    buy_lis = owns == 1
+    sell_lis = owns == 0
+
+    buy_lis2 = mus > 0
+    sell_lis2 = mus <= 0
+
+    buy_lis3 = ad > 0
+    sell_lis3 = ad <= 0
+
+    buy_lis = buy_lis & buy_lis2
+    sell_lis = sell_lis & sell_lis2
+
+    risk_args = {
+        'base_stop_loss': 0.02,
+        'profit_fraction': 3.0,
+        'trailing_alpha': 0.85,
+        'steam_th': -0.75,
+    }
+
+    risk_sells = risk_management(X, buy_lis, sell_lis, risk_args)
+
+    buy_lis = buy_lis.astype(float)
+    sell_lis = sell_lis.astype(float)
+
+    wealths, _, _, _, _ = get_wealths(
+        X, buy_lis, sell_lis
+    )
+    wealths += 1
+
+    sell_lis = risk_sells
+    sell_lis = sell_lis.astype(float)
+
+    wealths1, _, _, _, _ = get_wealths(
+        X, buy_lis, sell_lis
+    )
+    wealths1 += 1
+
+
+    print(wealths[-1], wealths1[-1])
 
     fig, ax = plt.subplots(ncols = 2)
 
-    ax[0].plot(X[:, 0])
-    ax[0].plot(emaX)
-    ax[0].plot(emaX1)
+    ax[0].plot(X[:, 0] / X[0, 0])
+    ax[0].plot(emaX / X[0, 0])
+    ax[0].plot(emaX1 / X[0, 0])
+    ax[0].plot(wealths)
+    ax[0].plot(wealths1)
 
     ax[1].plot(stoch)
     ax[1].plot(buy_ths)
