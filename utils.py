@@ -2,10 +2,23 @@ import numpy as np
 import pandas as pd
 from math import log10, floor
 from scipy.signal import find_peaks
+from scipy import stats
 try:
     import torch
 except ImportError as e:
     print(e)
+
+
+def p_to_logit(p):
+    return np.log(p / (1 - p))
+
+def logit_to_p(logit):
+    return 1 / (1 + np.exp(-logit))
+
+def rolling_quantile(X, w):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+    return pd.Series(X[:, 0]).rolling(w).apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True).dropna().values * 0.01
 
 
 def risk_management(X, buys, sells, risk_args):
@@ -165,7 +178,7 @@ def aggregate(X, n = 5):
     return aggregated_X
 
 def ema(X, alpha, mu_prior = 0.0):
-    alpha_is_not_float = not type(alpha) is float
+    alpha_is_not_float = not (type(alpha) is float or type(alpha) is np.float64)
     if alpha_is_not_float:
         alphas = alpha
 
