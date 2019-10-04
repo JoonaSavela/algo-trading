@@ -21,70 +21,91 @@ def rolling_quantile(X, w):
     return pd.Series(X[:, 0]).rolling(w).apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True).dropna().values * 0.01
 
 
-def risk_management(X, buys, sells, risk_args):
-    if 'base_stop_loss' in risk_args:
-        base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
-        profit_fraction = risk_args['profit_fraction']
-        increment = np.log(1.005)
-        trailing_alpha = risk_args['trailing_alpha']
+def risk_management(X, risk_args):
+    base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
+    base_take_profit = - risk_args['profit_fraction'] * base_stop_loss
+    increment = np.log(1 + risk_args['increment'])
+    trailing_alpha = risk_args['trailing_alpha']
+    steam_th = risk_args['steam_th']
+    slope_th = risk_args['slope_th']
 
-        if 'steam_th' in risk_args:
-            steam_th = risk_args['steam_th']
 
     i = 0
     N = X.shape[0]
 
     buy_price = None
     buy_time = None
+    sell_price = X[0, 0]
+    sell_time = 0
+    stop_loss = base_stop_loss
+    trailing_level = 0.0
 
-    idx = np.arange(N)
-    buy_peaks = idx[buys]
-    sell_peaks = idx[sells]
-
+    risk_buys = np.zeros((N,)).astype(bool)
     risk_sells = np.zeros((N,)).astype(bool)
 
+    # TODO: reduce repetition
+    # TODO: return information about the trades
     while i < N:
-        if buy_price is None and buy_time is None:
-            next_buys = buy_peaks[buy_peaks >= i]
-            i = next_buys[0] if len(next_buys) > 0 else N
-            if i < N:
+        if buy_price is None and buy_time is None and \
+                sell_price is not None and sell_time is not None:
+            log_return = - np.log(X[i, 0] / sell_price)
+            if log_return < stop_loss:
+                risk_buys[i] = True
+            elif (i - sell_time) * (log_return - trailing_level) < steam_th:
+                risk_buys[i] = True
+            elif log_return > trailing_level + increment:
+                trailing_level += increment
+                sell_time = i
+                stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
+
+
+            if risk_buys[i]:
                 buy_price = X[i, 0]
                 buy_time = i
-                # print(buy_time)
-                if 'base_stop_loss' in risk_args:
-                    stop_loss = base_stop_loss
-                    trailing_level = 0.0
+                original_buy_time = i
+                sell_price = None
+                sell_time = None
+
+                stop_loss = base_stop_loss
+                trailing_level = 0.0
+                trailing_level_profit = 0.0
+                prev_slope = 0
+
 
         else:
-            # print(i, (i - buy_time) * (np.log(X[i, 0] / buy_price) - trailing_level))
-            if 'base_stop_loss' in risk_args:
-                log_return = np.log(X[i, 0] / buy_price)
-                if log_return < stop_loss:
-                    risk_sells[i] = True
-                elif log_return > - profit_fraction * base_stop_loss:
-                    risk_sells[i] = True
-                elif (i - buy_time) * (log_return - trailing_level) < steam_th:
-                    risk_sells[i] = True
-                elif log_return > trailing_level + increment:
-                    trailing_level += increment
-                    # print(trailing_level)
-                    stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
+            log_return = np.log(X[i, 0] / buy_price)
+            slopes = np.log(X[i, 0] / X[original_buy_time:i, 0]) / np.flip(np.arange(i - original_buy_time) + 1)
+            max_i = np.argmax(slopes)
+            curr_slope = slopes[max_i]
 
-
-
-            if sells[i]:
+            if log_return < stop_loss:
                 risk_sells[i] = True
+            elif curr_slope > slope_th and curr_slope < prev_slope and \
+                    np.log(X[i, 0] / X[original_buy_time + max_i, 0]) > base_take_profit:
+                risk_sells[i] = True
+            elif (i - buy_time) * (log_return - trailing_level) < steam_th:
+                risk_sells[i] = True
+            elif log_return > trailing_level + increment:
+                trailing_level += increment
+                buy_time = i
+                stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
+
+            prev_slope = curr_slope
 
             if risk_sells[i]:
-                # print(i)
                 buy_price = None
                 buy_time = None
+                sell_price = X[i, 0]
+                sell_time = i
+
+                stop_loss = base_stop_loss
+                trailing_level = 0.0
 
 
         i += 1
 
 
-    return risk_sells
+    return risk_buys, risk_sells
 
 
 def get_ad(X, w, cumulative = True):
