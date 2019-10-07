@@ -21,13 +21,12 @@ def rolling_quantile(X, w):
     return pd.Series(X[:, 0]).rolling(w).apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True).dropna().values * 0.01
 
 
-def risk_management(X, risk_args):
+def risk_management(X, risk_args, commissions = 0.00075):
     base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
     base_take_profit = - risk_args['profit_fraction'] * base_stop_loss
     increment = np.log(1 + risk_args['increment'])
     trailing_alpha = risk_args['trailing_alpha']
     steam_th = risk_args['steam_th']
-    slope_th = risk_args['slope_th']
 
 
     i = 0
@@ -43,8 +42,10 @@ def risk_management(X, risk_args):
     risk_buys = np.zeros((N,)).astype(bool)
     risk_sells = np.zeros((N,)).astype(bool)
 
+    trades = []
+
     # TODO: reduce repetition
-    # TODO: return information about the trades
+    # TODO: return information about the pseudo trades
     while i < N:
         if buy_price is None and buy_time is None and \
                 sell_price is not None and sell_time is not None:
@@ -69,43 +70,56 @@ def risk_management(X, risk_args):
                 stop_loss = base_stop_loss
                 trailing_level = 0.0
                 trailing_level_profit = 0.0
-                prev_slope = 0
 
 
         else:
             log_return = np.log(X[i, 0] / buy_price)
-            slopes = np.log(X[i, 0] / X[original_buy_time:i, 0]) / np.flip(np.arange(i - original_buy_time) + 1)
-            max_i = np.argmax(slopes)
-            curr_slope = slopes[max_i]
+            min_i = np.argmin(X[original_buy_time:i, 0])
+            cause = '–'
 
             if log_return < stop_loss:
                 risk_sells[i] = True
-            elif curr_slope > slope_th and curr_slope < prev_slope and \
-                    np.log(X[i, 0] / X[original_buy_time + max_i, 0]) > base_take_profit:
+                cause = 'stop loss'
+            elif np.log(X[i, 0] / X[original_buy_time + min_i, 0]) > base_take_profit:
                 risk_sells[i] = True
+                cause = 'take profit'
             elif (i - buy_time) * (log_return - trailing_level) < steam_th:
                 risk_sells[i] = True
+                cause = 'steam'
             elif log_return > trailing_level + increment:
                 trailing_level += increment
                 buy_time = i
                 stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
 
-            prev_slope = curr_slope
-
             if risk_sells[i]:
-                buy_price = None
-                buy_time = None
                 sell_price = X[i, 0]
                 sell_time = i
 
                 stop_loss = base_stop_loss
                 trailing_level = 0.0
 
+                trade = {
+                    'buy_time': original_buy_time,
+                    'sell_time': sell_time,
+                    'buy_price': buy_price,
+                    'sell_price': sell_price,
+                    'cause': cause,
+                }
+
+                trades.append(trade)
+
+                buy_price = None
+                buy_time = None
+
 
         i += 1
 
+    trades = pd.DataFrame(trades)
 
-    return risk_buys, risk_sells
+    trades['profit'] = np.log(trades['sell_price'] / trades['buy_price']) + np.log(1 - commissions) * 2
+    trades['winning'] = trades['profit'] > 0
+
+    return risk_buys, risk_sells, trades
 
 
 def get_ad(X, w, cumulative = True):
