@@ -4,6 +4,7 @@ from math import log10, floor
 from scipy.signal import find_peaks
 from scipy import stats
 try:
+    import matplotlib.pyplot as plt
     import torch
 except ImportError as e:
     print(e)
@@ -20,14 +21,26 @@ def rolling_quantile(X, w):
         X = X.reshape(-1, 1)
     return pd.Series(X[:, 0]).rolling(w).apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True).dropna().values * 0.01
 
+def apply_trend(x, limits, trend, strength):
+    min_x = limits[0]
+    range_x = limits[1] - limits[0]
+    p = (x - min_x) / range_x
 
-def risk_management(X, risk_args, commissions = 0.00075):
-    base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
-    base_take_profit = - risk_args['profit_fraction'] * base_stop_loss
+    logit = p_to_logit(p) + trend * strength
+    p = logit_to_p(logit)
+
+    x = p * range_x + min_x
+    return x
+
+
+def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
+    # base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
+    base_stop_loss = risk_args['base_stop_loss']
+    profit_fraction = risk_args['profit_fraction']
     increment = np.log(1 + risk_args['increment'])
     trailing_alpha = risk_args['trailing_alpha']
     steam_th = risk_args['steam_th']
-
+    strength = risk_args['strength']
 
     i = 0
     N = X.shape[0]
@@ -36,7 +49,6 @@ def risk_management(X, risk_args, commissions = 0.00075):
     buy_time = None
     sell_price = X[0, 0]
     sell_time = 0
-    stop_loss = base_stop_loss
     trailing_level = 0.0
 
     risk_buys = np.zeros((N,)).astype(bool)
@@ -44,62 +56,81 @@ def risk_management(X, risk_args, commissions = 0.00075):
 
     trades = []
 
+    stop_losses = []
+
     # TODO: reduce repetition
     # TODO: return information about the pseudo trades
+    # TODO: use trend to change thresholds
     while i < N:
-        if buy_price is None and buy_time is None and \
-                sell_price is not None and sell_time is not None:
-            log_return = - np.log(X[i, 0] / sell_price)
+        no_position = buy_price is None and buy_time is None and \
+                        sell_price is not None and sell_time is not None
+
+        if no_position:
+            log_prices = - np.log(X[sell_time:i + 1, 0] / sell_price)
+            trend = - trends[i]
+        else:
+            log_prices = np.log(X[buy_time:i + 1, 0] / buy_price)
+            trend = trends[i]
+
+        log_return = log_prices[-1]
+        max_log_return = np.max(log_prices)
+
+        trailing_n = np.floor(max_log_return / increment).astype(int)
+        trailing_level = trailing_n * increment
+        event_time = np.argmax(log_prices > trailing_level)
+
+        if no_position:
+            event_time += sell_time
+        else:
+            event_time += buy_time
+
+        stop_loss = apply_trend(base_stop_loss, limits['base_stop_loss'], trend, strength) # TODO: add trend
+        stop_losses.append(stop_loss)
+        stop_loss = np.log(1 - stop_loss)
+        take_profit = - profit_fraction * stop_loss
+        stop_loss = trailing_level - \
+                        increment * trailing_alpha * (1 - trailing_alpha ** trailing_n) / \
+                        (1 - trailing_alpha) + \
+                        stop_loss * trailing_alpha ** trailing_n
+
+
+
+
+
+        if no_position:
             if log_return < stop_loss:
                 risk_buys[i] = True
-            elif (i - sell_time) * (log_return - trailing_level) < steam_th:
+            elif (i - event_time) * (log_return - trailing_level) < steam_th:
                 risk_buys[i] = True
-            elif log_return > trailing_level + increment:
-                trailing_level += increment
-                sell_time = i
-                stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
 
 
             if risk_buys[i]:
                 buy_price = X[i, 0]
                 buy_time = i
-                original_buy_time = i
                 sell_price = None
                 sell_time = None
 
-                stop_loss = base_stop_loss
-                trailing_level = 0.0
-                trailing_level_profit = 0.0
-
 
         else:
-            log_return = np.log(X[i, 0] / buy_price)
-            min_i = np.argmin(X[original_buy_time:i, 0])
+            min_i = np.argmin(log_prices)
             cause = '–'
 
             if log_return < stop_loss:
                 risk_sells[i] = True
                 cause = 'stop loss'
-            elif np.log(X[i, 0] / X[original_buy_time + min_i, 0]) > base_take_profit:
+            elif np.log(X[i, 0] / X[buy_time + min_i, 0]) > take_profit:
                 risk_sells[i] = True
                 cause = 'take profit'
-            elif (i - buy_time) * (log_return - trailing_level) < steam_th:
+            elif (i - event_time) * (log_return - trailing_level) < steam_th:
                 risk_sells[i] = True
                 cause = 'steam'
-            elif log_return > trailing_level + increment:
-                trailing_level += increment
-                buy_time = i
-                stop_loss = trailing_level * (1 - trailing_alpha) + stop_loss * trailing_alpha
 
             if risk_sells[i]:
                 sell_price = X[i, 0]
                 sell_time = i
 
-                stop_loss = base_stop_loss
-                trailing_level = 0.0
-
                 trade = {
-                    'buy_time': original_buy_time,
+                    'buy_time': buy_time,
                     'sell_time': sell_time,
                     'buy_price': buy_price,
                     'sell_price': sell_price,
@@ -113,6 +144,9 @@ def risk_management(X, risk_args, commissions = 0.00075):
 
 
         i += 1
+
+    # plt.hist(stop_losses, 50)
+    # plt.show()
 
     trades = pd.DataFrame(trades)
 

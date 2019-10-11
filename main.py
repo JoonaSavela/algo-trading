@@ -15,33 +15,13 @@ from optimize import get_wealths
 from peaks import get_peaks
 
 # TODO:
-#   - make a "time since buy * price relative to buy price" risk management thing
-#   - make a function which applies risk management (stop loss etc.) to the
-#     generated buy and sell signals
+#   - test using multiple moving averages for buy/sell signals
+#       - the 1st ma is for timing
+#       - the last ma is for trend
+#       - the other mas are used depending on the trend
 
 def main():
     plt.style.use('seaborn')
-
-    prices = np.arange(0.0, np.log(1.05), np.log(1.005))
-    prices = np.exp(prices)
-    stop_losses = np.zeros(*prices.shape)
-
-    base_stop_loss = 1 - 0.05
-    trailing_alpha = 0.75
-
-    for i in range(len(prices)):
-        stop_losses[i] = base_stop_loss
-        if i + 1 < len(prices):
-            base_stop_loss = np.exp(np.log(prices[i + 1]) * (1 - trailing_alpha) + trailing_alpha * np.log(base_stop_loss))
-
-    x = np.arange(len(prices))
-    # print(prices)
-    # print(stop_losses)
-    #
-    # plt.step(x, prices, where='post')
-    # plt.step(x, stop_losses, where='post')
-    # plt.show()
-
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
@@ -49,380 +29,145 @@ def main():
 
     # idx = np.array([0, 1, 2, 3])
     # idx = np.arange(2)
-    test_files = np.array(test_files)[:2]
+    test_files = np.array(test_files)[:10]
     X = load_all_data(test_files)
 
-    mus = smoothed_returns(X, alpha = 0.75, n = 2)
-    ad = get_ad(X, 500, False)
-    N = ad.shape[0]
+    alpha0 = 0.85
+    alpha1 = 0.9975
+    mus = []
+    n = 10
 
-    # print(np.log(X[1:, 0] / X[:-1, 0]))
+    logit0 = p_to_logit(alpha0)
+    logit1 = p_to_logit(alpha1)
 
-    # plt.hist(np.log(X[1:, 0] / X[:-1, 0]))
+    if n > 1:
+        alphas = logit_to_p(np.linspace(logit0, logit1, n))
+    else:
+        alphas = [alpha0]
+    # print(alphas)
+
+    for i in range(n):
+        mus.append(smoothed_returns(X, alphas[i]))
+
+    rquantile = rolling_quantile(mus[-1], 1)
+    # print(rquantile)
+    # plt.plot(rquantile)
     # plt.show()
-    #
-    # plt.hist(np.exp(np.abs(np.log(X[1:, 0] / X[:-1, 0]))))
-    # plt.show()
-
-    # min alpha: 0.9
-    alpha = 0.9
-
-    emaX = ema(X, alpha, mu_prior = X[0, 0])
-
-    # tmp = np.log(X[:, 0] / emaX)
-    tmp = X[:, 0] / emaX
-    stoch = stochastic_oscillator(tmp, 600)
-
-    th = 0.2
-    th1 = -np.log((1 - th) / th)
-    # print(th1)
-
-    # min alpha1: 0.98
-    alpha1 = 0.985 #- (np.exp(np.abs(np.log(X[1:, 0] / X[:-1, 0]))) - 1) * 10
-    emaX1 = ema(X[1:, :], alpha1, mu_prior = X[0, 0])
-    _emaX = emaX1[1:] / emaX1[:-1]
-
-    # plt.hist(_emaX)
+    # plt.hist(mus[-1], bins=50)
     # plt.show()
 
-    _emaX = np.log(_emaX)
-    _emaX_std = std(_emaX, 1000)
+    N = rquantile.shape[0]
 
-    N = min(_emaX_std.shape[0], N)
-    _emaX = _emaX[-N:]
-
-    _emaX /= _emaX_std + 10 ** (-3)
-    # _emaX *= 50000
-    # _emaX = np.exp(_emaX)
-    # print(_emaX)
-
-    # _emaX -= 1
-    # _emaX /= np.std(_emaX)
-    # _emaX += 1
-
-    # _emaX = () ** 2000
-
-    buy_ths = 1 / (1 + np.exp(-(th1 + _emaX)))
-    sell_ths = 1 / (1 + np.exp(-(-th1 + _emaX)))
-
-    # plt.hist(_emaX)
-    # plt.show()
-    #
-    # plt.hist(buy_ths)
-    # plt.show()
-    #
-    # plt.hist(sell_ths)
-    # plt.show()
-
-    # print(buy_ths)
-
-    N = min(stoch.shape[0], N)
     X = X[-N:, :]
-    emaX = emaX[-N:]
-    emaX1 = emaX1[-N:]
-    buy_ths = buy_ths[-N:]
-    sell_ths = sell_ths[-N:]
-    stoch = stoch[-N:]
-    mus = mus[-N:]
-    ad = ad[-N:]
+    for i in range(n):
+        mus[i] = mus[i][-N:]
 
-    buy_lis = buy_ths > stoch
-    sell_lis = sell_ths < stoch
+    li = mus[-1] > 0
 
-    owns = np.zeros((N,))
+    buys = np.zeros((N,)).astype(bool)
+    sells = np.zeros((N,)).astype(bool)
+    # sells[li] = False
 
-    idx = np.arange(N)
-    buy_peaks = idx[buy_lis]
-    sell_peaks = idx[sell_lis]
+    i0 = 0
+    i1 = min(1, n - 1)
+    # i1 = max(n - 3, 0)
+    i2 = max(n - 2, 0)
+    i3 = n - 1
 
-    for peak in buy_peaks:
-        sell_peak = sell_peaks[sell_peaks >= peak]
-        sell_peak = sell_peak[0] if len(sell_peak) > 0 else N
-        owns[peak:sell_peak] = 1
+    qth1 = 0.8
 
-    buy_lis = owns == 1
-    sell_lis = owns == 0
+    # buys[li] = (mus[i0][li] > 0) & (mus[i2][li] > 0) & (rquantile[li] > qth1)
+    # buys[~li] = (mus[i0][~li] > 0) & (mus[i1][~li] > 0) & (rquantile[~li] > qth1)
 
-    buy_lis2 = mus > 0
-    sell_lis2 = mus <= 0
-
-    buy_lis3 = ad > 0
-    sell_lis3 = ad <= 0
-
-    buy_lis = buy_lis & buy_lis2
-    sell_lis = sell_lis & sell_lis2
+    # buys = (rquantile > qth1) & (mus[-2] > 0)
 
     risk_args = {
-        'base_stop_loss': 0.02,
-        'profit_fraction': 3.0,
+        'base_stop_loss': 0.025,
+        'profit_fraction': 1.,
+        'increment': 0.0025,
         'trailing_alpha': 0.85,
-        'steam_th': -0.75,
+        'steam_th': -2.5,
+        'strength': 5,
     }
 
-    risk_sells = risk_management(X, buy_lis, sell_lis, risk_args)
+    limits = {
+        'base_stop_loss': [0.005, 0.05],
+        'profit_fraction': [0.75, 4.],
+        'increment': [0.001, 0.01], # not needed?
+        'trailing_alpha': [0., 1.], # not needed?
+        'steam_th': [-4., -0.],
+    }
 
-    buy_lis = buy_lis.astype(float)
-    sell_lis = sell_lis.astype(float)
+
+    weights = 1 / (1 - alphas)
+    # print(weights)
+    mus = [mus[0], np.sum(np.array(mus) * weights.reshape(-1,1), axis=0) / np.sum(weights), mus[-1]]
+
+
+    buys, sells, trades = risk_management(X, mus[1], risk_args, limits, commissions = 0.0005)
+
+    print(trades.groupby('winning')['profit'].describe())
+    print(trades['profit'].sum())
+    print(trades.groupby('cause')['profit'].describe())
+
+    # print(trades.describe())
+    # print(len(trades))
+
+    # plt.hist(trades['profit'])
+    # plt.show()
+
+    # for index, row in trades.iterrows():
+    #     if row['profit'] > 0:
+    #         plt.plot(X[row['buy_time']:(row['sell_time'] + 1), 0] / X[row['buy_time'], 0], c='g', alpha = 0.25)
+    #
+    # plt.show()
+    #
+    # for index, row in trades.iterrows():
+    #     if row['profit'] <= 0:
+    #         plt.plot(X[row['buy_time']:(row['sell_time'] + 1), 0] / X[row['buy_time'], 0], c='r', alpha = 0.25)
+    #
+    # plt.show()
+
+    buys = mus[0] > 0
+    sells = mus[0] <= 0
+
+    # plt.hist(mus[1], bins=500)
+    # plt.show()
+
+    # print((mus[0][li] <= 0).sum())
+    # print(buys.sum(), sells.sum())
+
+    # idx = np.arange(rquantile.shape[0])
+    #
+    # plt.plot(idx[buys[-rquantile.shape[0]:]], rquantile[buys[-rquantile.shape[0]:]])
+    # plt.show()
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
 
     wealths, _, _, _, _ = get_wealths(
-        X, buy_lis, sell_lis
+        X, buys, sells, commissions = 0.00025
     )
     wealths += 1
 
-    sell_lis = risk_sells
-    sell_lis = sell_lis.astype(float)
-
     wealths1, _, _, _, _ = get_wealths(
-        X, buy_lis, sell_lis
+        X, buys, sells, commissions = 0
     )
     wealths1 += 1
 
-
     print(wealths[-1], wealths1[-1])
-
-    fig, ax = plt.subplots(ncols = 2)
-
-    ax[0].plot(X[:, 0] / X[0, 0])
-    ax[0].plot(emaX / X[0, 0])
-    ax[0].plot(emaX1 / X[0, 0])
-    ax[0].plot(wealths)
-    ax[0].plot(wealths1)
-
-    ax[1].plot(stoch)
-    ax[1].plot(buy_ths)
-    ax[1].plot(sell_ths)
-
+    plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
+    for i in range(len(mus)):
+        # print(mus[i].shape)
+        plt.plot(np.exp(np.cumsum(mus[i])), c='b', alpha=0.65)
+    plt.plot(wealths, c='g')
+    plt.plot(wealths1, c='g', alpha = 0.5)
+    if np.log(wealths1[-1]) / np.log(10) > 2:
+        plt.yscale('log')
     plt.show()
 
-    # cumulative = True
-    # signed_volumes1 = get_obv(X, cumulative, True)
-    # signed_volumes2 = get_obv(X, cumulative, False)
-    #
-    # # fig, ax = plt.subplots(ncols = 3)
-    #
-    # # ax[0].plot(X[1:, 0])
-    # # ax[1].plot(signed_volumes1)
-    # # ax[2].plot(signed_volumes2)
-    # # plt.show()
-    #
-    # cmfv = get_ad(X, 300, False)
-    #
-    # mus = smoothed_returns(X, alpha = 0.7, n = 4)
-    # smoothed_X = np.exp(np.cumsum(mus))
-    #
-    # w = 15
-    # mins = pd.Series(smoothed_X).rolling(w).min().dropna().values
-    # maxs = pd.Series(smoothed_X).rolling(w).max().dropna().values
-    # ranges = np.log(maxs / mins)
-    #
-    # # stds = std(smoothed_X, 5) ** 0.5
-    # # stds = std(X, 5) ** 0.5
-    # stds = std(mus, 30) ** 0.5
-    # # print(stds.min())
-    # # print(stds)
-    #
-    # N = min(cmfv.shape[0], smoothed_X.shape[0], stds.shape[0], ranges.shape[0])
-    #
-    # modified_mus = mus[-N:] / (stds[-N:] + 0.025)
-    # modified_smoothed_X = np.exp(np.cumsum(modified_mus))
-    #
-    # commissions = 0.0015
-    #
-    # th = 0.01
-    # buys1 = modified_mus > th
-    # sells1 = modified_mus <= 0
-    #
-    # buys1 = buys1[-N:]
-    # sells1 = sells1[-N:]
-    #
-    # buys2 = ranges > np.log(1 + commissions)
-    # sells2 = buys2
-    #
-    # buys2 = buys2[-N:]
-    # sells2 = sells2[-N:]
-    #
-    # buys3 = cmfv > 0
-    # sells3 = cmfv <= 0
-    #
-    # buys3 = buys3[-N:]
-    # sells3 = sells3[-N:]
-    #
-    # # buys = buys1 & buys2 & buys3
-    # # sells = sells1 & sells2 & sells3
-    #
-    # buys = buys1 & buys3
-    # sells = sells1 & sells3
-    #
-    # initial_usd = 1000
-    #
-    # wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-    #     X[-N:, :], buys, sells, initial_usd = initial_usd, #commissions = 0
-    # )
-    #
-    # print(wealths[-1] + 1)
-    #
-    # fig, ax = plt.subplots(ncols = 2, nrows = 2)
-    #
-    # ax[0, 0].plot(X[-N:, 0] / X[0, 0], c='k', alpha=0.5)
-    # ax[0, 0].plot(smoothed_X[-N:], c='b', alpha=0.7)
-    # ax[0, 0].plot(wealths[-N:] + 1, alpha=0.7)
-    # ax[0, 1].plot(np.cumsum(cmfv[-N:]))
-    # ax[1, 0].plot(stds[-N:])
-    # ax[1, 0].plot(ranges[-N:])
-    # ax[1, 0].axhline(np.log(1 + commissions))
-    # # ax[1, 0].plot(modified_mus[-N:])
-    # ax[1, 1].plot(modified_smoothed_X[-N:])
-    # ax[1, 1].plot(smoothed_X[-N:] ** 6)
-    # plt.show()
 
 
-
-
-    # inputs = {
-    #     'price': 4,
-    #     'mus': 3,
-    #     'std': 3,
-    #     'ma': 3,
-    #     'ha': 4,
-    #     'stoch': 3,
-    # }
-
-    # inputs = {
-    #     'price': 4,
-    #     'mus': 4,
-    #     'std': 4,
-    #     'ma': 4,
-    #     'ha': 4,
-    #     'stoch': 4,
-    # }
-    # hidden_size = sum(list(inputs.values())) * 1
-    #
-    # N = 1500
-    #
-    # params = {
-    #     'alpha': 0.8,
-    #     'std_window_min_max': [30, N],
-    #     'ma_window_min_max': [30, N],
-    #     'stoch_window_min_max': [30, N],
-    # }
-    #
-    # sequence_length = 800000
-    #
-    # signal_model = FFN(inputs, 1, use_lstm = True, Qlearn = False, use_tanh = False, hidden_size = hidden_size)
-    # signal_model.load_state_dict(torch.load('models/' + signal_model.name + '.pt'))
-    # signal_model.eval()
-    #
-    # model = FFN(dict(n_inputs=3), 1, use_tanh = True, hidden_size = 16)
-    # model.load_state_dict(torch.load('models/' + model.name + '.pt'))
-    # model.eval()
-    #
-    # alpha = 0.#5
-    # mus = smoothed_returns(X, alpha=alpha)
-    # mus = smoothed_returns(np.cumprod(mus + 1).reshape(-1, 1), alpha=alpha)
-    #
-    # obs, N, _ = get_obs_input(X, inputs, params)
-    # X = X[-N:, :]
-    # mus = mus[-N:]
-    #
-    # sequence_length = min(sequence_length, N)
-    #
-    # X = X[:sequence_length, :]
-    # obs = obs[:sequence_length, :]
-    # mus = mus[:sequence_length]
-    #
-    # signal_model.init_state()
-    # model.init_state()
-    #
-    # inp = obs.unsqueeze(1)
-    # signal_out = signal_model(inp)
-    #
-    # buy_peaks, sell_peaks = get_peaks(signal_out[:, 0, 1].detach().numpy())
-    #
-    # out = model(signal_out).detach().numpy()
-    #
-    # buys = np.zeros(sequence_length)
-    # sells = np.zeros(sequence_length)
-    #
-    # li = out[:, 0, 0] > 0
-    # buys[li] = out[li, 0, 0]
-    #
-    # li = out[:, 0, 0] < 0
-    # sells[li] = -out[li, 0, 0]
-    #
-    # max_buy = buys.max()
-    # min_buy = buys.min()
-    # max_sell = sells.max()
-    # min_sell = sells.min()
-    #
-    # buys = (buys - min_buy) / (max_buy - min_buy)
-    # sells = (sells - min_sell) / (max_sell - min_sell)
-    #
-    # # buys = buys ** 2
-    # # sells = sells ** 2
-    #
-    # idx = np.arange(1, sequence_length)
-    #
-    # th = 0.5
-    # buys_li = (buys[1:] > th) & (np.diff(buys) < 0)
-    # buy_peaks_approx = idx[buys_li]
-    #
-    # sells_li = (sells[1:] > th) & (np.diff(sells) < 0)
-    # sell_peaks_approx = idx[sells_li]
-    #
-    # d = 0
-    # buy_peaks_approx += d
-    # sell_peaks_approx += d
-    # buy_peaks_approx = buy_peaks_approx[buy_peaks_approx < sequence_length]
-    # sell_peaks_approx = sell_peaks_approx[sell_peaks_approx < sequence_length]
-    #
-    # owns1 = np.zeros((sequence_length,))
-    #
-    # for peak in buy_peaks_approx:
-    #     sell_peak = sell_peaks_approx[sell_peaks_approx > peak]
-    #     sell_peak = sell_peak[0] if len(sell_peak) > 0 else sequence_length
-    #     owns1[peak:sell_peak] = 1
-    #
-    # buys1 = owns1 == 1
-    # sells1 = owns1 == 0
-    #
-    # buys2 = mus > 0
-    # sells2 = mus < 0
-    #
-    # buys1 = buys1 & buys2
-    # sells1 = sells1 & sells2
-    #
-    # buys1 = buys1.astype(float)
-    # sells1 = sells1.astype(float)
-    #
-    # initial_usd = 1000
-    #
-    # wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
-    #     X, buys1, sells1, initial_usd = initial_usd,
-    # )
-    #
-    # print(wealths[-1] + 1)
-    #
-    # plt.style.use('seaborn')
-    # fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
-    #
-    # ax[0].plot(X[:, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-    # ax[0].plot(sell_peaks, X[sell_peaks, 0] / X[0, 0], 'mo', ms=12.0, alpha=0.7, label='sell peaks')
-    # ax[0].plot(buy_peaks, X[buy_peaks, 0] / X[0, 0], 'co', ms=12.0, alpha=0.7, label='buy peaks')
-    # ax[0].plot(sell_peaks_approx, X[sell_peaks_approx, 0] / X[0, 0], 'ro', alpha=0.7, label='sell peaks approx')
-    # ax[0].plot(buy_peaks_approx, X[buy_peaks_approx, 0] / X[0, 0], 'go', alpha=0.7, label='buy peaks approx')
-    # ax[0].plot(wealths + 1, c='b', alpha = 0.5, label='wealth')
-    # ax[0].legend()
-    #
-    # signal_sells = signal_out[:, 0, 1].detach().numpy()
-    # ax[1].plot(signal_sells, c='k', alpha=0.5, label='signal')
-    # ax[1].plot(buys, c='g', alpha=0.5, label='buy')
-    # ax[1].plot(sells, c='r', alpha=0.5, label='sell')
-    # ax[1].plot(sell_peaks, signal_sells[sell_peaks], 'mv', alpha=0.7, label='sell peaks')
-    # ax[1].plot(buy_peaks, signal_sells[buy_peaks], 'c^', alpha=0.7, label='buy peaks')
-    # ax[1].plot(sell_peaks_approx, sells[sell_peaks_approx], 'ro', alpha=0.7, label='sell peaks approx')
-    # ax[1].plot(buy_peaks_approx, buys[buy_peaks_approx], 'go', alpha=0.7, label='buy peaks approx')
-    # ax[1].legend()
-    # plt.show()
 
 
 if __name__ == "__main__":
