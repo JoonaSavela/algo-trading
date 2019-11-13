@@ -29,13 +29,19 @@ def main():
 
     # idx = np.array([0, 1, 2, 3])
     # idx = np.arange(2)
-    test_files = np.array(test_files)[:10]
+    test_files = np.array(test_files)[:5]
     X = load_all_data(test_files)
 
-    alpha0 = 0.85
-    alpha1 = 0.9975
+    # alpha0 = 0.85
+    x = 12
+    alpha0 = (x - 1) / x
+    print(alpha0, 1 / (1 - alpha0))
+    # print((x - 1) / x)
+    x = 26
+    alpha1 = (x - 1) / x
+    # alpha1 = 0.9975
     mus = []
-    n = 10
+    n = 2
 
     logit0 = p_to_logit(alpha0)
     logit1 = p_to_logit(alpha1)
@@ -99,16 +105,16 @@ def main():
     }
 
 
-    weights = 1 / (1 - alphas)
+    # weights = 1 / (1 - alphas)
     # print(weights)
-    mus = [mus[0], np.sum(np.array(mus) * weights.reshape(-1,1), axis=0) / np.sum(weights), mus[-1]]
+    # mus = [mus[0], np.sum(np.array(mus) * weights.reshape(-1,1), axis=0) / np.sum(weights), mus[-1]]
+    #
+    #
+    # buys, sells, trades = risk_management(X, mus[1], risk_args, limits, commissions = 0.0005)
 
-
-    buys, sells, trades = risk_management(X, mus[1], risk_args, limits, commissions = 0.0005)
-
-    print(trades.groupby('winning')['profit'].describe())
-    print(trades['profit'].sum())
-    print(trades.groupby('cause')['profit'].describe())
+    # print(trades.groupby('winning')['profit'].describe())
+    # print(trades['profit'].sum())
+    # print(trades.groupby('cause')['profit'].describe())
 
     # print(trades.describe())
     # print(len(trades))
