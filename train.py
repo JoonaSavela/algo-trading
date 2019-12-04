@@ -18,6 +18,11 @@ import torch.nn as nn
 from optimize import get_wealths
 import math
 
+from bayes_opt import BayesianOptimization
+from bayes_opt.observer import JSONLogger
+from bayes_opt.event import Events
+from bayes_opt.util import load_logs
+
 # TODO: reduce repetition
 def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 0.4, separate = False, use_percentage = True, use_behavioral_cloning = False, n_ahead = 30, n_slots = 10, q = 0.99):
     if n is None:
@@ -754,6 +759,176 @@ def Qlearn(policy_net, target_net, coin, files, inputs, params, n_epochs, lr, ba
     plt.show()
 
 
+# TODO: fuonctions:
+#   - optimize
+
+def get_rewards(X, c = 0.3, d = 40, commissions = 0.00075):
+    idx = torch.arange(d)
+    weights = torch.exp(- c * idx.float())
+    weights /= weights.sum()
+
+    n = X.shape[0] - d
+
+    returns = torch.zeros(n, d)
+
+    for i in range(1, d + 1):
+        returns[:, i - 1] = torch.from_numpy(X[i:i+n, 0] / X[:n, 0])
+
+    keep_rewards = torch.log(torch.matmul(returns, weights)).view(-1, 1)
+    do_nothing_rewards = torch.zeros(n, 1)
+
+    buy_rewards = keep_rewards + torch.log(torch.ones(1) - commissions)
+    sell_rewards = do_nothing_rewards + torch.log(torch.ones(1) - commissions)
+
+    keep_rewards = torch.cat([sell_rewards, keep_rewards], dim = 1)
+    buy_rewards = torch.cat([do_nothing_rewards, buy_rewards], dim = 1)
+
+    return keep_rewards, buy_rewards
+
+
+def get_optim_decisions(keep_rewards, buy_rewards):
+    keeps = torch.argmax(keep_rewards, dim = 1).float()
+    buys = torch.argmax(buy_rewards, dim = 1).float()
+
+    return keeps, buys
+
+def get_realized_decisions(keeps, buys):
+    li = keeps == buys
+    out = torch.zeros(keeps.shape[0])
+    out[li] = keeps[li]
+
+    idx = torch.arange(keeps.shape[0])
+    not_same_idx = idx[~li]
+
+    for i in not_same_idx:
+        if i > 0 and out[i - 1] == 1:
+            out[i] = keeps[i]
+        else:
+            out[i] = buys[i]
+
+    return out
+
+def optimize_reward_function(X, n_runs, kappa, commissions = 0.00075):
+    def objective_function(c, d):
+        c = 10 ** c
+        d = int(d)
+
+        keep_rewards, buy_rewards = get_rewards(X, c, d, commissions)
+
+        keeps, buys = get_optim_decisions(keep_rewards, buy_rewards)
+
+        buys = get_realized_decisions(keeps, buys).numpy()
+
+        wealths, _, _, _, _ = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
+
+        n_months = buys.shape[0] / (60 * 24 * 30)
+
+        wealth = (wealths[-1] + 1) ** (1 / n_months)
+
+        print('c = {}, d = {}, wealth = {}'.format(
+            round_to_n(c, 3),
+            d,
+            round_to_n(wealth, 4)
+        ))
+
+        return wealth
+
+    # Bounded region of parameter space
+    pbounds = {
+        'c': (-4, 1),
+        'd': (1.0, 60.0)
+    }
+
+    optimizer = BayesianOptimization(
+        f = objective_function,
+        pbounds = pbounds,
+        # random_state = 1,
+    )
+
+    filename = 'optim_results/reward.json'
+
+    logger = JSONLogger(path=filename)
+    optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
+
+    optimizer.probe(
+        params={
+            'c': -0.30103,
+            'd': 30,
+        },
+        lazy=True,
+    )
+
+    optimizer.probe(
+        params={
+            'c': -0.30103,
+            'd': 40,
+        },
+        lazy=True,
+    )
+
+    optimizer.probe(
+        params={
+            'c': -0.5228787,
+            'd': 30,
+        },
+        lazy=True,
+    )
+
+    optimizer.probe(
+        params={
+            'c': -0.5228787,
+            'd': 40,
+        },
+        lazy=True,
+    )
+
+    optimizer.maximize(
+        init_points = int(np.sqrt(n_runs)),
+        n_iter = n_runs,
+        kappa = kappa,
+    )
+
+    print(optimizer.max)
+
+def reward(keeps, buys, keep_rewards, buy_rewards):
+    keeps = keeps.view(-1, 1)
+    keeps = torch.cat([1 - keeps, keeps], dim = 1)
+
+    buys = buys.view(-1, 1)
+    buys = torch.cat([1 - buys, buys], dim = 1)
+
+    keep_reward = torch.sum(keep_rewards * keeps)
+    buy_reward = torch.sum(buy_rewards * buys)
+
+    return keep_reward + buy_reward
+
+
+
+
+
+def get_wealths_pt(X, out, commissions = 0.00075):
+    li_pos = out > 0
+    li_neg = ~li_pos
+
+    amount_coin_buy = (out[li_pos] / X[li_pos, 0] * (1 - commissions)).sum()
+    amount_usd_buy = out[li_pos].sum()
+
+    amount_usd_sell = (- out[li_neg] * (1 - commissions)).sum()
+    amount_coin_sell = (- out[li_neg] / X[li_neg, 0]).sum()
+
+    capital_coin = amount_coin_buy - amount_coin_sell
+    capital_usd = amount_usd_sell - amount_usd_buy
+
+    wealth = capital_usd + capital_coin * X[-1, 0]
+
+    return wealth
+
+
+def train2():
+    # TODO:
+    pass
+
+
 if __name__ == '__main__':
     commissions = 0.00075
 
@@ -809,7 +984,7 @@ if __name__ == '__main__':
     use_behavioral_cloning = False
 
     # NN model definition
-    policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
+    # policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
     n_epochs = 600
@@ -820,47 +995,56 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    plot_labels(files, coin, use_behavioral_cloning, n = 50, n_slots = n_slots, n_ahead = n_ahead)
-    plot_labels(files, coin, use_behavioral_cloning, n = 100_000, n_slots = n_slots, n_ahead = n_ahead)
+    X = load_all_data(files)
+    n_runs = 80
+    kappa = 10
 
-    start_time = time.time()
+    optimize_reward_function(X, n_runs, kappa, commissions = 0.00125)
 
-    train(
-        coin = coin,
-        files = files,
-        inputs = inputs,
-        params = params,
-        model = policy_net,
-        n_epochs = n_epochs,
-        lr = lr,
-        batch_size = batch_size,
-        sequence_length = sequence_length,
-        print_step = print_step,
-        commissions = commissions,
-        save = True,
-        use_tanh = use_tanh,
-        eps = eps,
-        use_behavioral_cloning = False,
-        n_ahead = n_ahead,
-        n_slots = n_slots,
-        q = q,
-    )
+    c = 0.3
+    d = 40
 
-    # policy_net.Qlearn = True
+    # plot_labels(files, coin, use_behavioral_cloning, n = 50, n_slots = n_slots, n_ahead = n_ahead)
+    # plot_labels(files, coin, use_behavioral_cloning, n = 100_000, n_slots = n_slots, n_ahead = n_ahead)
     #
-    # Qlearn(
-    #     policy_net = policy_net,
-    #     target_net = target_net,
+    # start_time = time.time()
+    #
+    # train(
     #     coin = coin,
     #     files = files,
     #     inputs = inputs,
     #     params = params,
+    #     model = policy_net,
     #     n_epochs = n_epochs,
     #     lr = lr,
     #     batch_size = batch_size,
     #     sequence_length = sequence_length,
     #     print_step = print_step,
     #     commissions = commissions,
+    #     save = True,
+    #     use_tanh = use_tanh,
+    #     eps = eps,
+    #     use_behavioral_cloning = False,
+    #     n_ahead = n_ahead,
+    #     n_slots = n_slots,
+    #     q = q,
     # )
-
-    print('Time taken: {} seconds'.format(round_to_n(time.time() -start_time, 3)))
+    #
+    # # policy_net.Qlearn = True
+    # #
+    # # Qlearn(
+    # #     policy_net = policy_net,
+    # #     target_net = target_net,
+    # #     coin = coin,
+    # #     files = files,
+    # #     inputs = inputs,
+    # #     params = params,
+    # #     n_epochs = n_epochs,
+    # #     lr = lr,
+    # #     batch_size = batch_size,
+    # #     sequence_length = sequence_length,
+    # #     print_step = print_step,
+    # #     commissions = commissions,
+    # # )
+    #
+    # print('Time taken: {} seconds'.format(round_to_n(time.time() -start_time, 3)))
