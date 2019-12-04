@@ -8,6 +8,63 @@ import json
 from collections import namedtuple, deque
 import random
 
+# TODO: 1d conv network where for each conv layer stride = kernel size
+
+class CNN(nn.Module):
+    def __init__(
+            self,
+            n_features,
+            n_hidden_features_per_layer,
+            kernel_size = 2,
+            n_conv_layers = 10):
+        super(CNN, self).__init__()
+        self.n_features = n_features
+        self.n_hidden_features_per_layer = n_hidden_features_per_layer
+        self.kernel_size = kernel_size
+        self.n_conv_layers = n_conv_layers
+        self.look_back_size = self.kernel_size ** self.n_conv_layers
+
+        assert(self.look_back_size <= 2000)
+
+        self.conv_layers = nn.ModuleList([
+            nn.Conv1d(
+                self.n_features + i * self.n_hidden_features_per_layer,
+                self.n_features + (i + 1) * self.n_hidden_features_per_layer,
+                self.kernel_size,
+                stride = self.kernel_size
+            )
+            for i in range(self.n_conv_layers)
+        ])
+
+        self.linear1 = nn.Linear(
+            self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer,
+            (self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer) // 2
+        )
+
+        self.linear2 = nn.Linear(
+            (self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer) // 2,
+            2
+        )
+
+    def forward(self, x):
+        hidden = x # (batch_size, n_features, sequence_length)
+
+        for conv in self.conv_layers:
+            hidden = conv(hidden)
+            hidden = F.leaky_relu(hidden)
+
+        hidden = hidden.squeeze(-1)
+
+        hidden = self.linear1(hidden)
+        hidden = F.leaky_relu(hidden)
+
+        hidden = self.linear2(hidden)
+
+        out = torch.sigmoid(hidden)
+
+        return out
+
+
 class FFN(nn.Module):
     def __init__(self, inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = True, n_hidden_layers = 4, decay_per_layer = 0.85, hidden_size = None, use_behavioral_cloning = True, n_ahead = 30, n_slots = 10):
         super(FFN, self).__init__()
