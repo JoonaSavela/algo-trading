@@ -8,8 +8,6 @@ import json
 from collections import namedtuple, deque
 import random
 
-# TODO: 1d conv network where for each conv layer stride = kernel size
-
 class CNN(nn.Module):
     def __init__(
             self,
@@ -22,38 +20,47 @@ class CNN(nn.Module):
         self.n_hidden_features_per_layer = n_hidden_features_per_layer
         self.kernel_size = kernel_size
         self.n_conv_layers = n_conv_layers
-        self.look_back_size = self.kernel_size ** self.n_conv_layers
+        self.sequence_length = self.kernel_size ** self.n_conv_layers
 
-        assert(self.look_back_size <= 2000)
+        assert(self.sequence_length <= 2000)
 
         self.conv_layers = nn.ModuleList([
-            nn.Conv1d(
+            nn.utils.weight_norm(nn.Conv1d(
                 self.n_features + i * self.n_hidden_features_per_layer,
                 self.n_features + (i + 1) * self.n_hidden_features_per_layer,
                 self.kernel_size,
-                stride = self.kernel_size
-            )
+                dilation = self.kernel_size ** i
+                # stride = self.kernel_size
+            ))
             for i in range(self.n_conv_layers)
         ])
 
-        self.linear1 = nn.Linear(
+        self.linear1 = nn.utils.weight_norm(nn.Linear(
             self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer,
             (self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer) // 2
-        )
+        ))
 
-        self.linear2 = nn.Linear(
+        self.linear2 = nn.utils.weight_norm(nn.Linear(
             (self.n_features + self.n_conv_layers * self.n_hidden_features_per_layer) // 2,
-            2
-        )
+            2 # (keeps, buys)
+        ))
 
     def forward(self, x):
-        hidden = x # (batch_size, n_features, sequence_length)
+        hidden = x
+
+        # convert input into shape: (batch_size, n_features, sequence_length)
+        if hidden.dim() == 2:
+            if hidden.shape[1] == self.n_features:
+                hidden = hidden.t()
+            hidden = hidden.unsqueeze(0)
 
         for conv in self.conv_layers:
             hidden = conv(hidden)
             hidden = F.leaky_relu(hidden)
+            # print(hidden.shape)
 
-        hidden = hidden.squeeze(-1)
+        hidden = hidden.permute(0, 2, 1).squeeze(0)
+        # print(hidden.shape)
 
         hidden = self.linear1(hidden)
         hidden = F.leaky_relu(hidden)
@@ -62,7 +69,7 @@ class CNN(nn.Module):
 
         out = torch.sigmoid(hidden)
 
-        return out
+        return out # (pred_seq_length, 2); 2 = (keeps, buys)
 
 
 class FFN(nn.Module):

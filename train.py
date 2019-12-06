@@ -154,9 +154,6 @@ def get_labels(X, buys_optim, use_tanh = False, n = None, l = 75, c = 1, skew = 
 
     return labels, n, min_max_log_returns
 
-
-
-
 def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ahead = 30):
     X = load_all_data(files)
 
@@ -228,8 +225,6 @@ def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ah
 
         plt.show()
 
-
-
 BUY, SELL, DO_NOTHING = 0, 1, 2
 
 def update_state(action, state, price, ma_ref, commissions):
@@ -259,10 +254,6 @@ def update_state(action, state, price, ma_ref, commissions):
     state = torch.stack([capital_usd, capital_coin, timedelta, buy_price], dim = 1)
 
     return state
-
-
-
-
 
 def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence_length, print_step, commissions, save, use_tanh, eps, use_behavioral_cloning, n_ahead, n_slots, q):
     X = load_all_data(files)
@@ -548,7 +539,6 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
     if save:
         torch.save(model.state_dict(), 'models/' + model.name + '.pt')
 
-
 def Qlearn(policy_net, target_net, coin, files, inputs, params, n_epochs, lr, batch_size, sequence_length, print_step, commissions):
     # TODO: move outside of the function?
     # TODO: to lower cpas
@@ -759,10 +749,8 @@ def Qlearn(policy_net, target_net, coin, files, inputs, params, n_epochs, lr, ba
     plt.show()
 
 
-# TODO: fuonctions:
-#   - optimize
 
-def get_rewards(X, c = 0.3, d = 40, commissions = 0.00075):
+def get_rewards(X, c = 0.358, d = 40, commissions = 0.001):
     idx = torch.arange(d)
     weights = torch.exp(- c * idx.float())
     weights /= weights.sum()
@@ -785,7 +773,6 @@ def get_rewards(X, c = 0.3, d = 40, commissions = 0.00075):
 
     return keep_rewards, buy_rewards
 
-
 def get_optim_decisions(keep_rewards, buy_rewards):
     keeps = torch.argmax(keep_rewards, dim = 1).float()
     buys = torch.argmax(buy_rewards, dim = 1).float()
@@ -793,6 +780,36 @@ def get_optim_decisions(keep_rewards, buy_rewards):
     return keeps, buys
 
 def get_realized_decisions(keeps, buys):
+    li = keeps == buys
+    out = torch.zeros(keeps.shape[0])
+    out[li] = keeps[li]
+
+    idx = torch.arange(keeps.shape[0])
+
+    # li = points that need to be processed
+    li = ~li
+
+    if li[0]:
+        out[0] = buys[0]
+        li[0] = False
+
+    while li.sum() > 0:
+        idx1 = idx[li]
+        idx_m = idx1[torch.cat([torch.ones(1).bool(), idx1[1:] - idx1[:-1] > 1])]
+
+        out_prev = out[idx_m - 1]
+
+        idx_1 = idx_m[out_prev == 1]
+        idx_0 = idx_m[out_prev == 0]
+
+        out[idx_1] = keeps[idx_1]
+        out[idx_0] = buys[idx_0]
+
+        li[idx_m] = False
+
+    return out
+
+def get_realized_decisions_old(keeps, buys):
     li = keeps == buys
     out = torch.zeros(keeps.shape[0])
     out[li] = keeps[li]
@@ -890,7 +907,34 @@ def optimize_reward_function(X, n_runs, kappa, commissions = 0.00075):
 
     print(optimizer.max)
 
-def reward(keeps, buys, keep_rewards, buy_rewards):
+def plot_c_and_d(X, c = 0.358, d = 40, commissions = 0.001):
+    keep_rewards, buy_rewards = get_rewards(X, c, d, commissions)
+
+    keeps, buys = get_optim_decisions(keep_rewards, buy_rewards)
+
+    buys = get_realized_decisions(keeps, buys).numpy()
+
+    wealths, _, _, _, _ = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
+
+    wealths += 1
+
+    n_months = buys.shape[0] / (60 * 24 * 30)
+
+    wealth = wealths[-1] ** (1 / n_months)
+
+    print('n_months = {}, wealth = {}'.format(
+        round_to_n(n_months, 3),
+        round_to_n(wealth, 4)
+    ))
+
+    plt.style.use('seaborn')
+    plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
+    plt.plot(wealths, c='g')
+    if np.log(wealths[-1]) / np.log(10) > 2:
+        plt.yscale('log')
+    plt.show()
+
+def get_reward(keeps, buys, keep_rewards, buy_rewards):
     keeps = keeps.view(-1, 1)
     keeps = torch.cat([1 - keeps, keeps], dim = 1)
 
@@ -902,35 +946,86 @@ def reward(keeps, buys, keep_rewards, buy_rewards):
 
     return keep_reward + buy_reward
 
+# TODO:
+#   -
+def train2(
+    files,
+    model,
+    lr,
+    n_epochs,
+    print_step,
+    commissions,
+    c,
+    d,
+):
+    X = load_all_data(files[:1])
+
+    keep_rewards, buy_rewards = get_rewards(X, c = c, d = d, commissions = commissions)
+
+    sequence_length = model.sequence_length
+    keep_rewards = keep_rewards[sequence_length - 1:, :]
+    buy_rewards = buy_rewards[sequence_length - 1:, :]
+
+    N = keep_rewards.shape[0]
+
+    keeps, buys = get_optim_decisions(keep_rewards, buy_rewards)
+
+    reward = get_reward(keeps, buys, keep_rewards, buy_rewards)
+    print('optim. reward:', reward.item())
+    reward = get_reward(1 - keeps, 1 - buys, keep_rewards, buy_rewards)
+    print('worst reward:', reward.item())
+
+    inp = torch.from_numpy(X[:sequence_length + N - 1, :]).float()
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr = lr)
+
+    for e in range(n_epochs):
+        optimizer.zero_grad()
+
+        out = model(inp)
+        keeps = out[:, 0]
+        buys = out[:, 1]
+        # print(keeps.mean().item(), keeps.std().item())
+        # print(buys.mean().item(), buys.std().item())
+
+        reward = get_reward(keeps, buys, keep_rewards, buy_rewards)
+        loss = - reward
+
+        loss.backward()
+        optimizer.step()
+
+        keeps = torch.round(keeps)
+        buys = torch.round(buys)
+
+        buys = get_realized_decisions(keeps, buys).detach().numpy()
+
+        wealths, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = commissions)
+        wealths += 1
+
+        wealths1, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = 0.00025)
+        wealths1 += 1
+
+        n_months = buys.shape[0] / (60 * 24 * 30)
+        wealth = wealths[-1] ** (1 / n_months)
+        wealth1 = wealths1[-1] ** (1 / n_months)
+
+        print(e, reward.item(), wealth, wealth1)
+        # print()
+
+    X = X[-buys.shape[0]:, :]
+
+    plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
+    plt.plot(wealths, c='g')
+    plt.plot(wealths1, c='g', alpha = 0.5)
+    if np.log(wealths[-1]) / np.log(10) > 2:
+        plt.yscale('log')
+    plt.show()
 
 
-
-
-def get_wealths_pt(X, out, commissions = 0.00075):
-    li_pos = out > 0
-    li_neg = ~li_pos
-
-    amount_coin_buy = (out[li_pos] / X[li_pos, 0] * (1 - commissions)).sum()
-    amount_usd_buy = out[li_pos].sum()
-
-    amount_usd_sell = (- out[li_neg] * (1 - commissions)).sum()
-    amount_coin_sell = (- out[li_neg] / X[li_neg, 0]).sum()
-
-    capital_coin = amount_coin_buy - amount_coin_sell
-    capital_usd = amount_usd_sell - amount_usd_buy
-
-    wealth = capital_usd + capital_coin * X[-1, 0]
-
-    return wealth
-
-
-def train2():
-    # TODO:
-    pass
-
+# TODO: predict volatility?
 
 if __name__ == '__main__':
-    commissions = 0.00075
+    commissions = 0.0 # + spread
 
     # inputs:
     #   note: all prices (and stds) are relative to a running average price
@@ -987,7 +1082,7 @@ if __name__ == '__main__':
     # policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 600
+    n_epochs = 500
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -995,14 +1090,53 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    X = load_all_data(files)
-    n_runs = 80
-    kappa = 10
+    X = load_all_data(files[:5])
+    # n_runs = 80
+    # kappa = 10
+    #
+    # optimize_reward_function(X, n_runs, kappa, commissions = 0.00125)
 
-    optimize_reward_function(X, n_runs, kappa, commissions = 0.00125)
+    c = 0.1
+    d = 60
 
-    c = 0.3
-    d = 40
+    plot_c_and_d(X, c, d)
+
+
+    model = CNN(n_features = 6, n_hidden_features_per_layer = 10)
+
+    train2(
+        files,
+        model,
+        lr,
+        n_epochs,
+        print_step,
+        commissions,
+        c,
+        d,
+    )
+
+
+    # keep_rewards, buy_rewards = get_rewards(X)
+    #
+    # l = 5
+    #
+    # sequence_length = model.sequence_length
+    # keep_rewards = keep_rewards[sequence_length - 1:sequence_length + l - 1, :]
+    # buy_rewards = buy_rewards[sequence_length - 1:sequence_length + l - 1, :]
+    # print(keep_rewards)
+    # print(buy_rewards)
+    # print()
+    #
+    # inp = torch.from_numpy(X[:sequence_length + l - 1, :]).float()
+    # # print(inp.shape)
+    # out = model(inp)
+    # keeps = out[:, 0]
+    # buys = out[:, 1]
+    # reward = get_reward(keeps, buys, keep_rewards, buy_rewards)
+    # # print(out.shape)
+    # # print()
+    # print(out)
+    # print(reward)
 
     # plot_labels(files, coin, use_behavioral_cloning, n = 50, n_slots = n_slots, n_ahead = n_ahead)
     # plot_labels(files, coin, use_behavioral_cloning, n = 100_000, n_slots = n_slots, n_ahead = n_ahead)
