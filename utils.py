@@ -10,6 +10,18 @@ except ImportError as e:
     print(e)
 
 
+def rolling_max(X, w):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+    return pd.Series(X[:, 0]).rolling(w).max().dropna().values
+
+
+def rolling_min(X, w):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+    return pd.Series(X[:, 0]).rolling(w).min().dropna().values
+
+
 def p_to_logit(p):
     return np.log(p / (1 - p))
 
