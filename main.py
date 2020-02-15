@@ -20,97 +20,105 @@ def main():
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    # idx = np.arange(1, len(test_files))
-    # li = np.diff(np.array(list(map(lambda x: get_time(x), test_files)))) != 120000
-    #
-    # points = [0]
-    # for p in idx[li]:
-    #     points.append(p)
-    # points.append(len(test_files))
-    #
-    # print(points)
-    # count = 0
-    #
-    # for start, end in zip(points[:-1], points[1:]):
-    #     print(start, end)
-    #     X = load_all_data(test_files[start:end])
-    #     N = X.shape[0]
-    #
-    #     plt.plot(np.arange(N) + count, X[:, 0], c='k', alpha=0.5)
-    #     plt.plot([count], X[0, 0], 'g.', markersize=12)
-    #     plt.plot([count + N - 1], X[-1, 0], 'r.', markersize=12)
-    #     count += N
-    # plt.show()
+    X_orig = load_all_data(test_files, 0)
 
-    X = load_all_data(test_files, 0)
-    if isinstance(X, list):
-        count = 0
-        for x in X:
-            N = x.shape[0]
-            plt.plot(np.arange(N) + count, x[:, 0], c='k', alpha=0.5)
-            count += N
-    else:
-        plt.plot(X[:, 0], c='k', alpha=0.5)
-    plt.show()
+    best = 0
+    best_w = -1
+    best_aggregate_N = -1
+    best_type = ''
 
-    return
+    for type in ['sma', 'ema']:
+        for aggregate_N in range(60, 60*25, 60):
+            X_all = aggregate(X_orig[np.random.randint(aggregate_N):, :], aggregate_N)
+            for w in range(1, 101):
+                if type == 'sma':
+                    ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
+                else:
+                    alpha = 1 - 1 / w
+                    ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
+                N = ma.shape[0]
 
-    # idx = np.array([0, 1, 2, 3])
-    # idx = np.arange(2)
-    test_files = np.array(test_files)[:2]
-    X = load_all_data(test_files)
+                X = X_all[-N:, :]
 
-    w0 = 5
-    w1 = 500
-    n = 1
+                buys = ma > 0
+                sells = ~buys
 
-    if n > 1:
-        ws = np.round(np.linspace(w0, w1, n)).astype(int)
-    else:
-        ws = [w0]
+                buys = buys.astype(float)
+                sells = sells.astype(float)
 
-    print(ws)
-    N = X.shape[0] - max(ws) + 1 - 1
+                wealths, _, _, _, _ = get_wealths(
+                    X, buys, sells, commissions = 0.00075
+                )
+                wealths += 1
 
-    mas = []
-    for w in ws:
-        mas.append(np.diff(sma(X[:, 0] / X[0, 0], w))[-N:])
+                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
-    X = X[-N:, :]
+                wealth = wealths[-1] ** (1 / n_months)
 
-    buys = mas[0] > 0
-    sells = ~buys
+                if wealth > best:
+                    best = wealth
+                    best_w = w
+                    best_aggregate_N = aggregate_N
+                    best_type = type
 
-    buys = buys.astype(float)
-    sells = sells.astype(float)
+                print(wealth)
 
-    wealths, _, _, _, _ = get_wealths(
-        X, buys, sells, commissions = 0.00075
-    )
-    wealths += 1
+    print()
+    print(best_type, best_aggregate_N // 60, best_w)
+    print()
 
-    wealths1, _, _, _, _ = get_wealths(
-        X, buys, sells, commissions = 0
-    )
-    wealths1 += 1
+    w = best_w
+    aggregate_N = best_aggregate_N
+    type = best_type
 
-    n_months = buys.shape[0] / (60 * 24 * 30)
+    Xs = load_all_data(test_files, [0, 1])
 
-    wealth = wealths[-1] ** (1 / n_months)
-    wealth1 = wealths1[-1] ** (1 / n_months)
+    if not isinstance(Xs, list):
+        Xs = [Xs]
 
-    print(wealths[-1], wealths1[-1])
-    print(wealth, wealth1)
+    average_wealth = 1.0
+    total_months = 0
 
+    for X in Xs:
+        X_all = aggregate(X, aggregate_N)
 
-    plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
-    for i in range(len(mas)):
-        plt.plot(np.cumsum(mas[i])+1, c='b', alpha=0.65)
-    plt.plot(wealths, c='g')
-    plt.plot(wealths1, c='g', alpha = 0.5)
-    if np.log(wealths1[-1]) / np.log(10) > 2:
-        plt.yscale('log')
-    plt.show()
+        if type == 'sma':
+            ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
+        else:
+            alpha = 1 - 1 / w
+            ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
+        N = ma.shape[0]
+
+        X = X_all[-N:, :]
+
+        buys = ma > 0
+        sells = ~buys
+
+        buys = buys.astype(float)
+        sells = sells.astype(float)
+
+        wealths, _, _, _, _ = get_wealths(
+            X, buys, sells, commissions = 0.00075
+        )
+        wealths += 1
+
+        n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+        wealth = wealths[-1] ** (1 / n_months)
+
+        print(wealth, wealth ** 12)
+
+        plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
+        plt.plot(np.cumsum(ma)+1, c='b', alpha=0.65)
+        plt.plot(wealths, c='g')
+        plt.show()
+
+        average_wealth *= wealths[-1]
+        total_months += n_months
+
+    average_wealth = average_wealth ** (1 / total_months)
+    print()
+    print(average_wealth, average_wealth ** 12)
 
 
 

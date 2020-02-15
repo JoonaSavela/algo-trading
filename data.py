@@ -123,7 +123,7 @@ def load_all_data(filenames, index = 0):
     points = list(zip(points[:-1], points[1:]))
 
     if isinstance(index, int):
-        idx = [index]
+        idx = [min(index, len(points) - 1)]
     elif not isinstance(index, list):
         raise ValueError('index must be either int or list')
     else:
