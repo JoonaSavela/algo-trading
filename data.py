@@ -109,18 +109,44 @@ def load_data(filename, sequence_length, latency, window_size, k = 1, return_sta
 
     return X
 
-def load_all_data(filenames):
-    Xs = []
-
+def load_all_data(filenames, index = 0):
     filenames = sorted(filenames, key = get_time)
 
-    for filename in filenames:
-        X = load_data(filename, 2001, 0, 1)
-        Xs.append(X[:2000, :]) # remove duplicates
+    idx = np.arange(1, len(filenames))
+    li = np.diff(np.array(list(map(lambda x: get_time(x), filenames)))) != 120000
 
-    X = np.concatenate(Xs)
+    points = [0]
+    for p in idx[li]:
+        points.append(p)
+    points.append(len(filenames))
 
-    return X
+    points = list(zip(points[:-1], points[1:]))
+
+    if isinstance(index, int):
+        idx = [index]
+    elif not isinstance(index, list):
+        raise ValueError('index must be either int or list')
+    else:
+        idx = index
+
+    res = []
+
+    for start, end in map(lambda x: points[x], idx):
+        fnames = filenames[start:end]
+
+        Xs = []
+
+        for filename in fnames:
+            X = load_data(filename, 2001, 0, 1)
+            Xs.append(X[:2000, :]) # remove duplicates
+
+        X = np.concatenate(Xs)
+        res.append(X)
+
+    if len(res) == 1:
+        return res[0]
+
+    return res
 
 
 

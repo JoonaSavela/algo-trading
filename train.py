@@ -958,7 +958,7 @@ def train2(
     c,
     d,
 ):
-    X = load_all_data(files[:1])
+    X = load_all_data(files[:5])
 
     keep_rewards, buy_rewards = get_rewards(X, c = c, d = d, commissions = commissions)
 
@@ -1002,7 +1002,7 @@ def train2(
         wealths, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = commissions)
         wealths += 1
 
-        wealths1, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = 0.00025)
+        wealths1, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = 0.0005)
         wealths1 += 1
 
         n_months = buys.shape[0] / (60 * 24 * 30)
@@ -1082,7 +1082,7 @@ if __name__ == '__main__':
     # policy_net = FFN(inputs, batch_size, use_lstm = True, Qlearn = False, use_tanh = use_tanh, hidden_size = hidden_size, use_behavioral_cloning = use_behavioral_cloning, n_slots = n_slots, n_ahead = n_ahead)
     # target_net = FFN(inputs, batch_size, use_lstm = False, Qlearn = True)
 
-    n_epochs = 500
+    n_epochs = 100
     print_step = max(n_epochs // 20, 1)
 
     coin = 'ETH'
@@ -1090,14 +1090,14 @@ if __name__ == '__main__':
     files = glob.glob(dir + '*.json')
     files.sort(key = get_time)
 
-    X = load_all_data(files[:5])
+    X = load_all_data(files)
     # n_runs = 80
     # kappa = 10
     #
     # optimize_reward_function(X, n_runs, kappa, commissions = 0.00125)
 
-    c = 0.1
-    d = 60
+    c = 0.01
+    d = 120
 
     plot_c_and_d(X, c, d)
 
