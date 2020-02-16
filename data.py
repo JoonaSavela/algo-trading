@@ -8,8 +8,27 @@ import glob
 from keys import cryptocompare_key
 from utils import get_time
 
-def get_recent_data(coin, size = 3 * 14):
-    url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=' + str(size - 1) + '&api_key=' + cryptocompare_key
+def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
+    if type == 'm':
+        url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' \
+            + coin \
+            + '&tsym=USD&limit=' \
+            + str(size - 1) \
+            + '&aggregate=' \
+            + str(aggregate) \
+            + '&api_key=' \
+            + cryptocompare_key
+    elif type == 'h':
+        url = 'https://min-api.cryptocompare.com/data/histohour?fsym=' \
+            + coin \
+            + '&tsym=USD&limit=' \
+            + str(size - 1) \
+            + '&aggregate=' \
+            + str(aggregate) \
+            + '&api_key=' \
+            + cryptocompare_key
+    else:
+        raise ValueError('type must be "m" or "h"')
     request = requests.get(url)
     content = request.json()
 
