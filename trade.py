@@ -158,6 +158,7 @@ def trading_pipeline():
                 buy = ma[0] > 0
                 sell = not buy
 
+                print()
                 print(ma[0], buy, sell)
 
                 price = X[-1, 0]
