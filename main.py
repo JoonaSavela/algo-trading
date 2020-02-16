@@ -13,14 +13,32 @@ from utils import *
 from model import *
 from optimize import get_wealths
 from peaks import get_peaks
+from tqdm import tqdm
+import binance
+from binance.client import Client
+from binance.enums import *
+from keys import binance_api_key, binance_secret_key
+
+# TODO: check whether limit orders would work
+# TODO: try out smoothed returns
+# TODO: move this to a different file
+# TODO: make a separate function for calculating buys and sells
 
 def main():
     plt.style.use('seaborn')
+
+    client = Client(binance_api_key, binance_secret_key)
+    avg_price = client.get_avg_price(symbol='ETHUSDT')
+    print(avg_price)
+
+    return
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
     X_orig = load_all_data(test_files, 0)
+
+    commissions = 0.00075
 
     best = 0
     best_w = -1
@@ -28,7 +46,7 @@ def main():
     best_type = ''
 
     for type in ['sma']:#, 'ema']:
-        for aggregate_N in range(60, 60*25, 60):
+        for aggregate_N in tqdm(range(60, 60*25, 60)):
             X_all = aggregate(X_orig[np.random.randint(aggregate_N):, :], aggregate_N)
             for w in range(1, 51):
                 if type == 'sma':
@@ -49,7 +67,7 @@ def main():
                 sells = sells.astype(float)
 
                 wealths, _, _, _, _ = get_wealths(
-                    X, buys, sells, commissions = 0.00075
+                    X, buys, sells, commissions = commissions
                 )
                 wealths += 1
 
@@ -63,10 +81,11 @@ def main():
                     best_aggregate_N = aggregate_N
                     best_type = type
 
-                print(wealth)
+                # print(wealth)
 
     print()
-    # sma 11 4
+    # ETH: sma 11 4, 1.0969
+    # BCH: sma 12 1, 1.1200
     print(best_type, best_aggregate_N // 60, best_w)
     print()
 
@@ -103,7 +122,7 @@ def main():
         sells = sells.astype(float)
 
         wealths, _, _, _, _ = get_wealths(
-            X, buys, sells, commissions = 0.00075
+            X, buys, sells, commissions = commissions
         )
         wealths += 1
 

@@ -7,7 +7,17 @@ parameters = [
     {'target': 6.771999455808914, 'params': {'buy_threshold': 0.22010689257298865, 'c': 86.60018672021383, 'change_threshold': 3.7289026959158464, 'decay': 0.000511831700893408, 'ha_threshold': 0.0003232868609798567, 'look_back_size': 156.6462861381031, 'min_threshold': 1.3810115848197073, 'rolling_min_window_size': 772.8826284501503, 'sell_threshold': 0.18815300323038794, 'stop_loss': -0.17547226872207852, 'take_profit': 0.05252199560591147, 'window_size': 907.5818071441176, 'window_size1': 263.58699479302885, 'window_size2': 495.5478301591963}},
     {'target': 5.0366355109162155, 'params': {'alpha': 0.649199156662133, 'buy_threshold': 0.14047742865159574, 'c': 80.13894174606659, 'change_threshold': 2.6554205576668917, 'decay': 0.00019804214664061626, 'ha_threshold': 0.0004019804672615934, 'look_back_size': 855.1768552937709, 'maxlen': 2.6243862335782957, 'min_threshold': 3.639473803194394, 'rolling_min_window_size': 752.2589155887903, 'sell_threshold': 0.21173394087446776, 'stop_loss': -0.04804957468191795, 'take_profit': 0.15024991715450597, 'waiting_time': 78.0601566211894, 'window_size': 272.0143043532347, 'window_size1': 743.9827078387367, 'window_size2': 188.271275283646}},
     {'target': 4.64331144441737, 'params': {'alpha': 0.440600188837343, 'buy_threshold': 0.11195367257701978, 'c': 52.36633945926425, 'change_threshold': 1.5982357191792937, 'decay': 0.0008426326704627309, 'ha_threshold': 8.677837490877749e-05, 'look_back_size': 887.3200344488924, 'maxlen': 6.988922649687287, 'min_threshold': 2.1939101298056505, 'rolling_min_window_size': 220.68385926634895, 'sell_threshold': 0.24148809385729525, 'stop_loss': -0.18061223528556128, 'take_profit': 0.17210198459132686, 'waiting_time': 194.54464819499512, 'window_size': 699.3754305908301, 'window_size1': 3.701091666359622, 'window_size2': 468.6253597784341}},
-
-
-
 ]
+
+params = {
+    'ETH': {
+        'type': 'sma',
+        'aggregate': 11,
+        'w': 4
+    },
+    'BCH': {
+        'type': 'sma',
+        'aggregate': 12,
+        'w': 1
+    },
+}

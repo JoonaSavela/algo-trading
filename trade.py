@@ -6,34 +6,56 @@ from binance.enums import *
 import time
 from data import coins, get_recent_data
 import numpy as np
-from utils import round_to_n, floor_to_n, stochastic_oscillator, heikin_ashi, sma, std
+from utils import *
 from math import floor, log10
 import json
 from strategy import *
 from requests.exceptions import ConnectionError, ReadTimeout
 from visualize import get_trades
-from parameters import parameters
+from parameters import params
 
-def asset_balance(client, symbol):
-    response = client.get_asset_balance(asset=symbol)
-    time.sleep(0.05)
-    return float(response['free'])
+# TODO: detect which coins are owned
+
+target_symbol = 'ETH'
+source_symbol = 'USDT'
 
 def binance_price(client, symbol):
-    return float(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1][2])
+    res = float(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1][2])
+    time.sleep(0.05)
+    return res
+
+def asset_balance(client, symbol, in_usd = False):
+    res = float(client.get_asset_balance(asset=symbol)['free'])
+    time.sleep(0.05)
+    if in_usd and symbol != 'USDT':
+        res *= binance_price(client, symbol + 'USDT')
+    return res
+
+def get_total_balance(client, separate = True):
+    balance_target = asset_balance(client, target_symbol, True)
+    balance_source = asset_balance(client, source_symbol, True)
+    balance_bnb = asset_balance(client, 'BNB', True)
+    total_balance = balance_target + balance_source + balance_bnb
+
+    if separate:
+        return total_balance, balance_target, balance_source, balance_bnb
+
+    return total_balance
 
 def check_bnb(client):
-    balance_usdt = asset_balance(client, 'USDT')
-    time.sleep(0.05)
-    if balance_usdt > 50:
-        balance_bnb = asset_balance(client, 'BNB')
-        if balance_bnb < 0.25:
-            try:
-                client.order_market_buy(symbol='BNBUSDT', quantity=0.5)
-                print('Bought BNB')
-                time.sleep(0.1)
-            except binance.exceptions.BinanceAPIException as e:
-                print(e)
+    total_balance, balance_target, balance_source, balance_bnb = get_total_balance(client)
+    if balance_bnb / (total_balance) < 0.005:
+        if balance_target > balance_source:
+            symbol = target_symbol
+        else:
+            symbol = source_symbol
+        try:
+            symbol = 'BNB' + symbol
+            client.order_market_buy(symbol=symbol, quantity=0.01 * total_balance)
+            print('Bought BNB')
+            time.sleep(0.1)
+        except binance.exceptions.BinanceAPIException as e:
+            print(e)
 
 def snippet(amount, precision):
     return "{:0.0{}f}".format(amount, precision)
@@ -49,8 +71,10 @@ def cancel_orders(client, symbol, side = None):
     if count > 0:
         print('Cancelled', count, 'orders')
 
-def sell_assets(client, symbol, balance_symbol, amount = 1):
-    quantity = floor_to_n(balance_symbol * amount, 4)
+def sell_assets(client, amount = 1):
+    symbol = target_symbol + source_symbol
+    balance_target = asset_balance(client, target_symbol)
+    quantity = floor_to_n(balance_target * amount, 4)
     try:
         order = client.order_market_sell(
             symbol=symbol,
@@ -61,8 +85,12 @@ def sell_assets(client, symbol, balance_symbol, amount = 1):
         print(e)
         return False
 
-def buy_assets(client, symbol, prev_close, balance_usdt, amount = 1):
-    quantity = floor_to_n(balance_usdt / prev_close * amount, 4)
+def buy_assets(client, amount = 1):
+    symbol = target_symbol + source_symbol
+    prev_high = binance_price(client, symbol)
+    balance_source = asset_balance(client, source_symbol, True)
+
+    quantity = floor_to_n(balance_source / prev_high * amount, 4)
     try:
         order = client.order_market_buy(
             symbol=symbol,
@@ -73,161 +101,106 @@ def buy_assets(client, symbol, prev_close, balance_usdt, amount = 1):
         print(e)
         return False
 
+def wait(time_delta, initial_time, verbose = False):
+    time_diff = time.time() - initial_time
+    waiting_time = time_delta - time_diff
+    while waiting_time < 0:
+        waiting_time += time_delta
+    if verbose:
+        print()
+        print('waiting', waiting_time / (60 * 60), 'hours')
+    time.sleep(waiting_time)
+
+def get_status(client):
+    status = client.get_account_status()
+    time.sleep(0.05)
+    return status
 
 def trading_pipeline():
     client = Client(binance_api_key, binance_secret_key)
-    # symbol = np.random.choice(coins) + 'USDT'
-    symbol1 = 'ETH'
-    symbol = symbol1 + 'USDT'
-    print(symbol1)
+    symbol = target_symbol + source_symbol
+    print(target_symbol)
+
+    params_dict = params[target_symbol]
+    print(params_dict)
+    type = params_dict['type']
+    aggregate = params_dict['aggregate']
+    w = params_dict['w']
+
+    time_delta = 60 * 60 * aggregate
 
     try:
         print('Starting trading pipeline...')
 
-        status = client.get_account_status()
+        status = get_status(client)
         print('Status:', status)
         check_bnb(client)
 
-        _, initial_time = get_recent_data(symbol1)
-        initial_capital = asset_balance(client, 'USDT')
-        initial_bnb = asset_balance(client, 'BNB')
-        print(initial_time, initial_capital, asset_balance(client, symbol1), initial_bnb)
-
-        stop_loss_take_profit = True
-        restrictive = True
-
-        obj = parameters[2]
-
-        params = obj['params']
-
-        if 'decay' not in params:
-            params['decay'] = 0.0001
-
-        strategy = Main_Strategy(params, stop_loss_take_profit, restrictive)
-        X_size = strategy.size()
-
-        wealths = get_trades(count = 4)
-        trades = wealths[-3:] / wealths[:3]
-        print(trades)
-
-        # for trade in trades:
-        #     strategy.deque_criterion.append(trade)
-        #
-        # print(strategy.deque_criterion.get_profit())
-
-        time_diff = time.time() - initial_time
-        waiting_time = 60 - time_diff
-        while waiting_time < 0:
-            waiting_time += 60
+        _, initial_time = get_recent_data(target_symbol, type='h', aggregate=aggregate)
+        balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
         print()
-        print('waiting', waiting_time, 'seconds')
-        time.sleep(waiting_time)
+        print(initial_time, balance_capital, balance_target, balance_source, balance_bnb)
+        assert(balance_capital - balance_bnb > 100)
+
+        # TODO: disable waiting here?
+        # wait(time_delta, initial_time, True)
 
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
-                X, timeTo = get_recent_data(symbol1, size = X_size)
+                X, timeTo = get_recent_data(target_symbol, size = w + 1, type='h', aggregate=aggregate)
 
-                buy, sell, buy_and_criteria, sell_and_criteria, buy_or_criteria, sell_or_criteria = \
-                    strategy.get_output(X, timeTo / 60, reset = False, update = False)
+                if type == 'sma':
+                    ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+                else:
+                    alpha = 1 - 1 / w
+                    ma = np.diff(ema(X[:, 0] / X[0, 0], alpha, 1.0))
 
-                # print(buy, sell)
+                buy = ma[0] > 0
+                sell = not buy
+
+                print(ma[0], buy, sell)
 
                 price = X[-1, 0]
                 action = 'DO NOTHING'
 
-                if buy:
-                    balance_usdt = asset_balance(client, 'USDT')
-                    high = binance_price(client, symbol)
-
-                    success = buy_assets(client, symbol, high, balance_usdt)
-
+                if buy and balance_source > 100:
+                    success = buy_assets(client)
                     if success:
-                        strategy.update_after_buy(price, timeTo / 60)
                         action = 'BUY'
-                elif sell:
-                    balance_symbol = asset_balance(client, symbol1)
-
-                    success = sell_assets(client, symbol, balance_symbol)
-
+                elif sell and balance_target > 100:
+                    success = sell_assets(client)
                     if success:
-                        strategy.update_after_sell(price, timeTo / 60)
                         action = 'SELL'
 
 
-                if action == 'BUY':
-                    print()
-                    print(timeTo, action, price, buy_and_criteria, buy_or_criteria)
-                elif action == 'SELL':
-                    print()
-                    print(timeTo, action, price, sell_and_criteria, sell_or_criteria)
-                    print(strategy.deque_criterion.trades)
-                    print(strategy.deque_criterion.get_profit())
-
-                time.sleep(20)
                 if action != 'DO NOTHING':
+                    print()
+                    print(timeTo, action, price)
                     check_bnb(client)
-                    # open_orders = client.get_open_orders(symbol=symbol)
-                    balance_symbol = asset_balance(client, symbol1)
-                    balance_usdt = asset_balance(client, 'USDT')
-                    balance_bnb = asset_balance(client, 'BNB')
-                    print(balance_usdt, balance_symbol, balance_bnb)
+                    balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
+                    print(balance_capital, balance_target, balance_source, balance_bnb)
 
-                if restrictive and strategy.logic_criterion.recently_sold and \
-                        not strategy.deque_criterion.buy({'current_time': timeTo / 60}):
-                    profit = strategy.deque_criterion.get_profit() - 1.0
-                    waiting_time = strategy.deque_criterion.get_waiting_time(profit) * 60
-                    print('Sleeping for', waiting_time // (60 * 60), 'hours')
-                    time.sleep(waiting_time)
-                    strategy.logic_criterion.recently_sold = False
-                    _, timeTo = get_recent_data(symbol1)
-
-                time_diff = time.time() - timeTo
-                waiting_time = 60 - time_diff
-                while waiting_time < 0:
-                    waiting_time += 60
-                time.sleep(waiting_time)
+                wait(time_delta, timeTo, True)
             except ConnectionError as e:
                 print(e)
-                status = client.get_account_status()
+                status = get_status(client)
                 print('Status:', status)
             except ReadTimeout as e:
                 print(e)
-                status = client.get_account_status()
+                status = get_status(client)
                 print('Status:', status)
 
     except KeyboardInterrupt:
         pass
     finally:
         print()
-        print('Status:', client.get_account_status())
+        print('Status:', get_status(client))
         print('Exiting trading pipeline...')
 
         cancel_orders(client, symbol)
-        balance_symbol = asset_balance(client, symbol1)
-        if balance_symbol > 0:
-            sell_assets(client, symbol, balance_symbol)
-        time.sleep(0.1)
-
-        _, final_time = get_recent_data(symbol1)
-        final_capital = asset_balance(client, 'USDT')
-        final_bnb = asset_balance(client, 'BNB')
-        print(final_time, final_capital, asset_balance(client, symbol1), final_bnb)
-
-        obj = {
-            'symbol': symbol,
-            'initial_time': str(initial_time),
-            'final_time': str(final_time),
-            'initial_capital': str(initial_capital),
-            'final_capital': str(final_capital),
-            'initial_bnb': str(initial_bnb),
-            'final_bnb': str(final_bnb)
-        }
-        filename = 'trading_logs/' + symbol1 + '-' + str(initial_time) + '-' + str(final_time) + '.json'
-
-        # if not initial_capital == final_capital:
-        #     with open(filename, 'w') as file:
-        #         json.dump(obj, file)
-
+        balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
+        print()
+        print(balance_capital, balance_target, balance_source, balance_bnb)
 
 if __name__ == '__main__':
     trading_pipeline()
