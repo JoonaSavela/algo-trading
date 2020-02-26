@@ -2,9 +2,12 @@ from strategy import *
 import numpy as np
 import pandas as pd
 import glob
-from utils import get_time
+from utils import *
+from data import *
 import os
 from parameters import parameters
+from tqdm import tqdm
+from optimize import get_wealths
 
 from bayes_opt import BayesianOptimization
 from bayes_opt.observer import JSONLogger
@@ -333,20 +336,156 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 
+def find_aggregated_strategy():
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    X_orig = load_all_data(test_files, 0)
+
+    commissions = 0.00075
+
+    best = 0
+    best_w = -1
+    best_aggregate_N = -1
+    best_type = ''
+
+    type_list = ['sma']
+    # type_list = ['sma', 'ema']
+    # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
+
+    for type in type_list:
+        for aggregate_N in tqdm(range(60, 60*25, 60)):
+            X_all = aggregate(X_orig[np.random.randint(aggregate_N):, :], aggregate_N)
+            for w in range(1, 51):
+                if type == 'sma':
+                    ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
+                elif type == 'sma_returns':
+                    ma = sma(np.log(X_all[1:, 0] / X_all[:-1, 0]), w)
+                elif type == 'ema_returns':
+                    alpha = 1 - 1 / w
+                    ma = smoothed_returns(X_all, alpha)
+                else:
+                    alpha = 1 - 1 / w
+                    ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
+                N = ma.shape[0]
+                if N == 0:
+                    continue
+
+                X = X_all[-N:, :]
+
+                buys = ma > 0
+                sells = ~buys
+
+                buys = buys.astype(float)
+                sells = sells.astype(float)
+
+                wealths, _, _, _, _ = get_wealths(
+                    X, buys, sells, commissions = commissions
+                )
+                wealths += 1
+
+                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+                wealth = wealths[-1] ** (1 / n_months)
+
+                if wealth > best:
+                    best = wealth
+                    best_w = w
+                    best_aggregate_N = aggregate_N
+                    best_type = type
+
+                # print(wealth)
+
+    print()
+    # ETH: sma 11 4, 1.0969
+    # BCH: sma 12 1, 1.1200
+    print(best_type, best_aggregate_N // 60, best_w)
+    print()
+
+    w = best_w
+    aggregate_N = best_aggregate_N
+    type = best_type
+
+    Xs = load_all_data(test_files, [0, 1])
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    total_wealth = 1.0
+    total_months = 0
+    count = 0
+    prev_price = 1.0
+
+    for X in Xs:
+        X_all = aggregate(X, aggregate_N)
+
+        if type == 'sma':
+            ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
+        elif type == 'sma_returns':
+            ma = sma(np.log(X_all[1:, 0] / X_all[:-1, 0]), w)
+        elif type == 'ema_returns':
+            alpha = 1 - 1 / w
+            ma = smoothed_returns(X_all, alpha)
+        else:
+            alpha = 1 - 1 / w
+            ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
+        N = ma.shape[0]
+
+        X = X_all[-N:, :]
+
+        buys = ma > 0
+        sells = ~buys
+
+        buys = buys.astype(float)
+        sells = sells.astype(float)
+
+        wealths, _, _, _, _ = get_wealths(
+            X, buys, sells, commissions = commissions
+        )
+        wealths += 1
+
+        n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+        wealth = wealths[-1] ** (1 / n_months)
+
+        print(wealth, wealth ** 12)
+
+        t = np.arange(N) + count
+        count += N
+
+        plt.plot(t, X[:, 0] / X[0, 0] * prev_price, c='k', alpha=0.5)
+        plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
+        plt.plot(t, wealths * total_wealth, c='g')
+
+        total_wealth *= wealths[-1]
+        prev_price *= X[-1, 0] / X[0, 0]
+        total_months += n_months
+
+    plt.show()
+
+    total_wealth = total_wealth ** (1 / total_months)
+    print()
+    print(total_wealth, total_wealth ** 12)
+
+
 if __name__ == '__main__':
-    n_runs = 800
-    kappa = 1
-    p = 0.9
-    strategy_class = Main_Strategy
-    stop_loss_take_profit = True
-    restrictive = True
+    find_aggregated_strategy()
 
-    coin = 'ETH'
-
-    dir = 'data/' + coin + '/'
-    files = glob.glob(dir + '*.json')
-    files.sort(key = get_time)
-    # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
-
-    optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p)
+    # n_runs = 800
+    # kappa = 1
+    # p = 0.9
+    # strategy_class = Main_Strategy
+    # stop_loss_take_profit = True
+    # restrictive = True
+    #
+    # coin = 'ETH'
+    #
+    # dir = 'data/' + coin + '/'
+    # files = glob.glob(dir + '*.json')
+    # files.sort(key = get_time)
+    # # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
+    #
+    # optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p)
     # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
