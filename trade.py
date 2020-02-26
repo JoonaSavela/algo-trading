@@ -158,8 +158,7 @@ def trading_pipeline():
                 buy = ma[0] > 0
                 sell = not buy
 
-                print()
-                print(ma[0], buy, sell)
+                print(ma[0])
 
                 price = X[-1, 0]
                 action = 'DO NOTHING'
@@ -180,8 +179,9 @@ def trading_pipeline():
                     check_bnb(client)
                     balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
                     print(balance_capital, balance_target, balance_source, balance_bnb)
+                    print()
 
-                wait(time_delta, timeTo, True)
+                wait(time_delta, timeTo, False)
             except ConnectionError as e:
                 print(e)
                 status = get_status(client)

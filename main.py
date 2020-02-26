@@ -27,12 +27,6 @@ from keys import binance_api_key, binance_secret_key
 def main():
     plt.style.use('seaborn')
 
-    client = Client(binance_api_key, binance_secret_key)
-    avg_price = client.get_avg_price(symbol='ETHUSDT')
-    print(avg_price)
-
-    return
-
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
