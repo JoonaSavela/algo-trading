@@ -189,7 +189,7 @@ def plot_peaks(files, inputs, params, model, sequence_length):
         X, buys1, sells1
     )
 
-    print(wealths1[-1] + 1)
+    print(wealths1[-1])
 
     owns2 = np.zeros((sequence_length,))
 
@@ -214,7 +214,7 @@ def plot_peaks(files, inputs, params, model, sequence_length):
         X, buys2, sells2
     )
 
-    print(wealths2[-1] + 1)
+    print(wealths2[-1])
 
     #lag = 15
     #threshold = 4
@@ -415,7 +415,7 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
                 wealths, _, _, _, _ = get_wealths(
                     X[t[b]:t[b]+sequence_length, :], buys, sells, commissions = commissions
                 )
-                profits.append(wealths[-1] + 1)
+                profits.append(wealths[-1])
 
             n_round = 4
 
@@ -453,7 +453,7 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
         X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
     )
 
-    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
+    print(wealths[-1], capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
 
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
@@ -480,7 +480,7 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
         X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
     )
 
-    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
+    print(wealths[-1], capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
 
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
@@ -502,7 +502,7 @@ def train(files, inputs, params, model, signal_model, sequence_length, n_epochs,
         X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
     )
 
-    print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
+    print(wealths[-1], capital_usd / initial_usd, capital_coin * X_test[-1, 0] / initial_usd)
 
     plt.style.use('seaborn')
     fig, ax = plt.subplots(ncols=2, figsize=(16, 8))

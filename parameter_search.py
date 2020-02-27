@@ -386,7 +386,6 @@ def find_optimal_aggregated_strategy():
                 wealths, _, _, _, _ = get_wealths(
                     X, buys, sells, commissions = commissions
                 )
-                wealths += 1
 
                 n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
@@ -448,7 +447,6 @@ def find_optimal_aggregated_strategy():
         wealths, _, _, _, _ = get_wealths(
             X, buys, sells, commissions = commissions
         )
-        wealths += 1
 
         n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
@@ -507,7 +505,6 @@ def find_optimal_limit_order_percentage():
         wealths, _, _, _, _ = get_wealths_limit(
             X, p, buys, sells, commissions = 0.00075
         )
-        wealths += 1
 
         n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
@@ -531,7 +528,6 @@ def find_optimal_limit_order_percentage():
     wealths, _, _, _, _ = get_wealths_limit(
         X, p, buys, sells, commissions = 0.00075
     )
-    wealths += 1
 
     n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 

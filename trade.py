@@ -19,6 +19,9 @@ from parameters import params
 target_symbol = 'ETH'
 source_symbol = 'USDT'
 
+# TODO: start using OCO orders
+
+# TODO: change to prev close
 def binance_price(client, symbol):
     res = float(client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)[-1][2])
     time.sleep(0.05)
@@ -85,6 +88,7 @@ def sell_assets(client, amount = 1):
         print(e)
         return False
 
+# TODO: use amount = 0.99?
 def buy_assets(client, amount = 1):
     symbol = target_symbol + source_symbol
     prev_high = binance_price(client, symbol)

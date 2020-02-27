@@ -183,7 +183,7 @@ def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ah
         # plt.plot(X[:n, 0] / X[0, 0], c='k', alpha=0.5, label='price')
         # plt.plot(wealths + 1, c='b', alpha=0.5, label='wealth')
         plt.plot((X[:n, 0] / X[0, 0] - 1) * 100, c='k', alpha=0.5, label='price')
-        plt.plot(wealths * 100, c='b', alpha=0.5, label='wealth')
+        plt.plot((wealths - 1) * 100, c='b', alpha=0.5, label='wealth')
 
         plt.plot(idx, buy, c='g', alpha=0.5)
         plt.plot(idx, sell, c='r', alpha=0.5)
@@ -209,14 +209,14 @@ def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ah
             X[:n, :], buy_li, sell_li
         )
 
-        print(wealths[-1] + 1)
+        print(wealths[-1])
 
         plt.style.use('seaborn')
 
         fig, ax = plt.subplots(ncols = 2)
 
         ax[0].plot(X[:n+n_ahead, 0] / X[0, 0], c='k', alpha=0.5, label='price')
-        ax[0].plot(wealths + 1, c='b', alpha=0.7, label='wealth')
+        ax[0].plot(wealths, c='b', alpha=0.7, label='wealth')
         ax[0].plot(buys, X[buys, 0] / X[0, 0], 'go', alpha=0.7, label='buys')
         ax[0].plot(sells, X[sells, 0] / X[0, 0], 'ro', alpha=0.7, label='sells')
         ax[0].legend()
@@ -367,7 +367,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                     wealths, _, _, _, _ = get_wealths(
                         X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
                     )
-                    profits.append(wealths[-1] + 1)
+                    profits.append(wealths[-1])
 
                 n_round = 4
 
@@ -391,7 +391,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                         X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
                     )
 
-                    profits.append(wealths[-1] + 1)
+                    profits.append(wealths[-1])
 
                 expected_profits, expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx = get_expected_min_max_profits(target.detach(), min_max_log_returns)
 
@@ -402,7 +402,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                         X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
                     )
 
-                    optim_profits.append(wealths[-1] + 1)
+                    optim_profits.append(wealths[-1])
 
                 n_round = 4
 
@@ -452,7 +452,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
             X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
         )
 
-        print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+        print(wealths[-1], capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
 
         plt.style.use('seaborn')
         fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
@@ -478,7 +478,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
             X_test, buys, sells, initial_usd = initial_usd, commissions = commissions
         )
 
-        print(wealths[-1] + 1, capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
+        print(wealths[-1], capital_usd / initial_usd, capital_coin * X_test[0, 0] / initial_usd)
 
         fig, ax = plt.subplots(ncols=2, figsize=(16, 8))
 
@@ -513,7 +513,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
             X_test, buy_li, sell_li
         )
 
-        print(wealths[-1] + 1, wealths_optim[-1] + 1)
+        print(wealths[-1], wealths_optim[-1])
 
         plt.style.use('seaborn')
 
@@ -840,7 +840,7 @@ def optimize_reward_function(X, n_runs, kappa, commissions = 0.00075):
 
         n_months = buys.shape[0] / (60 * 24 * 30)
 
-        wealth = (wealths[-1] + 1) ** (1 / n_months)
+        wealth = wealths[-1] ** (1 / n_months)
 
         print('c = {}, d = {}, wealth = {}'.format(
             round_to_n(c, 3),
@@ -915,8 +915,6 @@ def plot_c_and_d(X, c = 0.358, d = 40, commissions = 0.001):
     buys = get_realized_decisions(keeps, buys).numpy()
 
     wealths, _, _, _, _ = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
-
-    wealths += 1
 
     n_months = buys.shape[0] / (60 * 24 * 30)
 
@@ -1000,10 +998,8 @@ def train2(
         buys = get_realized_decisions(keeps, buys).detach().numpy()
 
         wealths, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = commissions)
-        wealths += 1
 
         wealths1, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = 0.0005)
-        wealths1 += 1
 
         n_months = buys.shape[0] / (60 * 24 * 30)
         wealth = wealths[-1] ** (1 / n_months)

@@ -38,7 +38,7 @@ def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, com
 
         wealths[i] = capital_usd + capital_coin * price
 
-    wealths = np.array(wealths) / wealths[0] - 1
+    wealths = np.array(wealths) / wealths[0]
 
     return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
 
@@ -76,7 +76,7 @@ def get_wealths_limit(X, p, buys, sells = None, initial_usd = 1000, initial_coin
 
         wealths[i] = capital_usd + capital_coin * price
 
-    wealths = np.array(wealths) / wealths[0] - 1
+    wealths = np.array(wealths) / wealths[0]
 
     return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
 
@@ -217,7 +217,7 @@ def get_optimal_strategy(coin_filenames, improve, batch_size, commissions, verbo
         wealths, _, _, _, _ = get_wealths(
             X_all, buys_out
         )
-        print(wealths[-1], X_all[-1, 0] / X_all[0, 0] - 1)
+        print(wealths[-1], X_all[-1, 0] / X_all[0, 0])
 
     return X_all, buys_out
 
@@ -264,7 +264,7 @@ def visualize_optimum(X, buys):
 
     plt.style.use('seaborn')
     plt.plot(X[:, 0] / X[0, 0])
-    plt.plot(wealths + 1)
+    plt.plot(wealths)
     plt.show()
 
 if __name__ == '__main__':
