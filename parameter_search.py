@@ -7,7 +7,7 @@ from data import *
 import os
 from parameters import parameters
 from tqdm import tqdm
-from optimize import get_wealths
+from optimize import get_wealths, get_wealths_limit
 
 from bayes_opt import BayesianOptimization
 from bayes_opt.observer import JSONLogger
@@ -335,8 +335,10 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 
+# TODO: check whether limit orders would work
+# TODO: make a separate function for calculating buys and sells
 
-def find_aggregated_strategy():
+def find_optimal_aggregated_strategy():
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -408,6 +410,8 @@ def find_aggregated_strategy():
     aggregate_N = best_aggregate_N
     type = best_type
 
+    # commissions = 0.0
+
     Xs = load_all_data(test_files, [0, 1])
 
     if not isinstance(Xs, list):
@@ -470,8 +474,81 @@ def find_aggregated_strategy():
     print(total_wealth, total_wealth ** 12)
 
 
+# Not worth, increases risk while providing little extra profit
+def find_optimal_limit_order_percentage():
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    X = load_all_data(test_files, 0)
+
+    aggregate_N = 60 * 11
+    w = 4
+
+    X = aggregate(X, aggregate_N)
+
+    ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+    N = ma.shape[0]
+
+    X = X[-N:, :]
+
+    best_p = 0.0
+    best_wealth = -1
+
+    for p in np.arange(0, 0.003, 0.000125):
+
+        buys = ma > 0
+        sells = ~buys
+
+        buys = buys.astype(float)
+        sells = sells.astype(float)
+
+        wealths, _, _, _, _ = get_wealths_limit(
+            X, p, buys, sells, commissions = 0.00075
+        )
+        wealths += 1
+
+        n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+        wealth = wealths[-1] ** (1 / n_months)
+
+        if wealth > best_wealth:
+            best_wealth = wealth
+            best_p = p
+
+        print(p, wealth, wealth ** 12)
+
+
+    p = best_p
+
+    buys = ma > 0
+    sells = ~buys
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
+
+    wealths, _, _, _, _ = get_wealths_limit(
+        X, p, buys, sells, commissions = 0.00075
+    )
+    wealths += 1
+
+    n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+    wealth = wealths[-1] ** (1 / n_months)
+
+    print()
+    print(p, wealth, wealth ** 12)
+
+    plt.plot(X[:, 0] / X[0, 0], c='k', alpha=0.5)
+    plt.plot(np.cumsum(ma) + 1, c='b', alpha=0.65)
+    plt.plot(wealths, c='g')
+    plt.show()
+
+
 if __name__ == '__main__':
-    find_aggregated_strategy()
+    find_optimal_aggregated_strategy()
+    # find_optimal_limit_order_percentage()
 
     # n_runs = 800
     # kappa = 1

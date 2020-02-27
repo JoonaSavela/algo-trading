@@ -42,6 +42,44 @@ def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, com
 
     return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
 
+def get_wealths_limit(X, p, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+    if sells is None:
+        sells = 1 - buys
+    capital_usd = initial_usd
+    capital_coin = initial_coin
+
+    wealths = [0] * X.shape[0]
+    buy_amounts = []
+    sell_amounts = []
+
+    can_buy = (X[1:, 2] <= X[:-1, 0] * (1 - p)).astype(float)
+    buys[:-1] *= can_buy
+
+    can_sell = (X[1:, 1] >= X[:-1, 0] * (1 + p)).astype(float)
+    sells[:-1] *= can_sell
+
+    for i in range(X.shape[0]):
+        BUY, SELL = buys[i], sells[i]
+        price = X[i, 0]
+
+        amount_coin_buy = BUY * capital_usd / (price * (1 - p)) * (1 - commissions)
+        amount_usd_buy = capital_usd * BUY
+
+        amount_usd_sell = SELL * capital_coin * (price * (1 + p)) * (1 - commissions)
+        amount_coin_sell = capital_coin * SELL
+
+        capital_coin += amount_coin_buy - amount_coin_sell
+        capital_usd += amount_usd_sell - amount_usd_buy
+
+        buy_amounts.append(amount_usd_buy)
+        sell_amounts.append(amount_usd_sell)
+
+        wealths[i] = capital_usd + capital_coin * price
+
+    wealths = np.array(wealths) / wealths[0] - 1
+
+    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+
 def objective_function(buys, X, initial_usd, initial_coin, commissions):
     sells = 1 - buys
     wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
