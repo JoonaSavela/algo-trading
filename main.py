@@ -21,6 +21,7 @@ from keys import binance_api_key, binance_secret_key
 from parameter_search import *
 
 # TODO: try candlestick patterns
+# TODO: detect support and resistance lines
 
 def main():
     plot_performance([('sma', 5  * 60, 9, 1.4, 0.00875),
