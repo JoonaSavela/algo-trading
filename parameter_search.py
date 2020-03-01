@@ -348,7 +348,7 @@ def find_optimal_aggregated_strategy(verbose = True):
 
     commissions = 0.00075
 
-    best = 0
+    best_wealth = 0
     best_w = -1
     best_aggregate_N = -1
     best_type = ''
@@ -391,8 +391,8 @@ def find_optimal_aggregated_strategy(verbose = True):
 
                 wealth = wealths[-1] ** (1 / n_months)
 
-                if wealth > best:
-                    best = wealth
+                if wealth > best_wealth:
+                    best_wealth = wealth
                     best_w = w
                     best_aggregate_N = aggregate_N
                     best_type = type
@@ -542,7 +542,7 @@ def find_optimal_limit_order_percentage():
     plt.show()
 
 
-def find_optimal_oco_order_params_helper(X, X_agg, ma, disable):
+def find_optimal_oco_order_params_helper(X, X_agg, ma, aggregate_N, disable):
     best_p = 0.0
     best_m = 0
     best_wealth = -1
@@ -596,7 +596,7 @@ def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable 
     X_agg = X_agg[-N:, :]
     X = X[-aggregate_N * N:, :]
 
-    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, ma, disable)
+    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, ma, aggregate_N, disable)
 
     if verbose:
         print()
