@@ -728,6 +728,72 @@ def find_optimal_aggregated_oco_strategy():
     print(best_type, best_aggregate_N // 60, best_w, best_m, best_p)
     print(best_wealth, best_wealth ** 12)
 
+# TODO: add type handling
+def plot_performance(params_list):
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    c_list = ['g', 'c']
+
+    for i, params in enumerate(params_list):
+        type, aggregate_N, w, m, p = params
+        print(type, aggregate_N // 60, w, m, p)
+
+        Xs = load_all_data(test_files, [0, 1])
+
+        if not isinstance(Xs, list):
+            Xs = [Xs]
+
+        total_wealth = 1.0
+        total_months = 0
+        count = 0
+        prev_price = 1.0
+
+        for X in Xs:
+            X_agg = aggregate(X, aggregate_N)
+
+            ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+            N = ma.shape[0]
+
+            X_agg = X_agg[-N:, :]
+            X = X[-aggregate_N * N:, :]
+
+            buys = ma > 0
+            sells = ~buys
+
+            buys = buys.astype(float)
+            sells = sells.astype(float)
+
+            wealths, _, _, _, _ = get_wealths_oco(
+                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = True
+            )
+
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+            wealth = wealths[-1] ** (1 / n_months)
+
+            print(wealth, wealth ** 12)
+
+            t = np.arange(N) + count
+            t *= aggregate_N
+            count += N
+
+            plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
+            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
+            plt.plot(t, wealths * total_wealth, c=c_list[i % len(c_list)], alpha=0.65)
+
+            total_wealth *= wealths[-1]
+            prev_price *= X[-1, 0] / X[0, 0]
+            total_months += n_months
+
+        total_wealth = total_wealth ** (1 / total_months)
+        print(total_wealth, total_wealth ** 12)
+        print()
+
+    plt.show()
+
 if __name__ == '__main__':
     type_list = ['sma']
     # type_list = ['sma', 'ema']
@@ -741,6 +807,7 @@ if __name__ == '__main__':
     m, p = find_optimal_oco_order_params(type, aggregate_N, w, True)
     print(m, p)
 
+    # sma 5 9 1.4000000000000004 0.00875
     # find_optimal_aggregated_oco_strategy()
 
     # n_runs = 800
