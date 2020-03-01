@@ -542,34 +542,7 @@ def find_optimal_limit_order_percentage():
     plt.show()
 
 
-def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable = False):
-    plt.style.use('seaborn')
-
-    test_files = glob.glob('data/ETH/*.json')
-    test_files.sort(key = get_time)
-
-    X = load_all_data(test_files, 0)
-
-    # aggregate_N = 60 * 11
-    # w = 4
-
-    X_agg = aggregate(X, aggregate_N)
-
-    if type == 'sma':
-        ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
-    elif type == 'sma_returns':
-        ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
-    elif type == 'ema_returns':
-        alpha = 1 - 1 / w
-        ma = smoothed_returns(X_agg, alpha)
-    else:
-        alpha = 1 - 1 / w
-        ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
-    N = ma.shape[0]
-
-    X_agg = X_agg[-N:, :]
-    X = X[-aggregate_N * N:, :]
-
+def find_optimal_oco_order_params_helper(X, X_agg, ma, disable):
     best_p = 0.0
     best_m = 0
     best_wealth = -1
@@ -595,6 +568,35 @@ def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable 
                 best_wealth = wealth
                 best_p = p
                 best_m = m
+
+    return best_m, best_p
+
+def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable = False):
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    X = load_all_data(test_files, 0)
+
+    X_agg = aggregate(X, aggregate_N)
+
+    if type == 'sma':
+        ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+    elif type == 'sma_returns':
+        ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
+    elif type == 'ema_returns':
+        alpha = 1 - 1 / w
+        ma = smoothed_returns(X_agg, alpha)
+    else:
+        alpha = 1 - 1 / w
+        ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
+    N = ma.shape[0]
+
+    X_agg = X_agg[-N:, :]
+    X = X[-aggregate_N * N:, :]
+
+    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, ma, disable)
 
     if verbose:
         print()
