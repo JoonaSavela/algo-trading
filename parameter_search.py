@@ -7,7 +7,7 @@ from data import *
 import os
 from parameters import parameters
 from tqdm import tqdm
-from optimize import get_wealths, get_wealths_limit
+from optimize import *
 
 from bayes_opt import BayesianOptimization
 from bayes_opt.observer import JSONLogger
@@ -336,9 +336,9 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 # TODO: check whether limit orders would work
-# TODO: make a separate function for calculating buys and sells
+# TODO: make a separate function for calculating buys and sells depending on type
 
-def find_optimal_aggregated_strategy():
+def find_optimal_aggregated_strategy(verbose = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -397,80 +397,80 @@ def find_optimal_aggregated_strategy():
                     best_aggregate_N = aggregate_N
                     best_type = type
 
-                # print(wealth)
+    if verbose:
+        print()
+        # ETH: sma 11 4, 1.0969
+        # BCH: sma 12 1, 1.1200
+        print(best_type, best_aggregate_N // 60, best_w)
+        print()
 
-    print()
-    # ETH: sma 11 4, 1.0969
-    # BCH: sma 12 1, 1.1200
-    print(best_type, best_aggregate_N // 60, best_w)
-    print()
+        w = best_w
+        aggregate_N = best_aggregate_N
+        type = best_type
 
-    w = best_w
-    aggregate_N = best_aggregate_N
-    type = best_type
+        # commissions = 0.0
 
-    # commissions = 0.0
+        Xs = load_all_data(test_files, [0, 1])
 
-    Xs = load_all_data(test_files, [0, 1])
+        if not isinstance(Xs, list):
+            Xs = [Xs]
 
-    if not isinstance(Xs, list):
-        Xs = [Xs]
+        total_wealth = 1.0
+        total_months = 0
+        count = 0
+        prev_price = 1.0
 
-    total_wealth = 1.0
-    total_months = 0
-    count = 0
-    prev_price = 1.0
+        for X in Xs:
+            X_all = aggregate(X, aggregate_N)
 
-    for X in Xs:
-        X_all = aggregate(X, aggregate_N)
+            if type == 'sma':
+                ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
+            elif type == 'sma_returns':
+                ma = sma(np.log(X_all[1:, 0] / X_all[:-1, 0]), w)
+            elif type == 'ema_returns':
+                alpha = 1 - 1 / w
+                ma = smoothed_returns(X_all, alpha)
+            else:
+                alpha = 1 - 1 / w
+                ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
+            N = ma.shape[0]
 
-        if type == 'sma':
-            ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
-        elif type == 'sma_returns':
-            ma = sma(np.log(X_all[1:, 0] / X_all[:-1, 0]), w)
-        elif type == 'ema_returns':
-            alpha = 1 - 1 / w
-            ma = smoothed_returns(X_all, alpha)
-        else:
-            alpha = 1 - 1 / w
-            ma = np.diff(ema(X_all[:, 0] / X_all[0, 0], alpha, 1.0))
-        N = ma.shape[0]
+            X = X_all[-N:, :]
 
-        X = X_all[-N:, :]
+            buys = ma > 0
+            sells = ~buys
 
-        buys = ma > 0
-        sells = ~buys
+            buys = buys.astype(float)
+            sells = sells.astype(float)
 
-        buys = buys.astype(float)
-        sells = sells.astype(float)
+            wealths, _, _, _, _ = get_wealths(
+                X, buys, sells, commissions = commissions
+            )
 
-        wealths, _, _, _, _ = get_wealths(
-            X, buys, sells, commissions = commissions
-        )
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
-        n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+            wealth = wealths[-1] ** (1 / n_months)
 
-        wealth = wealths[-1] ** (1 / n_months)
+            print(wealth, wealth ** 12)
 
-        print(wealth, wealth ** 12)
+            t = np.arange(N) + count
+            count += N
 
-        t = np.arange(N) + count
-        count += N
+            plt.plot(t, X[:, 0] / X[0, 0] * prev_price, c='k', alpha=0.5)
+            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
+            plt.plot(t, wealths * total_wealth, c='g')
 
-        plt.plot(t, X[:, 0] / X[0, 0] * prev_price, c='k', alpha=0.5)
-        plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
-        plt.plot(t, wealths * total_wealth, c='g')
+            total_wealth *= wealths[-1]
+            prev_price *= X[-1, 0] / X[0, 0]
+            total_months += n_months
 
-        total_wealth *= wealths[-1]
-        prev_price *= X[-1, 0] / X[0, 0]
-        total_months += n_months
+        total_wealth = total_wealth ** (1 / total_months)
+        print()
+        print(total_wealth, total_wealth ** 12)
 
-    plt.show()
+        plt.show()
 
-    total_wealth = total_wealth ** (1 / total_months)
-    print()
-    print(total_wealth, total_wealth ** 12)
-
+    return best_type, best_aggregate_N, best_w
 
 # Not worth, increases risk while providing little extra profit
 def find_optimal_limit_order_percentage():
@@ -542,9 +542,133 @@ def find_optimal_limit_order_percentage():
     plt.show()
 
 
+def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable = False):
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    X = load_all_data(test_files, 0)
+
+    # aggregate_N = 60 * 11
+    # w = 4
+
+    X_agg = aggregate(X, aggregate_N)
+
+    if type == 'sma':
+        ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+    elif type == 'sma_returns':
+        ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
+    elif type == 'ema_returns':
+        alpha = 1 - 1 / w
+        ma = smoothed_returns(X_agg, alpha)
+    else:
+        alpha = 1 - 1 / w
+        ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
+    N = ma.shape[0]
+
+    X_agg = X_agg[-N:, :]
+    X = X[-aggregate_N * N:, :]
+
+    best_p = 0.0
+    best_m = 0
+    best_wealth = -1
+
+    for m in tqdm(np.arange(1.0, 3.0, 0.1), disable = disable):
+        for p in np.arange(0, 0.01, 0.00025):
+
+            buys = ma > 0
+            sells = ~buys
+
+            buys = buys.astype(float)
+            sells = sells.astype(float)
+
+            wealths, _, _, _, _ = get_wealths_oco(
+                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            )
+
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+            wealth = wealths[-1] ** (1 / n_months)
+
+            if wealth > best_wealth:
+                best_wealth = wealth
+                best_p = p
+                best_m = m
+
+    if verbose:
+        print()
+        # 2, 0.005
+        # 2.4, 0.00475
+        print(best_m, best_p)
+        print()
+
+        p = best_p
+        m = best_m
+
+        # commissions = 0.0
+
+        Xs = load_all_data(test_files, [0, 1])
+
+        if not isinstance(Xs, list):
+            Xs = [Xs]
+
+        total_wealth = 1.0
+        total_months = 0
+        count = 0
+        prev_price = 1.0
+
+        for X in Xs:
+            X_agg = aggregate(X, aggregate_N)
+
+            ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+            N = ma.shape[0]
+
+            X_agg = X_agg[-N:, :]
+            X = X[-aggregate_N * N:, :]
+
+            buys = ma > 0
+            sells = ~buys
+
+            buys = buys.astype(float)
+            sells = sells.astype(float)
+
+            wealths, _, _, _, _ = get_wealths_oco(
+                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            )
+
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+            wealth = wealths[-1] ** (1 / n_months)
+
+            print(wealth, wealth ** 12)
+
+            t = np.arange(N) + count
+            count += N
+
+            plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
+            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
+            plt.plot(t, wealths * total_wealth, c='g')
+
+            total_wealth *= wealths[-1]
+            prev_price *= X[-1, 0] / X[0, 0]
+            total_months += n_months
+
+        total_wealth = total_wealth ** (1 / total_months)
+        print()
+        print(total_wealth, total_wealth ** 12)
+
+        plt.show()
+
+    return best_m, best_p
+
+
 if __name__ == '__main__':
-    find_optimal_aggregated_strategy()
+    type, aggregate_N, w = find_optimal_aggregated_strategy(False)
+    print(type, aggregate_N // 60, w)
     # find_optimal_limit_order_percentage()
+    m, p = find_optimal_oco_order_params(type, aggregate_N, w, True)
+    print(m, p)
 
     # n_runs = 800
     # kappa = 1

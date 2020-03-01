@@ -80,6 +80,103 @@ def get_wealths_limit(X, p, buys, sells = None, initial_usd = 1000, initial_coin
 
     return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
 
+def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075, verbose = True):
+    if sells is None:
+        sells = 1 - buys
+    capital_usd = initial_usd
+    capital_coin = initial_coin
+
+    wealths = [0] * X_agg.shape[0]
+    buy_amounts = []
+    sell_amounts = []
+
+    buy_lim_count = 0
+    buy_stop_count = 0
+    sell_lim_count = 0
+    sell_stop_count = 0
+
+    for i in range(X_agg.shape[0] - 1):
+        BUY, SELL = buys[i], sells[i]
+        price = X_agg[i, 0]
+        buy_price = price
+        sell_price = price
+
+        if BUY > 0.0 and capital_usd > 0.0:
+            idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
+            # TODO: different profit ratio than 1:1
+            li_limit = X[idx, 2] <= price * np.exp(-m*p)
+            li_stop = X[idx, 1] > price * np.exp(p)
+
+            if li_limit.any():
+                first_limit_idx = idx[li_limit][0]
+            else:
+                first_limit_idx = np.inf
+
+            if li_stop.any():
+                first_stop_idx = idx[li_stop][0]
+            else:
+                first_stop_idx = np.inf
+
+            if (first_limit_idx == first_stop_idx and first_limit_idx != np.inf) or \
+                    (first_stop_idx < first_limit_idx):
+                buy_price = price * np.exp(p)
+                buy_stop_count += 1
+            elif first_limit_idx < first_stop_idx:
+                buy_price = price * np.exp(-m*p)
+                buy_lim_count += 1
+            else:
+                BUY = 0.0
+
+        if SELL > 0.0 and capital_coin > 0.0:
+            idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
+            # TODO: different profit ratio than 1:1
+            li_limit = X[idx, 1] >= price * np.exp(m*p)
+            li_stop = X[idx, 2] < price * np.exp(-p)
+
+            if li_limit.any():
+                first_limit_idx = idx[li_limit][0]
+            else:
+                first_limit_idx = np.inf
+
+            if li_stop.any():
+                first_stop_idx = idx[li_stop][0]
+            else:
+                first_stop_idx = np.inf
+
+            if (first_limit_idx == first_stop_idx and first_limit_idx != np.inf) or \
+                    (first_stop_idx < first_limit_idx):
+                sell_price = price * np.exp(-p)
+                sell_stop_count += 1
+            elif first_limit_idx < first_stop_idx:
+                sell_price = price * np.exp(m*p)
+                sell_lim_count += 1
+            else:
+                SELL = 0.0
+
+        amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions)
+        amount_usd_buy = capital_usd * BUY
+
+        amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions)
+        amount_coin_sell = capital_coin * SELL
+
+        capital_coin += amount_coin_buy - amount_coin_sell
+        capital_usd += amount_usd_sell - amount_usd_buy
+
+        buy_amounts.append(amount_usd_buy)
+        sell_amounts.append(amount_usd_sell)
+
+        wealths[i] = capital_usd + capital_coin * price
+
+    if verbose:
+        print(buy_lim_count, buy_stop_count)
+        print(sell_lim_count, sell_stop_count)
+
+    wealths[-1] = wealths[-2]
+
+    wealths = np.array(wealths) / wealths[0]
+
+    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+
 def objective_function(buys, X, initial_usd, initial_coin, commissions):
     sells = 1 - buys
     wealths, capital_usd, capital_coin, buy_amounts, sell_amounts = get_wealths(
