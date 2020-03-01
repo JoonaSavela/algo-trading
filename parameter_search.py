@@ -338,7 +338,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 # TODO: check whether limit orders would work
 # TODO: make a separate function for calculating buys and sells depending on type
 
-def find_optimal_aggregated_strategy(verbose = True):
+def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbose = True, disable = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -353,14 +353,10 @@ def find_optimal_aggregated_strategy(verbose = True):
     best_aggregate_N = -1
     best_type = ''
 
-    type_list = ['sma']
-    # type_list = ['sma', 'ema']
-    # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
-
     for type in type_list:
-        for aggregate_N in tqdm(range(60, 60*25, 60)):
+        for aggregate_N in tqdm(aggregate_N_list, disable = disable):
             X_all = aggregate(X_orig[np.random.randint(aggregate_N):, :], aggregate_N)
-            for w in range(1, 51):
+            for w in w_list:
                 if type == 'sma':
                     ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
                 elif type == 'sma_returns':
@@ -665,12 +661,87 @@ def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable 
     return best_m, best_p
 
 
+def find_optimal_aggregated_oco_strategy():
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    X = load_all_data(test_files, 0)
+
+    commissions = 0.00075
+
+    best_wealth = 0
+    best_w = -1
+    best_aggregate_N = -1
+    best_type = ''
+    best_p = 0.0
+    best_m = 0
+
+    type_list = ['sma']
+    # type_list = ['sma', 'ema']
+    # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
+
+    for type in type_list:
+        for aggregate_N in tqdm(range(60, 60*25, 60)):
+            X_agg = aggregate(X, aggregate_N)
+
+            _, _, w = find_optimal_aggregated_strategy([type], [aggregate_N], range(1, 51), False, True)
+
+            if type == 'sma':
+                ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+            elif type == 'sma_returns':
+                ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
+            elif type == 'ema_returns':
+                alpha = 1 - 1 / w
+                ma = smoothed_returns(X_agg, alpha)
+            else:
+                alpha = 1 - 1 / w
+                ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
+            N = ma.shape[0]
+
+            X_agg1 = X_agg[-N:, :]
+            X1 = X[-aggregate_N * N:, :]
+
+            m, p = find_optimal_oco_order_params_helper(X1, X_agg1, ma, aggregate_N, True)
+
+            buys = ma > 0
+            sells = ~buys
+
+            buys = buys.astype(float)
+            sells = sells.astype(float)
+
+            wealths, _, _, _, _ = get_wealths_oco(
+                X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            )
+
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+            wealth = wealths[-1] ** (1 / n_months)
+
+            if wealth > best_wealth:
+                best_wealth = wealth
+                best_w = w
+                best_aggregate_N = aggregate_N
+                best_type = type
+                best_p = p
+                best_m = m
+
+    print(best_type, best_aggregate_N // 60, best_w, best_m, best_p)
+    print(best_wealth, best_wealth ** 12)
+
 if __name__ == '__main__':
-    type, aggregate_N, w = find_optimal_aggregated_strategy(False)
+    type_list = ['sma']
+    # type_list = ['sma', 'ema']
+    # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
+    aggregate_N_list = range(60, 60*25, 60)
+    w_list = range(1, 51)
+
+    type, aggregate_N, w = find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, False)
     print(type, aggregate_N // 60, w)
     # find_optimal_limit_order_percentage()
     m, p = find_optimal_oco_order_params(type, aggregate_N, w, True)
     print(m, p)
+
+    # find_optimal_aggregated_oco_strategy()
 
     # n_runs = 800
     # kappa = 1
