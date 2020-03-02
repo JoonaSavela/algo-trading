@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from math import log10, floor
+from math import log10, floor, ceil
 from scipy.signal import find_peaks
 from scipy import stats
 try:
@@ -343,6 +343,12 @@ def floor_to_n(x, n = 2):
     res = int(res) if abs(res) >= 10**(n - 1) else res
     return res
 
+def ceil_to_n(x, n = 2):
+    if x == 0: return x
+    p = -int(floor(log10(abs(x)))) + (n - 1)
+    res = ceil(x * 10 ** p) / 10 ** p
+    res = int(res) if abs(res) >= 10**(n - 1) else res
+    return res
 
 def get_time(filename):
     split1 = filename.split('/')

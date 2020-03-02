@@ -13,7 +13,9 @@ params = {
     'ETH': {
         'type': 'sma',
         'aggregate': 11,
-        'w': 4
+        'w': 4,
+        'm': 2.4,
+        'p': 0.00475
     },
     'BCH': {
         'type': 'sma',

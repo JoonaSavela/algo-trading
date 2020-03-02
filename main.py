@@ -25,7 +25,8 @@ from parameter_search import *
 
 def main():
     plot_performance([('sma', 5  * 60, 9, 1.4, 0.00875),
-                      ('sma', 11 * 60, 4, 2.4, 0.00475)])
+                      ('sma', 11 * 60, 4, 2.4, 0.00475),
+                      ('sma', 11 * 60, 4, 1.0, 0.0)])
 
     # buys = ma > 0
     # sells = ~buys
