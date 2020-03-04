@@ -255,6 +255,8 @@ def aggregate(X, n = 5):
         aggregated_X[i, 1] = np.max(X[js, 1]) # high
         aggregated_X[i, 2] = np.min(X[js, 2]) # low
         aggregated_X[i, 3] = X[js[0], 3] # open
+        aggregated_X[i, 4] = np.sum(X[js, 4])
+        aggregated_X[i, 5] = np.sum(X[js, 5])
 
     return aggregated_X
 
