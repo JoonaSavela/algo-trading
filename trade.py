@@ -207,6 +207,7 @@ def trading_pipeline():
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
                 X, timeTo = get_recent_data(target_symbol, size = w + 1, type='h', aggregate=aggregate)
+                balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
 
                 if type == 'sma':
                     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
