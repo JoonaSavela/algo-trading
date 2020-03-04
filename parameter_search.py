@@ -355,7 +355,7 @@ def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbos
 
     for type in type_list:
         for aggregate_N in tqdm(aggregate_N_list, disable = disable):
-            X_all = aggregate(X_orig[np.random.randint(aggregate_N):, :], aggregate_N)
+            X_all = aggregate(X_orig, aggregate_N)
             for w in w_list:
                 if type == 'sma':
                     ma = np.diff(sma(X_all[:, 0] / X_all[0, 0], w))
@@ -732,7 +732,7 @@ def find_optimal_aggregated_oco_strategy(verbose = True):
 
     return best_type, best_aggregate_N, best_w, best_m, best_p
 
-def plot_performance(params_list):
+def plot_performance(params_list, N_repeat = 1):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -740,71 +740,91 @@ def plot_performance(params_list):
 
     c_list = ['g', 'c', 'm']
 
+    Xs = load_all_data(test_files, [0, 1])
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
     for i, params in enumerate(params_list):
         type, aggregate_N, w, m, p = params
         print(type, aggregate_N // 60, w, m, p)
 
-        Xs = load_all_data(test_files, [0, 1])
+        total_log_wealths = []
+        total_months = []
 
-        if not isinstance(Xs, list):
-            Xs = [Xs]
+        for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+            prev_price = 1.0
+            count = 0
+            total_wealth1 = 1.0
+            total_months1 = 0
 
-        total_wealth = 1.0
-        total_months = 0
-        count = 0
-        prev_price = 1.0
+            for X in Xs:
+                rand_N = np.random.randint(aggregate_N)
+                if rand_N > 0:
+                    X = X[:-rand_N, :]
+                X_agg = aggregate(X, aggregate_N)
 
-        for X in Xs:
-            X_agg = aggregate(X, aggregate_N)
+                if type == 'sma':
+                    ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
+                elif type == 'sma_returns':
+                    ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
+                elif type == 'ema_returns':
+                    alpha = 1 - 1 / w
+                    ma = smoothed_returns(X_agg, alpha)
+                else:
+                    alpha = 1 - 1 / w
+                    ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
+                N = ma.shape[0]
 
-            if type == 'sma':
-                ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], w))
-            elif type == 'sma_returns':
-                ma = sma(np.log(X_agg[1:, 0] / X_agg[:-1, 0]), w)
-            elif type == 'ema_returns':
-                alpha = 1 - 1 / w
-                ma = smoothed_returns(X_agg, alpha)
-            else:
-                alpha = 1 - 1 / w
-                ma = np.diff(ema(X_agg[:, 0] / X_agg[0, 0], alpha, 1.0))
-            N = ma.shape[0]
+                X_agg = X_agg[-N:, :]
+                X = X[-aggregate_N * N:, :]
 
-            X_agg = X_agg[-N:, :]
-            X = X[-aggregate_N * N:, :]
+                buys = ma > 0
+                sells = ~buys
 
-            buys = ma > 0
-            sells = ~buys
+                buys = buys.astype(float)
+                sells = sells.astype(float)
 
-            buys = buys.astype(float)
-            sells = sells.astype(float)
+                wealths, _, _, _, _ = get_wealths_oco(
+                    X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = N_repeat == 1
+                )
 
-            wealths, _, _, _, _ = get_wealths_oco(
-                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = True
-            )
+                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
-            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+                wealth = wealths[-1] ** (1 / n_months)
 
-            wealth = wealths[-1] ** (1 / n_months)
+                if N_repeat == 1:
+                    print(wealth, wealth ** 12)
 
-            print(wealth, wealth ** 12)
+                t = np.arange(N) + count
+                t *= aggregate_N
+                count += N
 
-            t = np.arange(N) + count
-            t *= aggregate_N
-            count += N
+                if N_repeat == 1:
+                    if i == 0:
+                        plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
+                    plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
+                    plt.plot(t, wealths * total_wealth1, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
 
-            if i == 0:
-                plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
-            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
-            plt.plot(t, wealths * total_wealth, c=c_list[i % len(c_list)], alpha=0.65)
+                total_wealth1 *= wealths[-1]
+                prev_price *= X[-1, 0] / X[0, 0]
+                total_months1 += n_months
 
-            total_wealth *= wealths[-1]
-            prev_price *= X[-1, 0] / X[0, 0]
-            total_months += n_months
+            total_log_wealths.append(np.log(total_wealth1))
+            total_months.append(total_months1)
 
-        total_wealth = total_wealth ** (1 / total_months)
+        total_wealth = np.exp(np.sum(total_log_wealths) / np.sum(total_months))
         print()
         print(total_wealth, total_wealth ** 12)
         print()
+
+        if N_repeat > 1:
+            plt.hist(
+                np.array(total_log_wealths) / np.array(total_months),
+                np.sqrt(N_repeat).astype(int),
+                color=c_list[i % len(c_list)],
+                alpha=0.9 / np.sqrt(len(params_list))
+            )
 
     plt.show()
 
@@ -823,7 +843,8 @@ if __name__ == '__main__':
     type, aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False)
 
     plot_performance([(type, aggregate_N, w, m, p),
-                      ('sma', 11 * 60, 4, 2.4, 0.00475)])
+                      ('sma', 11 * 60, 4, 2.4, 0.00475)],
+                      N_repeat = 100)
 
     # n_runs = 800
     # kappa = 1
