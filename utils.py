@@ -452,3 +452,26 @@ def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
     state = torch.tensor(state).view(1, -1).repeat(batch_size, 1).type(torch.float32)
 
     return state
+
+
+
+def get_buys_and_sells(X, type, w):
+    if type == 'sma':
+        ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+    elif type == 'sma_returns':
+        ma = sma(np.log(X[1:, 0] / X[:-1, 0]), w)
+    elif type == 'ema_returns':
+        alpha = 1 - 1 / w
+        ma = smoothed_returns(X, alpha)
+    else:
+        alpha = 1 - 1 / w
+        ma = np.diff(ema(X[:, 0] / X[0, 0], alpha, 1.0))
+    N = ma.shape[0]
+
+    buys = ma > 0
+    sells = ~buys
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
+
+    return buys, sells, N, ma

@@ -22,14 +22,17 @@ from parameter_search import *
 from scipy.stats import gaussian_kde
 from scipy.signal import find_peaks
 
-# TODO: try candlestick patterns with support and resistance lines
+# TODO: try candlestick patterns with support and resistance lines?
+
+# TODO: try getting as much (aggregated) hourly data as possible from cryptocompare
+# TODO: train a NN on the (aggregated) data
 
 def main():
 
     plot_performance([('sma', 5  * 60, 9, 1.4, 0.00875),
-                      ('sma', 11 * 60, 4, 2.4, 0.00475),
-                      ('sma', 11 * 60, 4, 1.0, 0.0)],
-                      N_repeat=1000)
+                      ('sma', 5  * 60, 9, 1.0, 0.0),
+                      ('sma', 11 * 60, 4, 2.4, 0.00475)],
+                      N_repeat=1)
 
 
 
