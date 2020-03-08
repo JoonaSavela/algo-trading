@@ -454,7 +454,8 @@ def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
     return state
 
 
-
+# TODO: try candlestick patterns with support and resistance lines?
+# TODO: try using stoch when abs of ma is low
 def get_buys_and_sells(X, type, w):
     if type == 'sma':
         ma = np.diff(sma(X[:, 0] / X[0, 0], w))

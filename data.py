@@ -47,7 +47,6 @@ def _get_recent_data(coin, TimeTo, size, type, aggregate):
 def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
     res = np.zeros(shape=(size, 6))
 
-    i = 0
     s = size
     timeFrom = None
 
