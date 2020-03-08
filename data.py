@@ -8,29 +8,28 @@ import glob
 from keys import cryptocompare_key
 from utils import get_time
 
-def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
+def _get_recent_data(coin, TimeTo, size, type, aggregate):
     if type == 'm':
-        url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' \
-            + coin \
-            + '&tsym=USD&limit=' \
-            + str(size - 1) \
-            + '&aggregate=' \
-            + str(aggregate) \
-            + '&api_key=' \
-            + cryptocompare_key
+        url = 'https://min-api.cryptocompare.com/data/histominute'
     elif type == 'h':
-        url = 'https://min-api.cryptocompare.com/data/histohour?fsym=' \
-            + coin \
-            + '&tsym=USD&limit=' \
-            + str(size - 1) \
-            + '&aggregate=' \
-            + str(aggregate) \
-            + '&api_key=' \
-            + cryptocompare_key
+        url = 'https://min-api.cryptocompare.com/data/histohour'
     else:
         raise ValueError('type must be "m" or "h"')
+    url += '?fsym=' \
+        + coin \
+        + '&tsym=USD&limit=' \
+        + str(size - 1) \
+        + ('&toTs={}'.format(TimeTo) if TimeTo is not None else '') \
+        + '&aggregate=' \
+        + str(aggregate) \
+        + '&api_key=' \
+        + cryptocompare_key
+
     request = requests.get(url)
     content = request.json()
+
+    print(content['Response'])
+    print(url)
 
     data = content['Data']
     data_keys = ['close', 'high', 'low', 'open', 'volumefrom', 'volumeto']
@@ -43,7 +42,29 @@ def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
             tmp.append(item[key])
         X[i, :] = tmp
 
-    return X, content['TimeTo']
+    print(X.shape)
+
+    return X, content['TimeTo'], content['TimeFrom']
+
+
+def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
+    res = np.zeros(shape=(size, 6))
+
+    i = 0
+    s = size
+    timeFrom = None
+
+    while s > 0:
+        if s == size:
+            X, timeTo, timeFrom = _get_recent_data('ETH', timeFrom, min(2000, s), type, aggregate)
+        else:
+            X, _, timeFrom = _get_recent_data('ETH', timeFrom, min(2000, s), type, aggregate)
+
+        s -= X.shape[0]
+
+        res[s:s+X.shape[0], :] = X
+
+    return res, timeTo
 
 def get_and_save(coin, time_str):
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=' + cryptocompare_key
