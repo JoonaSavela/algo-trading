@@ -28,9 +28,6 @@ def _get_recent_data(coin, TimeTo, size, type, aggregate):
     request = requests.get(url)
     content = request.json()
 
-    print(content['Response'])
-    print(url)
-
     data = content['Data']
     data_keys = ['close', 'high', 'low', 'open', 'volumefrom', 'volumeto']
 
@@ -42,7 +39,7 @@ def _get_recent_data(coin, TimeTo, size, type, aggregate):
             tmp.append(item[key])
         X[i, :] = tmp
 
-    print(X.shape)
+    # print(content['Response'], X.shape)
 
     return X, content['TimeTo'], content['TimeFrom']
 
