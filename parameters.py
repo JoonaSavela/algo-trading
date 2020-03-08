@@ -12,10 +12,10 @@ parameters = [
 params = {
     'ETH': {
         'type': 'sma',
-        'aggregate': 5,
-        'w': 9,
-        'm': 1.4,
-        'p': 0.00875
+        'aggregate': 1,
+        'w': 46,
+        'm': 1.6,
+        'p': 0.0065
     },
     'BCH': {
         'type': 'sma',
