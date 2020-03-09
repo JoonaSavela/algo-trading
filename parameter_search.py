@@ -335,7 +335,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 
-def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbose = True, disable = False):
+def find_optimal_aggregated_strategy(aggregate_N_list, w_list, verbose = True, disable = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -348,42 +348,38 @@ def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbos
     best_wealth = 0
     best_w = -1
     best_aggregate_N = -1
-    best_type = ''
 
-    for type in type_list:
-        for aggregate_N in tqdm(aggregate_N_list, disable = disable):
-            X_all = aggregate(X_orig, aggregate_N)
-            for w in w_list:
-                buys, sells, N, ma = get_buys_and_sells(X_all, type, w)
-                if N == 0:
-                    continue
+    for aggregate_N in tqdm(aggregate_N_list, disable = disable):
+        X_all = aggregate(X_orig, aggregate_N)
+        for w in w_list:
+            buys, sells, N = get_buys_and_sells(X_all, w)
+            if N == 0:
+                continue
 
-                X = X_all[-N:, :]
+            X = X_all[-N:, :]
 
-                wealths, _, _, _, _ = get_wealths(
-                    X, buys, sells, commissions = commissions
-                )
+            wealths, _, _, _, _ = get_wealths(
+                X, buys, sells, commissions = commissions
+            )
 
-                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
-                wealth = wealths[-1] ** (1 / n_months)
+            wealth = wealths[-1] ** (1 / n_months)
 
-                if wealth > best_wealth:
-                    best_wealth = wealth
-                    best_w = w
-                    best_aggregate_N = aggregate_N
-                    best_type = type
+            if wealth > best_wealth:
+                best_wealth = wealth
+                best_w = w
+                best_aggregate_N = aggregate_N
 
     if verbose:
         print()
-        # ETH: sma 11 4, 1.0969
-        # BCH: sma 12 1, 1.1200
-        print(best_type, best_aggregate_N // 60, best_w)
+        # ETH: 11 4, 1.0969
+        # BCH: 12 1, 1.1200
+        print(best_aggregate_N // 60, best_w)
         print()
 
         w = best_w
         aggregate_N = best_aggregate_N
-        type = best_type
 
         # commissions = 0.0
 
@@ -400,7 +396,7 @@ def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbos
         for X in Xs:
             X_all = aggregate(X, aggregate_N)
 
-            buys, sells, N, ma = get_buys_and_sells(X_all, type, w)
+            buys, sells, N = get_buys_and_sells(X_all, w)
 
             X = X_all[-N:, :]
 
@@ -431,15 +427,15 @@ def find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, verbos
 
         plt.show()
 
-    return best_type, best_aggregate_N, best_w
+    return best_aggregate_N, best_w
 
 
-def find_optimal_oco_order_params_helper(X, X_agg, type, w, aggregate_N, disable, return_buys_output = False):
+def find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable, return_buys_output = False):
     best_p = 0.0
     best_m = 0
     best_wealth = -1
 
-    buys, sells, N, ma = get_buys_and_sells(X_agg, type, w)
+    buys, sells, N = get_buys_and_sells(X_agg, w)
 
     X_agg = X_agg[-N:, :]
     X = X[-aggregate_N * N:, :]
@@ -461,11 +457,11 @@ def find_optimal_oco_order_params_helper(X, X_agg, type, w, aggregate_N, disable
                 best_m = m
 
     if return_buys_output:
-        return best_m, best_p, buys, sells, N, ma
+        return best_m, best_p, buys, sells, N
 
     return best_m, best_p
 
-def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable = False):
+def find_optimal_oco_order_params(aggregate_N, w, verbose = True, disable = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -475,7 +471,7 @@ def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable 
 
     X_agg = aggregate(X, aggregate_N)
 
-    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, type, w, aggregate_N, disable)
+    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable)
 
     if verbose:
         print()
@@ -502,7 +498,7 @@ def find_optimal_oco_order_params(type, aggregate_N, w, verbose = True, disable 
         for X in Xs:
             X_agg = aggregate(X, aggregate_N)
 
-            buys, sells, N, ma = get_buys_and_sells(X_agg, type, w)
+            buys, sells, N = get_buys_and_sells(X_agg, w)
 
             X_agg = X_agg[-N:, :]
             X = X[-aggregate_N * N:, :]
@@ -548,57 +544,50 @@ def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
     best_wealth = 0
     best_w = -1
     best_aggregate_N = -1
-    best_type = ''
     best_p = 0.0
     best_m = 0
 
-    type_list = ['sma']
-    # type_list = ['sma', 'ema']
-    # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
+    for aggregate_N in tqdm(range(60, 60*13, 60)):
+        _, w = find_optimal_aggregated_strategy([aggregate_N], range(1, 51), False, True)
 
-    for type in type_list:
-        for aggregate_N in tqdm(range(60, 60*25, 60)):
-            _, _, w = find_optimal_aggregated_strategy([type], [aggregate_N], range(1, 51), False, True)
+        total_months = 0
+        total_wealth = 1.0
 
-            total_months = 0
-            total_wealth = 1.0
+        for n in range(N_repeat):
+            rand_N = np.random.randint(aggregate_N)
+            if rand_N > 0:
+                X1 = X[:-rand_N, :]
+            X_agg = aggregate(X1, aggregate_N)
 
-            for n in range(N_repeat):
-                rand_N = np.random.randint(aggregate_N)
-                if rand_N > 0:
-                    X1 = X[:-rand_N, :]
-                X_agg = aggregate(X1, aggregate_N)
+            m, p, buys, sells, N = find_optimal_oco_order_params_helper(X1, X_agg, w, aggregate_N, True, True)
 
-                m, p, buys, sells, N, _ = find_optimal_oco_order_params_helper(X1, X_agg, type, w, aggregate_N, True, True)
+            X_agg1 = X_agg[-N:, :]
+            X1 = X1[-aggregate_N * N:, :]
 
-                X_agg1 = X_agg[-N:, :]
-                X1 = X1[-aggregate_N * N:, :]
+            wealths, _, _, _, _ = get_wealths_oco(
+                X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            )
 
-                wealths, _, _, _, _ = get_wealths_oco(
-                    X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
-                )
+            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
-                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+            total_wealth *= wealths[-1]
+            total_months += n_months
 
-                total_wealth *= wealths[-1]
-                total_months += n_months
+        wealth = total_wealth ** (1 / total_months)
 
-            wealth = total_wealth ** (1 / total_months)
-
-            if wealth > best_wealth:
-                best_wealth = wealth
-                best_w = w
-                best_aggregate_N = aggregate_N
-                best_type = type
-                best_p = p
-                best_m = m
+        if wealth > best_wealth:
+            best_wealth = wealth
+            best_w = w
+            best_aggregate_N = aggregate_N
+            best_p = p
+            best_m = m
 
     if verbose:
-        print(best_type, best_aggregate_N // 60, best_w, best_m, best_p)
+        print(best_aggregate_N // 60, best_w, best_m, best_p)
         print(best_wealth, best_wealth ** 12)
         print()
 
-    return best_type, best_aggregate_N, best_w, best_m, best_p
+    return best_aggregate_N, best_w, best_m, best_p
 
 def plot_performance(params_list, N_repeat = 1):
     plt.style.use('seaborn')
@@ -614,8 +603,8 @@ def plot_performance(params_list, N_repeat = 1):
         Xs = [Xs]
 
     for i, params in enumerate(params_list):
-        type, aggregate_N, w, m, p = params
-        print(type, aggregate_N // 60, w, m, p)
+        aggregate_N, w, m, p = params
+        print(aggregate_N // 60, w, m, p)
 
         total_log_wealths = []
         total_months = []
@@ -632,7 +621,7 @@ def plot_performance(params_list, N_repeat = 1):
                     X = X[:-rand_N, :]
                 X_agg = aggregate(X, aggregate_N)
 
-                buys, sells, N, ma = get_buys_and_sells(X_agg, type, w)
+                buys, sells, N = get_buys_and_sells(X_agg, w)
 
                 X_agg = X_agg[-N:, :]
                 X = X[-aggregate_N * N:, :]
@@ -655,7 +644,7 @@ def plot_performance(params_list, N_repeat = 1):
                 if N_repeat == 1:
                     if i == 0:
                         plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
-                    plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
+                    # plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
                     plt.plot(t, wealths * total_wealth1, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
 
                 total_wealth1 *= wealths[-1]
@@ -681,22 +670,19 @@ def plot_performance(params_list, N_repeat = 1):
     plt.show()
 
 if __name__ == '__main__':
-    # type_list = ['sma']
-    # # type_list = ['sma', 'ema']
-    # # type_list = ['sma', 'ema', 'sma_returns', 'ema_returns']
     # aggregate_N_list = range(60, 60*25, 60)
     # w_list = range(1, 51)
     #
-    # type, aggregate_N, w = find_optimal_aggregated_strategy(type_list, aggregate_N_list, w_list, False)
-    # print(type, aggregate_N // 60, w)
-    # m, p = find_optimal_oco_order_params(type, aggregate_N, w, True)
+    # aggregate_N, w = find_optimal_aggregated_strategy(aggregate_N_list, w_list, False)
+    # print(aggregate_N // 60, w)
+    # m, p = find_optimal_oco_order_params(aggregate_N, w, True)
     # print(m, p)
 
-    type, aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False, 40)
+    aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False, 40)
 
-    plot_performance([(type, aggregate_N, w, m, p),
-                      ('sma', 5  * 60, 9, 1.0, 0.0),
-                      ('sma', 1 * 60, 46, 1.6, 0.0065)],
+    plot_performance([(aggregate_N, w, m, p),
+                      (5 * 60, 9, 1.0, 0.0),
+                      (1 * 60, 46, 1.6, 0.0065)],
                       N_repeat = 500)
 
     # n_runs = 800
