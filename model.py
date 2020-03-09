@@ -14,7 +14,7 @@ class CNN(nn.Module):
             n_features,
             n_hidden_features_per_layer,
             kernel_size = 2,
-            n_conv_layers = 10):
+            n_conv_layers = 7):
         super(CNN, self).__init__()
         self.n_features = n_features
         self.n_hidden_features_per_layer = n_hidden_features_per_layer
@@ -22,7 +22,7 @@ class CNN(nn.Module):
         self.n_conv_layers = n_conv_layers
         self.sequence_length = self.kernel_size ** self.n_conv_layers
 
-        assert(self.sequence_length <= 2000)
+        # assert(self.sequence_length <= 2000)
 
         self.conv_layers = nn.ModuleList([
             nn.utils.weight_norm(nn.Conv1d(
