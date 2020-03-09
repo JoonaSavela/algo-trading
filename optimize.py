@@ -168,14 +168,51 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd
         wealths[i] = capital_usd + capital_coin * price
 
     if verbose:
-        buy_profit = np.exp(m*p) * buy_lim_count + np.exp(-p) * buy_stop_count
-        buy_profit /= buy_lim_count + buy_stop_count
+        buy_profit = np.exp((m*p * buy_lim_count - p * buy_stop_count) / (buy_lim_count + buy_stop_count))
         print(buy_lim_count, buy_stop_count, buy_profit)
         sell_profit = np.exp(m*p) * sell_lim_count + np.exp(-p) * sell_stop_count
         sell_profit /= sell_lim_count + sell_stop_count
         print(sell_lim_count, sell_stop_count, sell_profit)
 
     wealths[-1] = wealths[-2]
+
+    wealths = np.array(wealths) / wealths[0]
+
+    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+
+def get_wealths_short(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+    if sells is None:
+        sells = 1 - buys
+    capital_usd = initial_usd
+    capital_coin = initial_coin
+
+    wealths = [0] * X.shape[0]
+    buy_amounts = []
+    sell_amounts = []
+
+    for i in range(X.shape[0]):
+        BUY, SELL = buys[i], sells[i]
+        price = X[i, 0]
+
+        amount_coin_buy = BUY * capital_usd / price * (1 - commissions)
+        amount_usd_buy = capital_usd * BUY
+
+        amount_usd_sell = SELL * capital_coin * price * (1 - commissions)
+        amount_coin_sell = capital_coin * SELL
+
+        capital_coin += amount_coin_buy - amount_coin_sell
+        capital_usd += amount_usd_sell - amount_usd_buy
+
+        buy_amounts.append(amount_usd_buy)
+        sell_amounts.append(amount_usd_sell)
+
+        amount_usd_sell = SELL * capital_usd * (1 - commissions)
+        amount_coin_sell = capital_usd / price * SELL
+
+        capital_coin -= amount_coin_sell
+        capital_usd += amount_usd_sell
+
+        wealths[i] = capital_usd + capital_coin * price
 
     wealths = np.array(wealths) / wealths[0]
 

@@ -39,7 +39,8 @@ def _get_recent_data(coin, TimeTo, size, type, aggregate):
             tmp.append(item[key])
         X[i, :] = tmp
 
-    # print(content['Response'], X.shape)
+    if content['Response'] == 'Error':
+        print(content)
 
     return X, content['TimeTo'], content['TimeFrom']
 
