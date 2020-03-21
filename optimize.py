@@ -5,52 +5,102 @@ import pandas as pd
 import glob
 import matplotlib.pyplot as plt
 import time
-from utils import round_to_n, get_time
+from utils import *
 import os
 from tqdm import tqdm
 import copy
 
-def get_wealths(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+# TODO: move to a different file
+# TODO: include all 6 columns
+def get_X_bear(X, multiplier = 1):
+    returns = X[1:, 0] / X[:-1, 0] - 1
+    returns_bear = -multiplier * returns
+    assert(np.all(returns_bear > -1.0))
+    X_bear = np.concatenate([
+        [1.0],
+        np.cumprod(returns_bear + 1)
+    ])
+
+    return X_bear
+
+def get_multiplied_X(X, multiplier = 1):
+    returns = X[1:, 0] / X[:-1, 0] - 1
+    returns = multiplier * returns
+    assert(np.all(returns > -1.0))
+
+    X_res = np.zeros(X.shape)
+    X_res[:, 0] = np.concatenate([
+        [1.0],
+        np.cumprod(returns + 1)
+    ])
+
+    other_returns = X[:, 1:4] / X[:, 0].reshape((-1, 1)) - 1
+    other_returns = multiplier * other_returns
+    assert(np.all(other_returns > -1.0))
+    X_res[:, 1:4] = X_res[:, 0].reshape((-1, 1)) * (other_returns + 1)
+
+    X_res[:, 4:] = X[:, 4:]
+
+    return X_res
+
+def get_wealths(X, buys, sells = None, commissions = 0.00075, short = False):
     if sells is None:
         sells = 1 - buys
-    capital_usd = initial_usd
-    capital_coin = initial_coin
+    capital_usd = 1000
+    capital_coin = 0
+    capital_coin_bear = 0
+
+    multiplier = 3
+
+    price_bear = 0.0
+    if short:
+        X_bear = get_X_bear(X, multiplier)
+
+    X = get_multiplied_X(X, multiplier)
 
     wealths = [0] * X.shape[0]
-    buy_amounts = []
-    sell_amounts = []
 
     for i in range(X.shape[0]):
         BUY, SELL = buys[i], sells[i]
         price = X[i, 0]
+        if short:
+            price_bear = X_bear[i]
 
-        amount_coin_buy = BUY * capital_usd / price * (1 - commissions)
+            amount_usd_sell_bear = BUY * capital_coin_bear * price_bear * (1 - commissions * multiplier)
+            amount_coin_sell_bear = capital_coin_bear * BUY
+
+            capital_coin_bear -= amount_coin_sell_bear
+            capital_usd += amount_usd_sell_bear
+
+        amount_coin_buy = BUY * capital_usd / price * (1 - commissions * multiplier)
         amount_usd_buy = capital_usd * BUY
 
-        amount_usd_sell = SELL * capital_coin * price * (1 - commissions)
+        amount_usd_sell = SELL * capital_coin * price * (1 - commissions * multiplier)
         amount_coin_sell = capital_coin * SELL
 
         capital_coin += amount_coin_buy - amount_coin_sell
         capital_usd += amount_usd_sell - amount_usd_buy
 
-        buy_amounts.append(amount_usd_buy)
-        sell_amounts.append(amount_usd_sell)
+        if short:
+            amount_coin_buy_bear = SELL * capital_usd / price_bear * (1 - commissions * multiplier)
+            amount_usd_buy_bear = capital_usd * SELL
 
-        wealths[i] = capital_usd + capital_coin * price
+            capital_coin_bear += amount_coin_buy_bear
+            capital_usd -= amount_usd_buy_bear
+
+        wealths[i] = capital_usd + capital_coin * price + capital_coin_bear * price_bear
 
     wealths = np.array(wealths) / wealths[0]
 
-    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+    return wealths
 
-def get_wealths_limit(X, p, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+def get_wealths_limit(X, p, buys, sells = None, commissions = 0.00075):
     if sells is None:
         sells = 1 - buys
-    capital_usd = initial_usd
-    capital_coin = initial_coin
+    capital_usd = 1000
+    capital_coin = 0
 
     wealths = [0] * X.shape[0]
-    buy_amounts = []
-    sell_amounts = []
 
     can_buy = (X[1:, 2] <= X[:-1, 0] * (1 - p)).astype(float)
     buys[:-1] *= can_buy
@@ -71,29 +121,28 @@ def get_wealths_limit(X, p, buys, sells = None, initial_usd = 1000, initial_coin
         capital_coin += amount_coin_buy - amount_coin_sell
         capital_usd += amount_usd_sell - amount_usd_buy
 
-        buy_amounts.append(amount_usd_buy)
-        sell_amounts.append(amount_usd_sell)
-
         wealths[i] = capital_usd + capital_coin * price
 
     wealths = np.array(wealths) / wealths[0]
 
-    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+    return wealths
 
-def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075, verbose = True):
+# TODO: start using X_bear
+
+def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, commissions = 0.00075, verbose = False):
     if sells is None:
         sells = 1 - buys
-    capital_usd = initial_usd
-    capital_coin = initial_coin
+    capital_usd = 1000
+    capital_coin = 0
 
     wealths = [0] * X_agg.shape[0]
-    buy_amounts = []
-    sell_amounts = []
 
     buy_lim_count = 0
     buy_stop_count = 0
     sell_lim_count = 0
     sell_stop_count = 0
+
+    sideways_count = 0
 
     for i in range(X_agg.shape[0] - 1):
         BUY, SELL = buys[i], sells[i]
@@ -103,9 +152,8 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd
 
         if BUY > 0.0 and capital_usd > 0.0:
             idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
-            # TODO: different profit ratio than 1:1
             li_limit = X[idx, 2] <= price * np.exp(-m*p)
-            li_stop = X[idx, 1] > price * np.exp(p)
+            li_stop = X[idx, 1] > price * (1 + p)
 
             if li_limit.any():
                 first_limit_idx = idx[li_limit][0]
@@ -119,19 +167,19 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd
 
             if (first_limit_idx == first_stop_idx and first_limit_idx != np.inf) or \
                     (first_stop_idx < first_limit_idx):
-                buy_price = price * np.exp(p)
+                buy_price = price * (1 + p)
                 buy_stop_count += 1
             elif first_limit_idx < first_stop_idx:
                 buy_price = price * np.exp(-m*p)
                 buy_lim_count += 1
             else:
                 BUY = 0.0
+                sideways_count += 1
 
         if SELL > 0.0 and capital_coin > 0.0:
             idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
-            # TODO: different profit ratio than 1:1
             li_limit = X[idx, 1] >= price * np.exp(m*p)
-            li_stop = X[idx, 2] < price * np.exp(-p)
+            li_stop = X[idx, 2] < price * (1 - p)
 
             if li_limit.any():
                 first_limit_idx = idx[li_limit][0]
@@ -145,13 +193,14 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd
 
             if (first_limit_idx == first_stop_idx and first_limit_idx != np.inf) or \
                     (first_stop_idx < first_limit_idx):
-                sell_price = price * np.exp(-p)
+                sell_price = price * (1 - p)
                 sell_stop_count += 1
             elif first_limit_idx < first_stop_idx:
                 sell_price = price * np.exp(m*p)
                 sell_lim_count += 1
             else:
                 SELL = 0.0
+                sideways_count += 1
 
         amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions)
         amount_usd_buy = capital_usd * BUY
@@ -162,61 +211,175 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, initial_usd
         capital_coin += amount_coin_buy - amount_coin_sell
         capital_usd += amount_usd_sell - amount_usd_buy
 
-        buy_amounts.append(amount_usd_buy)
-        sell_amounts.append(amount_usd_sell)
-
         wealths[i] = capital_usd + capital_coin * price
 
     if verbose:
         buy_profit = np.exp((m*p * buy_lim_count - p * buy_stop_count) / (buy_lim_count + buy_stop_count))
         print(buy_lim_count, buy_stop_count, buy_profit)
-        sell_profit = np.exp(m*p) * sell_lim_count + np.exp(-p) * sell_stop_count
+        sell_profit = np.exp(m*p) * sell_lim_count + (1 - p) * sell_stop_count
         sell_profit /= sell_lim_count + sell_stop_count
         print(sell_lim_count, sell_stop_count, sell_profit)
+        print(sideways_count)
 
     wealths[-1] = wealths[-2]
 
     wealths = np.array(wealths) / wealths[0]
 
-    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+    return wealths
 
-def get_wealths_short(X, buys, sells = None, initial_usd = 1000, initial_coin = 0, commissions = 0.00075):
+def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, commissions = 0.00075, verbose = False, short = False):
     if sells is None:
         sells = 1 - buys
-    capital_usd = initial_usd
-    capital_coin = initial_coin
+    if p == 0.0:
+        p = 1
+    capital_usd = 1000
+    capital_coin = 0
+    capital_coin_bear = 0
 
-    wealths = [0] * X.shape[0]
-    buy_amounts = []
-    sell_amounts = []
+    multiplier = 3
 
-    for i in range(X.shape[0]):
+    price_bear = 0.0
+    if short:
+        X_bear = get_X_bear(X, multiplier)
+        X_agg_bear = aggregate(X_bear, aggregate_N, True)
+
+    X = get_multiplied_X(X, multiplier)
+    X_agg = aggregate(X, aggregate_N)
+
+    wealths = [0] * X_agg.shape[0]
+
+    stop_count = 0
+    sideways_count = 0
+
+    prev_BUY = 0.0
+    prev_SELL = 0.0
+
+    for i in range(X_agg.shape[0] - 1):
         BUY, SELL = buys[i], sells[i]
-        price = X[i, 0]
+        buy_first = BUY > SELL
+        price = X_agg[i, 0]
+        buy_price = price
+        sell_price = price
+        if short:
+            price_bear = X_agg_bear[i]
+            buy_price_bear = price_bear
+            sell_price_bear = price_bear
+        idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
 
-        amount_coin_buy = BUY * capital_usd / price * (1 - commissions)
-        amount_usd_buy = capital_usd * BUY
+        if BUY == 1.0 and SELL == 0.0:
+            if BUY > prev_BUY:
+                stop_sell_price = price * (1 - p)
+                if short:
+                    stop_buy_price_bear = price_bear * (1 + p)
+            stop_sell_price = max(stop_sell_price, price * (1 - p))
+            if short:
+                stop_buy_price_bear = min(stop_buy_price_bear, price_bear * (1 + p))
+            li_stop = X[idx, 2] < stop_sell_price
 
-        amount_usd_sell = SELL * capital_coin * price * (1 - commissions)
-        amount_coin_sell = capital_coin * SELL
+            if li_stop.any():
+                sell_price = stop_sell_price
+                stop_buy_price = sell_price * (1 + p)
+                if short:
+                    buy_price_bear = stop_buy_price_bear
+                    stop_sell_price_bear = buy_price_bear * (1 - p)
+                SELL = 1.0
+                stop_count += 1
+            else:
+                sideways_count += 1
 
-        capital_coin += amount_coin_buy - amount_coin_sell
-        capital_usd += amount_usd_sell - amount_usd_buy
+        if SELL == 1.0 and BUY == 0.0:
+            if SELL > prev_SELL:
+                stop_buy_price = price * (1 + p)
+                if short:
+                    stop_sell_price_bear = price_bear * (1 - p)
+            stop_buy_price = min(stop_buy_price, price * (1 + p))
+            if short:
+                stop_sell_price_bear = min(stop_sell_price_bear, price_bear * (1 - p))
+            li_stop = X[idx, 1] > stop_buy_price
 
-        buy_amounts.append(amount_usd_buy)
-        sell_amounts.append(amount_usd_sell)
+            if li_stop.any():
+                buy_price = stop_buy_price
+                stop_sell_price = buy_price * (1 - p)
+                if short:
+                    sell_price_bear = stop_sell_price_bear
+                    stop_buy_price_bear = sell_price_bear * (1 + p)
+                BUY = 1.0
+                stop_count += 1
+            else:
+                sideways_count += 1
 
-        amount_usd_sell = SELL * capital_usd * (1 - commissions)
-        amount_coin_sell = capital_usd / price * SELL
+        # stop loss flips side
+        if buy_first:
+            if short:
+                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * multiplier)
+                amount_coin_sell_bear = capital_coin_bear * BUY
 
-        capital_coin -= amount_coin_sell
-        capital_usd += amount_usd_sell
+                capital_coin_bear -= amount_coin_sell_bear
+                capital_usd += amount_usd_sell_bear
 
-        wealths[i] = capital_usd + capital_coin * price
+            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * multiplier)
+            amount_usd_buy = capital_usd * BUY
+
+            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * multiplier)
+            amount_coin_sell = capital_coin * SELL
+
+            capital_coin += amount_coin_buy - amount_coin_sell
+            capital_usd += amount_usd_sell - amount_usd_buy
+
+            if short:
+                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * multiplier)
+                amount_usd_buy_bear = capital_usd * SELL
+
+                capital_coin_bear += amount_coin_buy_bear
+                capital_usd -= amount_usd_buy_bear
+        else:
+            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * multiplier)
+            amount_coin_sell = capital_coin * SELL
+
+            capital_coin -= amount_coin_sell
+            capital_usd += amount_usd_sell
+
+            if short:
+                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * multiplier)
+                amount_usd_buy_bear = capital_usd * SELL
+
+                capital_coin_bear += amount_coin_buy_bear
+                capital_usd -= amount_usd_buy_bear
+
+                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * multiplier)
+                amount_coin_sell_bear = capital_coin_bear * BUY
+
+                capital_coin_bear -= amount_coin_sell_bear
+                capital_usd += amount_usd_sell_bear
+
+            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * multiplier)
+            amount_usd_buy = capital_usd * BUY
+
+            capital_coin += amount_coin_buy
+            capital_usd -= amount_usd_buy
+
+        wealths[i] = capital_usd + capital_coin * price + capital_coin_bear * price_bear
+
+        if BUY == 1.0 and SELL == 1.0:
+            if buy_first:
+                BUY = 0.0
+            else:
+                SELL = 0.0
+
+        prev_BUY = BUY
+        prev_SELL = SELL
+
+    if verbose:
+        print(stop_count / (stop_count + sideways_count))
+
+    wealths[-1] = wealths[-2]
 
     wealths = np.array(wealths) / wealths[0]
 
-    return wealths, capital_usd, capital_coin, buy_amounts, sell_amounts
+    return wealths
+
+
+
 
 def objective_function(buys, X, initial_usd, initial_coin, commissions):
     sells = 1 - buys
