@@ -171,7 +171,7 @@ def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ah
 
         buys_optim = df.values.reshape(-1)
 
-        wealths, _, _, _, _ = get_wealths(
+        wealths = get_wealths(
             X[:n, :], buys_optim
         )
 
@@ -206,7 +206,7 @@ def plot_labels(files, coin, use_behavioral_cloning, n = 600, n_slots = 10, n_ah
 
         buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx)
 
-        wealths, _, _, _, _ = get_wealths(
+        wealths = get_wealths(
             X[:n, :], buy_li, sell_li
         )
 
@@ -365,7 +365,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                     else:
                         buys = out[:, b, 0]
                         sells = out[:, b, 1]
-                    wealths, _, _, _, _ = get_wealths(
+                    wealths = get_wealths(
                         X[i[b]:i[b]+sequence_length, :], buys, sells, commissions = commissions
                     )
                     profits.append(wealths[-1])
@@ -388,7 +388,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                 for b in range(batch_size):
                     buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx[:, b], expected_max_profit, expected_max_profit_idx[:, b])
 
-                    wealths, _, _, _, _ = get_wealths(
+                    wealths = get_wealths(
                         X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
                     )
 
@@ -399,7 +399,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
                 for b in range(batch_size):
                     buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx[:, b], expected_max_profit, expected_max_profit_idx[:, b])
 
-                    wealths, _, _, _, _ = get_wealths(
+                    wealths = get_wealths(
                         X[i[b]:i[b]+sequence_length, :], buy_li, sell_li, commissions = commissions
                     )
 
@@ -502,7 +502,7 @@ def train(coin, files, inputs, params, model, n_epochs, lr, batch_size, sequence
 
         buys, sells, buy_li, sell_li = get_buys_from_expected_min_max_profits(expected_min_profit, expected_min_profit_idx, expected_max_profit, expected_max_profit_idx)
 
-        wealths, _, _, _, _ = get_wealths(
+        wealths = get_wealths(
             X_test, buy_li, sell_li
         )
 
@@ -837,7 +837,7 @@ def optimize_reward_function(X, n_runs, kappa, commissions = 0.00075):
 
         buys = get_realized_decisions(keeps, buys).numpy()
 
-        wealths, _, _, _, _ = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
+        wealths = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
 
         n_months = buys.shape[0] / (24 * 30)
 
@@ -915,7 +915,7 @@ def plot_c_and_d(X, c = 0.358, d = 40, commissions = 0.001):
 
     buys = get_realized_decisions(keeps, buys).numpy()
 
-    wealths, _, _, _, _ = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
+    wealths = get_wealths(X[:buys.shape[0], :], buys, commissions = commissions)
 
     n_months = buys.shape[0] / (24 * 30)
 
@@ -995,7 +995,7 @@ def train2(
 
         buys = get_realized_decisions(keeps, buys).detach().numpy()
 
-        wealths, _, _, _, _ = get_wealths(X[-buys.shape[0]:, :], buys, commissions = commissions)
+        wealths = get_wealths(X[-buys.shape[0]:, :], buys, commissions = commissions)
 
         n_months = buys.shape[0] / (24 * 30)
         wealth = wealths[-1] ** (1 / n_months)

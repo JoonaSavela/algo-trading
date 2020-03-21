@@ -335,13 +335,13 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 
-def find_optimal_aggregated_strategy(aggregate_N_list, w_list, verbose = True, disable = False):
+def find_optimal_aggregated_strategy(aggregate_N_list, w_list, N_repeat = 1, verbose = True, disable = False, randomize = False, short = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    X_orig = load_all_data(test_files, 0)
+    X = load_all_data(test_files, 0)
 
     commissions = 0.00075
 
@@ -350,21 +350,33 @@ def find_optimal_aggregated_strategy(aggregate_N_list, w_list, verbose = True, d
     best_aggregate_N = -1
 
     for aggregate_N in tqdm(aggregate_N_list, disable = disable):
-        X_all = aggregate(X_orig, aggregate_N)
         for w in w_list:
-            buys, sells, N = get_buys_and_sells(X_all, w)
-            if N == 0:
-                continue
+            total_months = 0
+            total_wealth = 1.0
 
-            X = X_all[-N:, :]
+            for n in range(N_repeat):
+                rand_N = np.random.randint(aggregate_N)
+                if rand_N > 0 and randomize:
+                    X1 = X[:-rand_N, :]
+                else:
+                    X1 = X
+                X_agg = aggregate(X1, aggregate_N)
+                buys, sells, N = get_buys_and_sells(X_agg, w)
+                if N == 0:
+                    continue
 
-            wealths, _, _, _, _ = get_wealths(
-                X, buys, sells, commissions = commissions
-            )
+                X_agg = X_agg[-N:, :]
 
-            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+                wealths = get_wealths(
+                    X_agg, buys, sells, commissions = commissions, short = short
+                )
 
-            wealth = wealths[-1] ** (1 / n_months)
+                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+
+                total_wealth *= wealths[-1]
+                total_months += n_months
+
+            wealth = total_wealth ** (1 / total_months)
 
             if wealth > best_wealth:
                 best_wealth = wealth
@@ -372,60 +384,9 @@ def find_optimal_aggregated_strategy(aggregate_N_list, w_list, verbose = True, d
                 best_aggregate_N = aggregate_N
 
     if verbose:
-        print()
-        # ETH: 11 4, 1.0969
-        # BCH: 12 1, 1.1200
         print(best_aggregate_N // 60, best_w)
+        print(best_wealth, best_wealth ** 12)
         print()
-
-        w = best_w
-        aggregate_N = best_aggregate_N
-
-        # commissions = 0.0
-
-        Xs = load_all_data(test_files, [0, 1])
-
-        if not isinstance(Xs, list):
-            Xs = [Xs]
-
-        total_wealth = 1.0
-        total_months = 0
-        count = 0
-        prev_price = 1.0
-
-        for X in Xs:
-            X_all = aggregate(X, aggregate_N)
-
-            buys, sells, N = get_buys_and_sells(X_all, w)
-
-            X = X_all[-N:, :]
-
-            wealths, _, _, _, _ = get_wealths(
-                X, buys, sells, commissions = commissions
-            )
-
-            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
-
-            wealth = wealths[-1] ** (1 / n_months)
-
-            print(wealth, wealth ** 12)
-
-            t = np.arange(N) + count
-            count += N
-
-            plt.plot(t, X[:, 0] / X[0, 0] * prev_price, c='k', alpha=0.5)
-            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
-            plt.plot(t, wealths * total_wealth, c='g')
-
-            total_wealth *= wealths[-1]
-            prev_price *= X[-1, 0] / X[0, 0]
-            total_months += n_months
-
-        total_wealth = total_wealth ** (1 / total_months)
-        print()
-        print(total_wealth, total_wealth ** 12)
-
-        plt.show()
 
     return best_aggregate_N, best_w
 
@@ -445,8 +406,8 @@ def find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable, retu
     for m in tqdm(np.arange(1.0, 3.0, 0.1), disable = disable):
         for p in np.arange(0, 0.01, 0.00025):
 
-            wealths, _, _, _, _ = get_wealths_oco(
-                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            wealths = get_wealths_oco(
+                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075
             )
 
             wealth = wealths[-1] ** (1 / n_months)
@@ -473,63 +434,6 @@ def find_optimal_oco_order_params(aggregate_N, w, verbose = True, disable = Fals
 
     best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable)
 
-    if verbose:
-        print()
-        # 2, 0.005
-        # 2.4, 0.00475
-        print(best_m, best_p)
-        print()
-
-        p = best_p
-        m = best_m
-
-        # commissions = 0.0
-
-        Xs = load_all_data(test_files, [0, 1])
-
-        if not isinstance(Xs, list):
-            Xs = [Xs]
-
-        total_wealth = 1.0
-        total_months = 0
-        count = 0
-        prev_price = 1.0
-
-        for X in Xs:
-            X_agg = aggregate(X, aggregate_N)
-
-            buys, sells, N = get_buys_and_sells(X_agg, w)
-
-            X_agg = X_agg[-N:, :]
-            X = X[-aggregate_N * N:, :]
-
-            wealths, _, _, _, _ = get_wealths_oco(
-                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
-            )
-
-            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
-
-            wealth = wealths[-1] ** (1 / n_months)
-
-            print(wealth, wealth ** 12)
-
-            t = np.arange(N) + count
-            count += N
-
-            plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
-            plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65)
-            plt.plot(t, wealths * total_wealth, c='g')
-
-            total_wealth *= wealths[-1]
-            prev_price *= X[-1, 0] / X[0, 0]
-            total_months += n_months
-
-        total_wealth = total_wealth ** (1 / total_months)
-        print()
-        print(total_wealth, total_wealth ** 12)
-
-        plt.show()
-
     return best_m, best_p
 
 
@@ -548,7 +452,7 @@ def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
     best_m = 0
 
     for aggregate_N in tqdm(range(60, 60*13, 60)):
-        _, w = find_optimal_aggregated_strategy([aggregate_N], range(1, 51), False, True)
+        _, w = find_optimal_aggregated_strategy([aggregate_N], range(1, 51), 1, False, True)
 
         total_months = 0
         total_wealth = 1.0
@@ -557,6 +461,8 @@ def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
             rand_N = np.random.randint(aggregate_N)
             if rand_N > 0:
                 X1 = X[:-rand_N, :]
+            else:
+                X1 = X
             X_agg = aggregate(X1, aggregate_N)
 
             m, p, buys, sells, N = find_optimal_oco_order_params_helper(X1, X_agg, w, aggregate_N, True, True)
@@ -564,8 +470,8 @@ def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
             X_agg1 = X_agg[-N:, :]
             X1 = X1[-aggregate_N * N:, :]
 
-            wealths, _, _, _, _ = get_wealths_oco(
-                X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = False
+            wealths = get_wealths_oco(
+                X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075
             )
 
             n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
@@ -589,13 +495,14 @@ def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
 
     return best_aggregate_N, best_w, best_m, best_p
 
-def plot_performance(params_list, N_repeat = 1):
+def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = False, randomize = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
     c_list = ['g', 'c', 'm', 'r']
+    commissions = 0.00075
 
     Xs = load_all_data(test_files, [0, 1])
 
@@ -617,7 +524,7 @@ def plot_performance(params_list, N_repeat = 1):
 
             for X in Xs:
                 rand_N = np.random.randint(aggregate_N)
-                if rand_N > 0:
+                if rand_N > 0 and randomize:
                     X = X[:-rand_N, :]
                 X_agg = aggregate(X, aggregate_N)
 
@@ -626,9 +533,23 @@ def plot_performance(params_list, N_repeat = 1):
                 X_agg = X_agg[-N:, :]
                 X = X[-aggregate_N * N:, :]
 
-                wealths, _, _, _, _ = get_wealths_oco(
-                    X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075, verbose = N_repeat == 1
-                )
+                if trailing_stop:
+                    wealths = get_wealths_trailing_stop(
+                        X, X_agg, aggregate_N, p, buys, sells, commissions = commissions, short = short, verbose = N_repeat == 1
+                    )
+                else:
+                    if short:
+                        try:
+                            wealths = get_wealths(
+                                X_agg, buys, sells, commissions = commissions, short = True
+                            )
+                        except AssertionError as e:
+                            print(rand_N)
+                            continue
+                    else:
+                        wealths = get_wealths_oco(
+                            X, X_agg, aggregate_N, p, m, buys, sells, commissions = commissions, verbose = N_repeat == 1
+                        )
 
                 n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
 
@@ -643,9 +564,16 @@ def plot_performance(params_list, N_repeat = 1):
 
                 if N_repeat == 1:
                     if i == 0:
+                        buys_diff = np.diff(np.concatenate([np.array([0]), buys]))
+                        buys_li = buys_diff == 1.0
+                        sells_li = buys_diff == -1.0
+                        idx = np.arange(N)
                         plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
+                        plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
+                        plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
                     # plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
                     plt.plot(t, wealths * total_wealth1, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
+                    # plt.yscale('log')
 
                 total_wealth1 *= wealths[-1]
                 prev_price *= X[-1, 0] / X[0, 0]
@@ -661,10 +589,11 @@ def plot_performance(params_list, N_repeat = 1):
 
         if N_repeat > 1:
             plt.hist(
-                np.array(total_log_wealths) / np.array(total_months),
+                np.exp(np.array(total_log_wealths) / np.array(total_months) * 12),
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
-                alpha=0.9 / np.sqrt(len(params_list))
+                alpha=0.9 / np.sqrt(len(params_list)),
+                density = True
             )
 
     plt.show()
@@ -673,17 +602,34 @@ if __name__ == '__main__':
     # aggregate_N_list = range(60, 60*25, 60)
     # w_list = range(1, 51)
     #
-    # aggregate_N, w = find_optimal_aggregated_strategy(aggregate_N_list, w_list, False)
+    # aggregate_N, w = find_optimal_aggregated_strategy(aggregate_N_list, w_list, 1, False)
     # print(aggregate_N // 60, w)
     # m, p = find_optimal_oco_order_params(aggregate_N, w, True)
     # print(m, p)
 
-    aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False, 40)
+    # aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False, 40)
+    #
+    # plot_performance([(aggregate_N, w, m, p),
+    #                   (5 * 60, 9, 1.0, 0.0),
+    #                   (1 * 60, 46, 1.6, 0.0065)],
+    #                   N_repeat = 500)
 
-    plot_performance([(aggregate_N, w, m, p),
-                      (5 * 60, 9, 1.0, 0.0),
-                      (1 * 60, 46, 1.6, 0.0065)],
-                      N_repeat = 500)
+
+    aggregate_N, w = find_optimal_aggregated_strategy(
+        range(60, 60*13, 60),
+        range(1, 51),
+        N_repeat = 40,
+        randomize = True,
+        short = True
+    )
+
+    plot_performance([
+                        (aggregate_N, w, 1.0, 0.0),
+                        (3 * 60, 16, 1.0, 0.0),
+                        (5 * 60, 9, 1.3, 0.00875),
+                      ],
+                      N_repeat = 500,
+                      short = True)
 
     # n_runs = 800
     # kappa = 1

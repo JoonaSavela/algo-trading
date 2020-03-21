@@ -14,12 +14,10 @@ from requests.exceptions import ConnectionError, ReadTimeout
 from visualize import get_trades
 from parameters import params
 
-# TODO: detect which coins are owned
+# TODO: detect which coins are owned?
 
 target_symbol = 'ETH'
 source_symbol = 'USDT'
-
-# TODO: start using OCO orders
 
 def binance_price(client, symbol, use_high = True):
     if use_high:
@@ -183,7 +181,6 @@ def trading_pipeline():
 
     params_dict = params[target_symbol]
     print(params_dict)
-    type = params_dict['type']
     aggregate = params_dict['aggregate']
     w = params_dict['w']
     m = params_dict['m']
@@ -209,16 +206,8 @@ def trading_pipeline():
                 X, timeTo = get_recent_data(target_symbol, size = w + 1, type='h', aggregate=aggregate)
                 balance_capital, balance_target, balance_source, balance_bnb = get_total_balance(client)
 
-                if type == 'sma':
-                    ma = np.diff(sma(X[:, 0] / X[0, 0], w))
-                elif type == 'sma_returns':
-                    ma = sma(np.log(X[1:, 0] / X[:-1, 0]), w)
-                elif type == 'ema_returns':
-                    alpha = 1 - 1 / w
-                    ma = smoothed_returns(X, alpha)
-                else:
-                    alpha = 1 - 1 / w
-                    ma = np.diff(ema(X[:, 0] / X[0, 0], alpha, 1.0))
+                # TODO: use the new function to calculate buys and sells?
+                ma = np.diff(sma(X[:, 0] / X[0, 0], w))
 
                 buy = ma[0] > 0
                 sell = not buy
