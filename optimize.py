@@ -11,18 +11,6 @@ from tqdm import tqdm
 import copy
 
 # TODO: move to a different file
-# TODO: include all 6 columns
-def get_X_bear(X, multiplier = 1):
-    returns = X[1:, 0] / X[:-1, 0] - 1
-    returns_bear = -multiplier * returns
-    assert(np.all(returns_bear > -1.0))
-    X_bear = np.concatenate([
-        [1.0],
-        np.cumprod(returns_bear + 1)
-    ])
-
-    return X_bear
-
 def get_multiplied_X(X, multiplier = 1):
     returns = X[1:, 0] / X[:-1, 0] - 1
     returns = multiplier * returns
@@ -54,7 +42,7 @@ def get_wealths(X, buys, sells = None, commissions = 0.00075, short = False):
 
     price_bear = 0.0
     if short:
-        X_bear = get_X_bear(X, multiplier)
+        X_bear = get_multiplied_X(X, -multiplier)
 
     X = get_multiplied_X(X, multiplier)
 
@@ -64,7 +52,7 @@ def get_wealths(X, buys, sells = None, commissions = 0.00075, short = False):
         BUY, SELL = buys[i], sells[i]
         price = X[i, 0]
         if short:
-            price_bear = X_bear[i]
+            price_bear = X_bear[i, 0]
 
             amount_usd_sell_bear = BUY * capital_coin_bear * price_bear * (1 - commissions * multiplier)
             amount_coin_sell_bear = capital_coin_bear * BUY
@@ -126,8 +114,6 @@ def get_wealths_limit(X, p, buys, sells = None, commissions = 0.00075):
     wealths = np.array(wealths) / wealths[0]
 
     return wealths
-
-# TODO: start using X_bear
 
 def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, commissions = 0.00075, verbose = False):
     if sells is None:
@@ -240,8 +226,8 @@ def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, comm
 
     price_bear = 0.0
     if short:
-        X_bear = get_X_bear(X, multiplier)
-        X_agg_bear = aggregate(X_bear, aggregate_N, True)
+        X_bear = get_multiplied_X(X, -multiplier)
+        X_agg_bear = aggregate(X_bear, aggregate_N)
 
     X = get_multiplied_X(X, multiplier)
     X_agg = aggregate(X, aggregate_N)
@@ -261,7 +247,7 @@ def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, comm
         buy_price = price
         sell_price = price
         if short:
-            price_bear = X_agg_bear[i]
+            price_bear = X_agg_bear[i, 0]
             buy_price_bear = price_bear
             sell_price_bear = price_bear
         idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
