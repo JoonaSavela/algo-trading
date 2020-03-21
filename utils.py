@@ -454,6 +454,28 @@ def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
     return state
 
 
+def get_multiplied_X(X, multiplier = 1):
+    returns = X[1:, 0] / X[:-1, 0] - 1
+    returns = multiplier * returns
+    assert(np.all(returns > -1.0))
+
+    X_res = np.zeros(X.shape)
+    X_res[:, 0] = np.concatenate([
+        [1.0],
+        np.cumprod(returns + 1)
+    ])
+
+    other_returns = X[:, 1:4] / X[:, 0].reshape((-1, 1)) - 1
+    other_returns = multiplier * other_returns
+    assert(np.all(other_returns > -1.0))
+    X_res[:, 1:4] = X_res[:, 0].reshape((-1, 1)) * (other_returns + 1)
+
+    X_res[:, 4:] = X[:, 4:]
+
+    return X_res
+
+
+
 # TODO: try candlestick patterns with support and resistance lines?
 # TODO: try using stoch when abs of ma is low
 def get_buys_and_sells(X, w):
