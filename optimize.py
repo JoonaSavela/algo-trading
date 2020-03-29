@@ -10,20 +10,15 @@ import os
 from tqdm import tqdm
 import copy
 
-def get_wealths(X, buys, sells = None, commissions = 0.00075, short = False):
+def get_wealths(X, buys, sells = None, m = 1.0, commissions = 0.00075, X_bear = None, m_bear = None):
+    short = (X_bear is not None) and (m_bear is not None)
     if sells is None:
         sells = 1 - buys
     capital_usd = 1000
     capital_coin = 0
     capital_coin_bear = 0
 
-    multiplier = 3
-
     price_bear = 0.0
-    if short:
-        X_bear = get_multiplied_X(X, -multiplier)
-
-    X = get_multiplied_X(X, multiplier)
 
     wealths = [0] * X.shape[0]
 
@@ -33,23 +28,23 @@ def get_wealths(X, buys, sells = None, commissions = 0.00075, short = False):
         if short:
             price_bear = X_bear[i, 0]
 
-            amount_usd_sell_bear = BUY * capital_coin_bear * price_bear * (1 - commissions * multiplier)
+            amount_usd_sell_bear = BUY * capital_coin_bear * price_bear * (1 - commissions * m_bear)
             amount_coin_sell_bear = capital_coin_bear * BUY
 
             capital_coin_bear -= amount_coin_sell_bear
             capital_usd += amount_usd_sell_bear
 
-        amount_coin_buy = BUY * capital_usd / price * (1 - commissions * multiplier)
+        amount_coin_buy = BUY * capital_usd / price * (1 - commissions * m)
         amount_usd_buy = capital_usd * BUY
 
-        amount_usd_sell = SELL * capital_coin * price * (1 - commissions * multiplier)
+        amount_usd_sell = SELL * capital_coin * price * (1 - commissions * m)
         amount_coin_sell = capital_coin * SELL
 
         capital_coin += amount_coin_buy - amount_coin_sell
         capital_usd += amount_usd_sell - amount_usd_buy
 
         if short:
-            amount_coin_buy_bear = SELL * capital_usd / price_bear * (1 - commissions * multiplier)
+            amount_coin_buy_bear = SELL * capital_usd / price_bear * (1 - commissions * m_bear)
             amount_usd_buy_bear = capital_usd * SELL
 
             capital_coin_bear += amount_coin_buy_bear
@@ -192,7 +187,8 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, commissions
 
     return wealths
 
-def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, commissions = 0.00075, verbose = False, short = False):
+def get_wealths_trailing_stop(X, X_agg, aggregate_N, m, p, buys, sells = None, commissions = 0.00075, verbose = False, X_bear = None, X_bear_agg = None, m_bear = None):
+    short = (X_bear is not None) and (X_bear_agg is not None) and (m_bear is not None)
     if sells is None:
         sells = 1 - buys
     if p == 0.0:
@@ -201,15 +197,7 @@ def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, comm
     capital_coin = 0
     capital_coin_bear = 0
 
-    multiplier = 3
-
     price_bear = 0.0
-    if short:
-        X_bear = get_multiplied_X(X, -multiplier)
-        X_agg_bear = aggregate(X_bear, aggregate_N)
-
-    X = get_multiplied_X(X, multiplier)
-    X_agg = aggregate(X, aggregate_N)
 
     wealths = [0] * X_agg.shape[0]
 
@@ -226,10 +214,10 @@ def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, comm
         buy_price = price
         sell_price = price
         if short:
-            price_bear = X_agg_bear[i, 0]
+            price_bear = X_bear_agg[i, 0]
             buy_price_bear = price_bear
             sell_price_bear = price_bear
-        idx = np.arange((i + 1) * aggregate_N, (i + 2) * aggregate_N)
+        idx = np.arange((i + 1) * aggregate_N * 60, (i + 2) * aggregate_N * 60)
 
         if BUY == 1.0 and SELL == 0.0:
             if BUY > prev_BUY:
@@ -276,48 +264,48 @@ def get_wealths_trailing_stop(X, X_agg, aggregate_N, p, buys, sells = None, comm
         # stop loss flips side
         if buy_first:
             if short:
-                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * multiplier)
+                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * m_bear)
                 amount_coin_sell_bear = capital_coin_bear * BUY
 
                 capital_coin_bear -= amount_coin_sell_bear
                 capital_usd += amount_usd_sell_bear
 
-            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * multiplier)
+            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * m)
             amount_usd_buy = capital_usd * BUY
 
-            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * multiplier)
+            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * m)
             amount_coin_sell = capital_coin * SELL
 
             capital_coin += amount_coin_buy - amount_coin_sell
             capital_usd += amount_usd_sell - amount_usd_buy
 
             if short:
-                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * multiplier)
+                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * m_bear)
                 amount_usd_buy_bear = capital_usd * SELL
 
                 capital_coin_bear += amount_coin_buy_bear
                 capital_usd -= amount_usd_buy_bear
         else:
-            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * multiplier)
+            amount_usd_sell = SELL * capital_coin * sell_price * (1 - commissions * m)
             amount_coin_sell = capital_coin * SELL
 
             capital_coin -= amount_coin_sell
             capital_usd += amount_usd_sell
 
             if short:
-                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * multiplier)
+                amount_coin_buy_bear = SELL * capital_usd / buy_price_bear * (1 - commissions * m_bear)
                 amount_usd_buy_bear = capital_usd * SELL
 
                 capital_coin_bear += amount_coin_buy_bear
                 capital_usd -= amount_usd_buy_bear
 
-                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * multiplier)
+                amount_usd_sell_bear = BUY * capital_coin_bear * sell_price_bear * (1 - commissions * m_bear)
                 amount_coin_sell_bear = capital_coin_bear * BUY
 
                 capital_coin_bear -= amount_coin_sell_bear
                 capital_usd += amount_usd_sell_bear
 
-            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * multiplier)
+            amount_coin_buy = BUY * capital_usd / buy_price * (1 - commissions * m)
             amount_usd_buy = capital_usd * BUY
 
             capital_coin += amount_coin_buy

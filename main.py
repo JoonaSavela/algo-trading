@@ -21,145 +21,49 @@ from keys import binance_api_key, binance_secret_key
 from parameter_search import *
 from scipy.stats import gaussian_kde
 from scipy.signal import find_peaks
+from itertools import product
 
 # TODO: train a NN on the (aggregated) data
 
-# TODO: try trailing stop loss
+# TODO: include running quantile in sells
 
+# TODO: plot wealth as a function of rand_N
+#   - find the time difference, place it at zero
 
 def main():
 
-    # plt.style.use('seaborn')
+    # aggregate_N_list = range(1, 13)
+    # w_list = range(1, 51)
+    # m_list = range(1, 4, 2)
+    # m_bear_list = [3]
+    # p_list = np.arange(0, 0.9, 0.1)
+    # # p_list = [0]
     #
-    # test_files = glob.glob('data/ETH/*.json')
-    # test_files.sort(key = get_time)
+    # print(len(list(product(aggregate_N_list, w_list, m_list, m_bear_list, p_list))))
     #
-    # c_list = ['g', 'c', 'm', 'r']
-    # commissions = 0.00075
-    #
-    # Xs = load_all_data(test_files, [1])
-    #
-    # if not isinstance(Xs, list):
-    #     Xs = [Xs]
-    #
-    # for X in Xs:
-    #     X = X[:-34, :]
-    #     X = aggregate(X, 60 * 3)
-    #     returns = X[1:, 0] / X[:-1, 0] - 1
-    #     returns_bear = -3 * returns
-    #     plt.hist(returns_bear)
-    #     plt.show()
-    #     X_bear = np.concatenate([
-    #         [1.0],
-    #         np.cumprod(returns_bear + 1)
-    #     ])
-    #     plt.plot(X[:, 0] / X[0, 0])
-    #     plt.plot(X_bear)
-    #     # plt.yscale('log')
-    #     plt.show()
+    # # aggregate_N, w, m, m_bear, p
+    # params = find_optimal_aggregated_strategy(
+    #             aggregate_N_list,
+    #             w_list,
+    #             m_list,
+    #             m_bear_list,
+    #             p_list,
+    #             N_repeat = 1,
+    #             verbose = True,
+    #             disable = False,
+    #             randomize = True,
+    #             short = True,
+    #             trailing_stop=True)
 
     plot_performance([
-                        # (5 * 60, 9, 1.3, 0.0),
-                        # (5 * 60, 9, 1.3, 0.3),
-                        # (6 * 60, 8, 1.0, 0.0),
-                        (3 * 60, 16, 1.0, 0.0),
-                        (3 * 60, 16, 1.0, 0.3),
+                        (4, 12, 1, 3, 0),
+                        (5, 9, 1, 3, 0),
+                        (3, 16, 1, 3, 0), # best
                       ],
-                      N_repeat = 1,
+                      N_repeat = 1000,
                       short = True,
-                      trailing_stop = False)
+                      trailing_stop = True)
 
-    # plot_performance([
-    #                     (1 * 60, 46, 1.6, 0.0065),
-    #                     (5 * 60, 9, 1.3, 0.00875),
-    #                   ],
-    #                   N_repeat=1000)
-
-
-    # plt.style.use('seaborn')
-    #
-    # test_files = glob.glob('data/ETH/*.json')
-    # test_files.sort(key = get_time)
-    #
-    # X = load_all_data(test_files, 0)
-    #
-    # aggregate_N = 60 * 1
-    #
-    # # rand_N = np.random.randint(aggregate_N)
-    # # if rand_N > 0:
-    # #     X = X[:-rand_N, :]
-    # X_agg = aggregate(X, aggregate_N)
-    #
-    # ma = np.diff(sma(X_agg[:, 0] / X_agg[0, 0], 2))
-    # stoch = stochastic_oscillator(X_agg, 14)
-    # N = min(stoch.shape[0], ma.shape[0])
-    # stoch = stoch[-N:]
-    # ma = ma[-N:]
-    #
-    # th = 0.1
-    # buys = (stoch < th) #& (ma > 0)
-    # sells = (stoch > 1 - th) #& (ma < 0)
-    #
-    # buys = buys.astype(float)
-    # sells = sells.astype(float)
-    #
-    # X_agg = X_agg[-N:, :]
-    #
-    # wealths = get_wealths(
-    #     X_agg, buys, sells, commissions = 0.00075
-    # )
-    #
-    # n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
-    #
-    # wealth = wealths[-1] ** (1 / n_months)
-    #
-    # print(wealth, wealth ** 12)
-    #
-    # plt.plot(X_agg[:, 0] / X_agg[0, 0], c='k', alpha=0.5)
-    # plt.plot(wealths, c='g')
-    # plt.show()
-
-
-    # plt.style.use('seaborn')
-    #
-    # test_files = glob.glob('data/ETH/*.json')
-    # test_files.sort(key = get_time)
-    #
-    # X = load_all_data(test_files, 0)
-    #
-    # aggregate_N = 60 * 1
-    #
-    # X_agg = aggregate(X, aggregate_N)
-    #
-    # X_agg_flat = X_agg[:, :4].reshape(-1)
-    #
-    # weights = X_agg[:, 4] / np.sum(X_agg[:, 4]) / 4
-    # weights = np.tile(weights, 4)
-    #
-    # x_grid = np.linspace(np.min(X_agg_flat), np.max(X_agg_flat), 10000)
-    #
-    # # kde = gaussian_kde(X_agg_flat, bw_method=0.2)
-    # # old_kde = kde.evaluate(x_grid)
-    # #
-    # # new_kde = np.zeros(10000)
-    # #
-    # # for i, x in enumerate(tqdm(X_agg_flat, disable = False)):
-    # #     min_i = np.argmin(np.abs(x_grid - x))
-    # #     new_kde[min_i] += old_kde[min_i] * weights[i // 4]
-    #
-    # new_X = np.random.choice(X_agg_flat, X_agg_flat.shape[0], p=weights)
-    #
-    # kde = gaussian_kde(new_X, bw_method=0.1)
-    #
-    # peaks, _ = find_peaks(kde.evaluate(x_grid))
-    # print(x_grid[peaks])
-    #
-    # plt.plot(x_grid, kde.evaluate(x_grid))
-    # plt.show()
-    #
-    # plt.plot(X_agg[:, 0])
-    # plt.hlines(x_grid[peaks], 0, X_agg.shape[0])
-    # plt.show()
 
 
 

@@ -244,7 +244,9 @@ def diff_loss(out, batch_size, use_tanh, e, n_epochs):
 
     return torch.cat(diffs).mean() * (1 - 0.99 ** (e / n_epochs))
 
-def aggregate(X, n = 5):
+def aggregate(X, n = 5, type = 'h'):
+    if type == 'h':
+        n *= 60
     aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))
     X = X[-n * aggregated_X.shape[0]:, :]
 
@@ -453,7 +455,7 @@ def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
 
     return state
 
-
+# TODO: test that with m = 1, X doesn't change
 def get_multiplied_X(X, multiplier = 1):
     returns = X[1:, 0] / X[:-1, 0] - 1
     returns = multiplier * returns
@@ -474,16 +476,45 @@ def get_multiplied_X(X, multiplier = 1):
 
     return X_res
 
+def get_max_dropdown(wealths, return_indices = False):
+    res = np.Inf
+    I = -1
+    J = -1
+
+    for i in range(len(wealths)):
+        j = np.argmin(wealths[i:]) + i
+        dropdown = wealths[j] / wealths[i]
+        if dropdown < res:
+            res = dropdown
+            I = i
+            J = j
+
+    if return_indices:
+        return res, I, J
+
+    return res
+
+def get_or_create(d, k, create_func, *args):
+    if not k in d:
+        d[k] = create_func(k, *args)
+
+    return d[k]
 
 
 # TODO: try candlestick patterns with support and resistance lines?
 # TODO: try using stoch when abs of ma is low
-def get_buys_and_sells(X, w):
+def get_buys_and_sells(X, w, as_boolean = False):
     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
     N = ma.shape[0]
 
     buys = ma > 0
     sells = ~buys
+
+    if as_boolean:
+        if N == 1:
+            return buys[0], sells[0], N
+        else:
+            return buys, sells, N
 
     buys = buys.astype(float)
     sells = sells.astype(float)

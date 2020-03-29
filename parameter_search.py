@@ -8,6 +8,7 @@ import os
 from parameters import parameters
 from tqdm import tqdm
 from optimize import *
+from itertools import product
 
 from bayes_opt import BayesianOptimization
 from bayes_opt.observer import JSONLogger
@@ -334,61 +335,113 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
     print(optimizer.max)
 
 
-
-def find_optimal_aggregated_strategy(aggregate_N_list, w_list, N_repeat = 1, verbose = True, disable = False, randomize = False, short = False):
+# TODO: make as general as possible
+def find_optimal_aggregated_strategy(
+        aggregate_N_list,
+        w_list,
+        m_list,
+        m_bear_list,
+        p_list,
+        N_repeat = 1,
+        verbose = True,
+        disable = False,
+        randomize = False,
+        short = False,
+        trailing_stop = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    X = load_all_data(test_files, 0)
+    X_orig = load_all_data(test_files, 0)
 
     commissions = 0.00075
 
+    best_reward = -np.Inf
     best_wealth = 0
-    best_w = -1
-    best_aggregate_N = -1
+    best_dropdown = 0
+    best_params = None
 
-    for aggregate_N in tqdm(aggregate_N_list, disable = disable):
-        for w in w_list:
-            total_months = 0
-            total_wealth = 1.0
+    if not short:
+        m_bear_list = [1]
 
-            for n in range(N_repeat):
-                rand_N = np.random.randint(aggregate_N)
-                if rand_N > 0 and randomize:
-                    X1 = X[:-rand_N, :]
-                else:
-                    X1 = X
-                X_agg = aggregate(X1, aggregate_N)
-                buys, sells, N = get_buys_and_sells(X_agg, w)
-                if N == 0:
-                    continue
+    aggregate_N_prev, w_prev, m_prev, m_bear_prev, p_prev = -1, -1, -1, -1, -1
+    X_bear_agg = None
 
-                X_agg = X_agg[-N:, :]
+    X_m_dict = {}
+    def create_multiplied_X(m, X):
+        return get_multiplied_X(X, m)
 
+    for params in tqdm(list(product(aggregate_N_list, w_list, m_list, m_bear_list, p_list)), disable = disable):
+        aggregate_N, w, m, m_bear, p = params
+        if aggregate_N * w > 90 or aggregate_N * w < 5:
+            continue
+        if short:
+            X_bear = get_or_create(X_m_dict, -m_bear, create_multiplied_X, X_orig)
+        X = get_or_create(X_m_dict, m, create_multiplied_X, X_orig)
+
+        total_months = 0
+        total_wealth_log = 0.0
+        total_dropdown_log = 0.0
+
+        for n in range(N_repeat):
+            rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+            if rand_N > 0:
+                X1 = X[:-rand_N, :]
+                if short:
+                    X1_bear = X_bear[:-rand_N, :]
+            else:
+                X1 = X
+                if short:
+                    X1_bear = X_bear
+            X_agg = aggregate(X1, aggregate_N)
+            if short:
+                X_bear_agg = aggregate(X1_bear, aggregate_N)
+            buys, sells, N = get_buys_and_sells(X_agg, w)
+            if N == 0:
+                continue
+
+            X_agg = X_agg[-N:, :]
+            if short:
+                X_bear_agg = X_bear_agg[-N:, :]
+            X1 = X1[-aggregate_N * 60 * N:, :]
+            if short:
+                X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+            if trailing_stop and p > 0:
+                wealths = get_wealths_trailing_stop(
+                    X1, X_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X1_bear, X_bear_agg = X_bear_agg, m_bear = m_bear
+                )
+            else:
                 wealths = get_wealths(
-                    X_agg, buys, sells, commissions = commissions, short = short
+                    X_agg, buys, sells, m, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
                 )
 
-                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+            n_months = buys.shape[0] * aggregate_N / (24 * 30)
+            dropdown = get_max_dropdown(wealths)
 
-                total_wealth *= wealths[-1]
-                total_months += n_months
+            total_wealth_log += np.log(wealths[-1])
+            total_months += n_months
+            total_dropdown_log += np.log(dropdown)
 
-            wealth = total_wealth ** (1 / total_months)
+        wealth = np.exp(total_wealth_log / total_months)
+        dropdown = np.exp(total_dropdown_log / total_months)
 
-            if wealth > best_wealth:
-                best_wealth = wealth
-                best_w = w
-                best_aggregate_N = aggregate_N
+        if wealth * dropdown > best_reward:
+            best_reward = wealth * dropdown
+            best_wealth = wealth
+            best_dropdown = dropdown
+            best_params = params
+
+        aggregate_N_prev, w_prev, m_prev, m_bear_prev, p_prev = aggregate_N, w, m, m_bear, p
 
     if verbose:
-        print(best_aggregate_N // 60, best_w)
+        print(best_params)
         print(best_wealth, best_wealth ** 12)
+        print(best_dropdown, best_reward)
         print()
 
-    return best_aggregate_N, best_w
+    return best_params
 
 
 def find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable, return_buys_output = False):
@@ -506,42 +559,64 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
 
     Xs = load_all_data(test_files, [0, 1])
 
+    if N_repeat > 1:
+        fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = [6.4 * 2, 4.8])
+
     if not isinstance(Xs, list):
         Xs = [Xs]
 
     for i, params in enumerate(params_list):
-        aggregate_N, w, m, p = params
-        print(aggregate_N // 60, w, m, p)
+        aggregate_N, w, m, m_bear, p = params
+        print(params)
 
         total_log_wealths = []
+        total_log_dropdowns = []
         total_months = []
 
         for n in tqdm(range(N_repeat), disable = N_repeat == 1):
             prev_price = 1.0
             count = 0
-            total_wealth1 = 1.0
+            total_log_wealth = 0
+            total_log_dropdown = 0
             total_months1 = 0
 
             for X in Xs:
-                rand_N = np.random.randint(aggregate_N)
-                if rand_N > 0 and randomize:
+                if short:
+                    X_bear = get_multiplied_X(X, -m_bear)
+                if m > 1:
+                    X = get_multiplied_X(X, m)
+
+                rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+                if rand_N > 0:
                     X = X[:-rand_N, :]
+                    if short:
+                        X_bear = X_bear[:-rand_N, :]
+                else:
+                    X = X
+                    if short:
+                        X_bear = X_bear
                 X_agg = aggregate(X, aggregate_N)
+                if short:
+                    X_bear_agg = aggregate(X_bear, aggregate_N)
 
                 buys, sells, N = get_buys_and_sells(X_agg, w)
 
                 X_agg = X_agg[-N:, :]
-                X = X[-aggregate_N * N:, :]
+                if short:
+                    X_bear_agg = X_bear_agg[-N:, :]
+                X = X[-aggregate_N * 60 * N:, :]
+                if short:
+                    X_bear = X_bear[-aggregate_N * 60 * N:, :]
 
-                if trailing_stop:
+                if trailing_stop and p > 0:
                     wealths = get_wealths_trailing_stop(
-                        X, X_agg, aggregate_N, p, buys, sells, commissions = commissions, short = short, verbose = N_repeat == 1
+                        X, X_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X_bear, X_bear_agg = X_bear_agg, m_bear = m_bear
                     )
                 else:
                     if short:
                         try:
                             wealths = get_wealths(
-                                X_agg, buys, sells, commissions = commissions, short = True
+                                X_agg, buys, sells, m, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
                             )
                         except AssertionError as e:
                             print(rand_N)
@@ -551,15 +626,18 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
                             X, X_agg, aggregate_N, p, m, buys, sells, commissions = commissions, verbose = N_repeat == 1
                         )
 
-                n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+                n_months = buys.shape[0] * aggregate_N / (24 * 30)
+                dropdown, I, J = get_max_dropdown(wealths, True)
 
                 wealth = wealths[-1] ** (1 / n_months)
 
                 if N_repeat == 1:
                     print(wealth, wealth ** 12)
+                    # dropdown = dropdown ** (1 / n_months)
+                    # print(dropdown, wealth * dropdown)
 
                 t = np.arange(N) + count
-                t *= aggregate_N
+                t *= aggregate_N * 60
                 count += N
 
                 if N_repeat == 1:
@@ -571,25 +649,39 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
                         plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
                         plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
                         plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
-                    # plt.plot(t, (np.cumsum(ma) + 1) * prev_price, c='b', alpha=0.65 ** i)
-                    plt.plot(t, wealths * total_wealth1, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
-                    # plt.yscale('log')
 
-                total_wealth1 *= wealths[-1]
+                    total_wealths = wealths * np.exp(total_log_wealth)
+                    plt.plot(t, total_wealths, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
+                    plt.plot(t[[I, J]], total_wealths[[I, J]], 'r.', alpha=0.85, markersize=15)
+                    plt.yscale('log')
+
+                total_log_wealth += np.log(wealths[-1])
+                total_log_dropdown += np.log(dropdown)
                 prev_price *= X[-1, 0] / X[0, 0]
                 total_months1 += n_months
 
-            total_log_wealths.append(np.log(total_wealth1))
+            total_log_wealths.append(total_log_wealth)
+            total_log_dropdowns.append(total_log_dropdown)
             total_months.append(total_months1)
 
         total_wealth = np.exp(np.sum(total_log_wealths) / np.sum(total_months))
+        total_dropdown = np.exp(np.sum(total_log_dropdowns) / np.sum(total_months))
         print()
         print(total_wealth, total_wealth ** 12)
+        print(total_dropdown, total_wealth * total_dropdown)
         print()
 
         if N_repeat > 1:
-            plt.hist(
+            ax[0].hist(
                 np.exp(np.array(total_log_wealths) / np.array(total_months) * 12),
+                np.sqrt(N_repeat).astype(int),
+                color=c_list[i % len(c_list)],
+                alpha=0.9 / np.sqrt(len(params_list)),
+                density = True
+            )
+            ax[0].set_xscale('log')
+            ax[1].hist(
+                np.exp((np.array(total_log_wealths) + np.array(total_log_dropdowns)) / np.array(total_months)),
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
                 alpha=0.9 / np.sqrt(len(params_list)),
@@ -614,22 +706,39 @@ if __name__ == '__main__':
     #                   (1 * 60, 46, 1.6, 0.0065)],
     #                   N_repeat = 500)
 
+    aggregate_N_list = range(1, 13)
+    w_list = range(1, 51)
+    # m_list = range(1, 4, 2)
+    m_list = [1]
+    m_bear_list = [3]
+    # p_list = np.arange(0, 0.6, 0.1)
+    p_list = [0]
 
-    aggregate_N, w = find_optimal_aggregated_strategy(
-        range(60, 60*13, 60),
-        range(1, 51),
-        N_repeat = 40,
-        randomize = True,
-        short = True
+    short = True
+    trailing_stop = True
+
+    params = find_optimal_aggregated_strategy(
+                aggregate_N_list,
+                w_list,
+                m_list,
+                m_bear_list,
+                p_list,
+                N_repeat = 40,
+                verbose = True,
+                disable = False,
+                randomize = True,
+                short = True,
+                trailing_stop=True
     )
 
     plot_performance([
-                        (aggregate_N, w, 1.0, 0.0),
-                        (3 * 60, 16, 1.0, 0.0),
-                        (5 * 60, 9, 1.3, 0.00875),
+                        params,
+                        (3, 16, 1, 3, 0),
+                        (4, 12, 1, 3, 0),
                       ],
                       N_repeat = 500,
-                      short = True)
+                      short = short,
+                      trailing_stop = trailing_stop)
 
     # n_runs = 800
     # kappa = 1
