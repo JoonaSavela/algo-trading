@@ -3,6 +3,7 @@ from keys import binance_api_key, binance_secret_key
 import binance
 from binance.client import Client
 from binance.enums import *
+from binance.exceptions import BinanceAPIException
 import time
 from data import coins, get_recent_data
 import numpy as np
@@ -225,6 +226,7 @@ def get_status(client):
 
 
 def trading_pipeline():
+    global bull_symbol
     client = Client(binance_api_key, binance_secret_key)
     min_amount = 20
     print(target_symbol)
@@ -236,10 +238,10 @@ def trading_pipeline():
     m = params_dict['m']
     m_bear = params_dict['m_bear']
 
-    symbol_bear = bear_symbol + source_symbol
     if m > 1:
         bull_symbol += 'BULL'
     symbol = bull_symbol + source_symbol
+    symbol_bear = bear_symbol + source_symbol
 
     time_delta = 60 * 60 * aggregate
 
@@ -251,7 +253,7 @@ def trading_pipeline():
         check_bnb(client)
 
         _, initial_time = get_recent_data(target_symbol, type='h', aggregate=aggregate)
-        balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client)
+        balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client, True)
         print()
         print(initial_time, balance_capital, balance_target, balance_short, balance_source, balance_bnb)
         assert(balance_capital - balance_bnb > min_amount)
@@ -259,7 +261,7 @@ def trading_pipeline():
         while status['msg'] == 'Normal' and status['success'] == True:
             try:
                 X, timeTo = get_recent_data(target_symbol, size = w + 1, type='h', aggregate=aggregate)
-                balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client)
+                balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client, True)
 
                 buy, sell, N = get_buys_and_sells(X, w, True)
 
@@ -284,7 +286,7 @@ def trading_pipeline():
                 if action != 'DO NOTHING':
                     print()
                     print(timeTo, action, price)
-                    balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client)
+                    balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client, True)
                     print(balance_capital, balance_target, balance_short, balance_source, balance_bnb)
                     print()
 
@@ -297,6 +299,11 @@ def trading_pipeline():
                 print(e)
                 status = get_status(client)
                 print('Status:', status)
+            except BinanceAPIException as e:
+                print(e)
+                status = get_status(client)
+                print('Status:', status)
+
 
     except KeyboardInterrupt:
         pass
@@ -307,7 +314,7 @@ def trading_pipeline():
 
         cancel_orders(client, symbol)
         cancel_orders(client, symbol_bear)
-        balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client)
+        balance_capital, balance_target, balance_short, balance_source, balance_bnb = get_total_balance(client, True)
         print()
         print(balance_capital, balance_target, balance_short, balance_source, balance_bnb)
 
