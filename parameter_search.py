@@ -690,6 +690,97 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
 
     plt.show()
 
+# TODO: improve visualization for a list of params
+def plot_displacement(params_list):
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    commissions = 0.00075
+    short = True
+    trailing_stop = True
+
+    Xs, time1 = load_all_data(test_files, [0, 1], True)
+    _, time2 = get_recent_data('ETH', 10, 'h', 1)
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+        time1 = [time1]
+
+    for params in params_list:
+        aggregate_N, w, m, m_bear, p = params
+        for i, X in enumerate(Xs):
+            if short:
+                X_bear = get_multiplied_X(X, -m_bear)
+            if m > 1:
+                X = get_multiplied_X(X, m)
+
+            wealth_list = []
+            time_diff = ((time2 - time1[i]) // 60) % (aggregate_N * 60)
+            print(time_diff)
+
+            for rand_N in tqdm(range(aggregate_N * 60)):
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1, aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
+
+                buys, sells, N = get_buys_and_sells(X1_agg, w)
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+                if trailing_stop and p > 0:
+                    wealths = get_wealths_trailing_stop(
+                        X1, X1_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X1_bear, X_bear_agg = X1_bear_agg, m_bear = m_bear
+                    )
+                else:
+                    if short:
+                        try:
+                            wealths = get_wealths(
+                                X1_agg, buys, sells, m, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
+                            )
+                        except AssertionError as e:
+                            print(rand_N)
+                            continue
+                    else:
+                        wealths = get_wealths_oco(
+                            X1, X1_agg, aggregate_N, p, m, buys, sells, commissions = commissions, verbose = N_repeat == 1
+                        )
+
+                n_months = buys.shape[0] * aggregate_N / (24 * 30)
+
+                wealth = wealths[-1] ** (1 / n_months)
+
+                wealth_list.append(wealth)
+
+            size = aggregate_N * 60
+            wealth_list = np.flip(np.array(wealth_list))
+            wealth_list = np.roll(wealth_list, -time_diff + 1)
+
+            new_wealth_list = np.ones((60,))
+
+            for n in range(aggregate_N):
+                new_wealth_list *= wealth_list[n * 60:(n + 1) * 60]
+
+            wealth_list = new_wealth_list ** (1 / aggregate_N)
+
+            plt.plot(wealth_list)
+        plt.show()
+
+
 if __name__ == '__main__':
     # aggregate_N_list = range(60, 60*25, 60)
     # w_list = range(1, 51)

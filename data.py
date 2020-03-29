@@ -146,7 +146,7 @@ def load_data(filename, sequence_length, latency, window_size, k = 1, return_sta
 
     return X
 
-def load_all_data(filenames, index = 0):
+def load_all_data(filenames, index = 0, return_time = False):
     filenames = sorted(filenames, key = get_time)
 
     idx = np.arange(1, len(filenames))
@@ -160,7 +160,9 @@ def load_all_data(filenames, index = 0):
     points = list(zip(points[:-1], points[1:]))
 
     if isinstance(index, int):
-        idx = [min(index, len(points) - 1)]
+        # TODO: change this into an assertion
+        index = min(index, len(points) - 1)
+        idx = [index]
     elif not isinstance(index, list):
         raise ValueError('index must be either int or list')
     else:
@@ -181,8 +183,12 @@ def load_all_data(filenames, index = 0):
         res.append(X)
 
     if len(res) == 1:
+        if return_time:
+            return res[0], get_time(filenames[points[idx[0]][1] - 1])
         return res[0]
 
+    if return_time:
+        return res, list(map(lambda x: get_time(filenames[points[x][1] - 1]), idx))
     return res
 
 

@@ -27,10 +27,14 @@ from itertools import product
 
 # TODO: include running quantile in sells
 
-# TODO: plot wealth as a function of rand_N
-#   - find the time difference, place it at zero
+# TODO: plot specific rand_N (for fun)
 
 def main():
+    plot_displacement([
+                        # (4, 12, 1, 3, 0),
+                        (5, 9, 1, 3, 0),
+                        (3, 16, 1, 3, 0), # best
+                      ])
 
     # aggregate_N_list = range(1, 13)
     # w_list = range(1, 51)
@@ -55,14 +59,14 @@ def main():
     #             short = True,
     #             trailing_stop=True)
 
-    plot_performance([
-                        (4, 12, 1, 3, 0),
-                        (5, 9, 1, 3, 0),
-                        (3, 16, 1, 3, 0), # best
-                      ],
-                      N_repeat = 1000,
-                      short = True,
-                      trailing_stop = True)
+    # plot_performance([
+    #                     (4, 12, 1, 3, 0),
+    #                     (5, 9, 1, 3, 0),
+    #                     (3, 16, 1, 3, 0), # best
+    #                   ],
+    #                   N_repeat = 1,
+    #                   short = True,
+    #                   trailing_stop = True)
 
 
 
