@@ -175,6 +175,7 @@ def buy_assets_short(client, m, balance_short):
             amount = 1,
             round_n = 4
         )
+        print('sell bear')
     else:
         success = True
 
@@ -185,6 +186,7 @@ def buy_assets_short(client, m, balance_short):
             amount = m if m <= 1 else m / 3,
             round_n = 5 if m <= 1 else 4
         )
+        print('buy bull')
 
     return success
 
@@ -196,6 +198,7 @@ def sell_assets_short(client, m, m_bear, balance_target):
             amount = 1,
             round_n = 5 if m <= 1 else 4
         )
+        print('sell bull')
     else:
         success = True
 
@@ -206,6 +209,7 @@ def sell_assets_short(client, m, m_bear, balance_target):
             amount = m_bear / 3,
             round_n = 4
         )
+        print('buy bear')
 
     return success
 
