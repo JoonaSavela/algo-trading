@@ -95,6 +95,7 @@ def sell_assets(client, symbol, amount = 1, round_n = 4):
         time.sleep(0.1)
         return True
     except binance.exceptions.BinanceAPIException as e:
+        print(balance)
         print(e)
         return False
 
@@ -111,6 +112,7 @@ def buy_assets(client, symbol, amount = 1, round_n = 4):
         time.sleep(0.1)
         return True
     except binance.exceptions.BinanceAPIException as e:
+        print(balance_source)
         print(e)
         return False
 
