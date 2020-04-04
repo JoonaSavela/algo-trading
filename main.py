@@ -14,27 +14,56 @@ from model import *
 from optimize import *
 from peaks import get_peaks
 from tqdm import tqdm
-import binance
-from binance.client import Client
-from binance.enums import *
-from keys import binance_api_key, binance_secret_key
+from keys import ftx_api_key, ftx_secret_key
 from parameter_search import *
 from scipy.stats import gaussian_kde
 from scipy.signal import find_peaks
 from itertools import product
+from ftx.rest.client import FtxClient
+from trade import *
 
-# TODO: train a NN on the (aggregated) data
+# TODO: train a (bayesian) NN on the (aggregated) data
 
 # TODO: include running quantile in sells
 
-# TODO: plot specific rand_N (for fun)
+# TODO: try only shorting?
+
+# TODO: plot different statistics of a strategy, use them to find improvements
+
+# TODO: find different ways of optimizing parameters?
 
 def main():
-    plot_displacement([
-                        # (4, 12, 1, 3, 0),
-                        (5, 9, 1, 3, 0),
-                        (3, 16, 1, 3, 0), # best
-                      ])
+    trading_pipeline()
+
+    # client = FtxClient(ftx_api_key, ftx_secret_key)
+    # total, res = get_total_balance(client, True)
+    # print(res)
+    # print()
+    # sell_assets(client, 'ETHBEAR')
+    # buy_assets_short(client, 1, res['usdValue']['ETHBEAR'] / total, 0.001)
+    # time.sleep(1)
+    # _, res = get_total_balance(client, True)
+    # print(res)
+    # print()
+    # sell_assets_short(client, 1, 3, res['usdValue']['ETH'] / total, 0.001)
+    # time.sleep(1)
+    # _, res = get_total_balance(client, True)
+    # print(res)
+
+    # balances = pd.DataFrame(client.get_balances())#.set_index('coin')
+    # balances = balances.set_index('coin')['usdValue']
+    # print(balances)
+    # print(balances.get('ETH', 0))
+    # markets = pd.DataFrame(client.list_markets())
+    # res = markets[(markets['baseCurrency'] == 'ETHBEAR') & (markets['quoteCurrency'] == 'USDT')]
+    # print(res)
+    # print(res['ask'])
+
+
+    # plot_displacement([
+    #                     (4, 12, 1, 3, 0),
+    #                     (3, 16, 1, 3, 0), # best
+    #                   ])
 
     # aggregate_N_list = range(1, 13)
     # w_list = range(1, 51)
@@ -61,10 +90,9 @@ def main():
 
     # plot_performance([
     #                     (4, 12, 1, 3, 0),
-    #                     (5, 9, 1, 3, 0),
     #                     (3, 16, 1, 3, 0), # best
     #                   ],
-    #                   N_repeat = 1,
+    #                   N_repeat = 1000,
     #                   short = True,
     #                   trailing_stop = True)
 
