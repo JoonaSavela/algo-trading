@@ -10,6 +10,7 @@ import os
 from tqdm import tqdm
 import copy
 
+# TODO: combine all versions into a single function?
 def get_wealths(X, buys, sells = None, m = 1.0, commissions = 0.00075, X_bear = None, m_bear = None):
     short = (X_bear is not None) and (m_bear is not None)
     if sells is None:
@@ -187,6 +188,7 @@ def get_wealths_oco(X, X_agg, aggregate_N, p, m, buys, sells = None, commissions
 
     return wealths
 
+# TODO: take profit version
 def get_wealths_trailing_stop(X, X_agg, aggregate_N, m, p, buys, sells = None, commissions = 0.00075, verbose = False, X_bear = None, X_bear_agg = None, m_bear = None):
     short = (X_bear is not None) and (X_bear_agg is not None) and (m_bear is not None)
     if sells is None:

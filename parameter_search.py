@@ -336,6 +336,7 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 # TODO: make as general as possible
+# TODO: combine all versions into a single function?
 def find_optimal_aggregated_strategy(
         aggregate_N_list,
         w_list,
@@ -374,7 +375,8 @@ def find_optimal_aggregated_strategy(
 
     for params in tqdm(list(product(aggregate_N_list, w_list, m_list, m_bear_list, p_list)), disable = disable):
         aggregate_N, w, m, m_bear, p = params
-        if aggregate_N * w > 90 or aggregate_N * w < 5:
+        # TODO: make these function parameters?
+        if aggregate_N * w > 80 or aggregate_N * w < 7:
             continue
         if short:
             X_bear = get_or_create(X_m_dict, -m_bear, create_multiplied_X, X_orig)
@@ -587,6 +589,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
                     X = get_multiplied_X(X, m)
 
                 rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+                # rand_N = 20 + 60*2
                 if rand_N > 0:
                     X = X[:-rand_N, :]
                     if short:
@@ -764,12 +767,15 @@ def plot_displacement(params_list):
 
                 wealth = wealths[-1] ** (1 / n_months)
 
+                # TODO: calculate std here
+
                 wealth_list.append(wealth)
 
             size = aggregate_N * 60
             wealth_list = np.flip(np.array(wealth_list))
             wealth_list = np.roll(wealth_list, -time_diff + 1)
 
+            # TODO: include trade profit standard deviation in the plots
             new_wealth_list = np.ones((60,))
 
             for n in range(aggregate_N):
