@@ -90,7 +90,7 @@ def buy_assets_short(client, m, relative_balance_short, min_amount):
     buy_assets(
         client,
         bull_symbol,
-        amount = 0.01,#m if m <= 1 else m / 3,
+        amount = m if m <= 1 else m / 3,
         round_n = 5 if m <= 1 else 4
     )
     time.sleep(1)
@@ -107,7 +107,7 @@ def sell_assets_short(client, m, m_bear, relative_balance_target, min_amount):
     buy_assets(
         client,
         bear_symbol,
-        amount = 0.01,#m_bear / 3,
+        amount = m_bear / 3,
         round_n = 4
     )
     time.sleep(1)
