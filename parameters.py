@@ -11,17 +11,11 @@ parameters = [
 
 params = {
     'ETH': {
-        'oco': {
-            'aggregate': 1,
-            'w': 46,
-            'm': 1.6,
-            'p': 0.0065
-        },
-        'short': {
-            'aggregate': 3,
-            'w': 16,
-            'm': 1,
-            'm_bear': 3,
-        },
+        'aggregate': 3,
+        'w': 16,
+        'm': 1,
+        'm_bear': 3,
+        'take_profit_long': 1.19,
+        'take_profit_short': 2.14,
     },
 }

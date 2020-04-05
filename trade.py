@@ -83,40 +83,49 @@ def buy_assets_short(client, m, relative_balance_short, min_amount):
         sell_assets(
             client,
             bear_symbol,
-            amount = 1,
             round_n = 4
         )
-        print('sell bear')
-
     time.sleep(1)
 
     buy_assets(
         client,
         bull_symbol,
-        amount = m if m <= 1 else m / 3,
+        amount = 0.01,#m if m <= 1 else m / 3,
         round_n = 5 if m <= 1 else 4
     )
-    print('buy bull')
+    time.sleep(1)
 
 def sell_assets_short(client, m, m_bear, relative_balance_target, min_amount):
     if relative_balance_target > min_amount:
         sell_assets(
             client,
             bull_symbol,
-            amount = 1,
             round_n = 5 if m <= 1 else 4
         )
-        print('sell bull')
-
     time.sleep(1)
 
     buy_assets(
         client,
         bear_symbol,
-        amount = m_bear / 3,
+        amount = 0.01,#m_bear / 3,
         round_n = 4
     )
-    print('buy bear')
+    time.sleep(1)
+
+def place_take_profit(client, symbol, take_profit):
+    price = ftx_price(client, symbol)
+    balance = float(asset_balance(client, symbol))
+    symbol += '/' +  source_symbol
+
+    client.place_conditional_order(
+        market = symbol,
+        side = 'buy',
+        size = balance,
+        type = 'take_profit',
+        trigger_price = price * take_profit
+    )
+    time.sleep(0.05)
+
 
 def wait(time_delta, initial_time, verbose = False):
     time_diff = time.time() - initial_time
@@ -141,12 +150,16 @@ def trading_pipeline():
     min_amount = 0.01
     print(target_symbol)
 
-    params_dict = params[target_symbol]['short']
+    params_dict = params[target_symbol]
     print(params_dict)
     aggregate = params_dict['aggregate']
     w = params_dict['w']
     m = params_dict['m']
     m_bear = params_dict['m_bear']
+    take_profit_long = params_dict['take_profit_long']
+    take_profit_short = params_dict['take_profit_short']
+    buy_flag = False
+    sell_flag = False
 
     if m > 1:
         bull_symbol += 'BULL'
@@ -172,20 +185,26 @@ def trading_pipeline():
             price = X[-1, 0]
             action = 'DO NOTHING'
 
-            if buy and (
+            if buy and not buy_flag and (
                     balance_source / total_balance > min_amount or
                     balance_short / total_balance > min_amount
                 ):
                 cancel_orders(client)
                 buy_assets_short(client, m, balance_short / total_balance, min_amount)
+                place_take_profit(client, bull_symbol, take_profit_long)
                 action = 'BUY'
-            elif sell and (
+                buy_flag = True
+                sell_flag = False
+            elif sell and not sell_flag and (
                     balance_target / total_balance > min_amount or
                     balance_source / total_balance > min_amount
                 ):
                 cancel_orders(client)
                 sell_assets_short(client, m, m_bear, balance_target / total_balance, min_amount)
+                place_take_profit(client, bear_symbol, take_profit_short)
                 action = 'SELL'
+                buy_flag = False
+                sell_flag = True
 
 
             if action != 'DO NOTHING':

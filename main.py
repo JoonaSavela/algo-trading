@@ -22,10 +22,11 @@ from itertools import product
 
 
 def main():
+
     # take_profit_long, take_profit_short = \
     # get_take_profits([
-    #                     # (4, 12, 1, 3, 0),
-    #                     (3, 16, 1, 3, 0), # best
+    #                     # (4, 12, 1, 3),
+    #                     (3, 16, 1, 3), # best
     #                   ],
     #                   short = True,
     #                   N_repeat = 500,
@@ -39,13 +40,13 @@ def main():
     #                     (3, 16, 1, 3, 1.19, 2.14), # best
     #                   ])
 
-    plot_performance([
-                        (3, 16, 1, 3, 1.19, 2.14), # best
-                        # (4, 12, 1, 3, 1.19, 2.14),
-                      ],
-                      N_repeat = 1,
-                      short = True,
-                      take_profit = True)
+    # plot_performance([
+    #                     (3, 16, 1, 3, 1.19, 2.14), # best
+    #                     # (4, 12, 1, 3, 1.19, 2.14),
+    #                   ],
+    #                   N_repeat = 1,
+    #                   short = True,
+    #                   take_profit = True)
 
 
 
