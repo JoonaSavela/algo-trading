@@ -336,19 +336,16 @@ def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, ka
 
 
 # TODO: make as general as possible
-# TODO: combine all versions into a single function?
 def find_optimal_aggregated_strategy(
         aggregate_N_list,
         w_list,
         m_list,
         m_bear_list,
-        p_list,
         N_repeat = 1,
         verbose = True,
         disable = False,
         randomize = False,
-        short = False,
-        trailing_stop = False):
+        short = False):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -366,15 +363,15 @@ def find_optimal_aggregated_strategy(
     if not short:
         m_bear_list = [1]
 
-    aggregate_N_prev, w_prev, m_prev, m_bear_prev, p_prev = -1, -1, -1, -1, -1
+    aggregate_N_prev, w_prev, m_prev, m_bear_prev = -1, -1, -1, -1
     X_bear_agg = None
 
     X_m_dict = {}
     def create_multiplied_X(m, X):
         return get_multiplied_X(X, m)
 
-    for params in tqdm(list(product(aggregate_N_list, w_list, m_list, m_bear_list, p_list)), disable = disable):
-        aggregate_N, w, m, m_bear, p = params
+    for params in tqdm(list(product(aggregate_N_list, w_list, m_list, m_bear_list)), disable = disable):
+        aggregate_N, w, m, m_bear = params
         # TODO: make these function parameters?
         if aggregate_N * w > 80 or aggregate_N * w < 7:
             continue
@@ -390,16 +387,20 @@ def find_optimal_aggregated_strategy(
             rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
             if rand_N > 0:
                 X1 = X[:-rand_N, :]
+                X1_orig = X_orig[:-rand_N, :]
                 if short:
                     X1_bear = X_bear[:-rand_N, :]
             else:
                 X1 = X
+                X1_orig = X_orig
                 if short:
                     X1_bear = X_bear
             X_agg = aggregate(X1, aggregate_N)
+            X1_orig_agg = aggregate(X1_orig, aggregate_N)
             if short:
                 X_bear_agg = aggregate(X1_bear, aggregate_N)
-            buys, sells, N = get_buys_and_sells(X_agg, w)
+
+            buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
             if N == 0:
                 continue
 
@@ -410,14 +411,9 @@ def find_optimal_aggregated_strategy(
             if short:
                 X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
-            if trailing_stop and p > 0:
-                wealths = get_wealths_trailing_stop(
-                    X1, X_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X1_bear, X_bear_agg = X_bear_agg, m_bear = m_bear
-                )
-            else:
-                wealths = get_wealths(
-                    X_agg, buys, sells, m, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
-                )
+            wealths = get_wealths(
+                X_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
+            )
 
             n_months = buys.shape[0] * aggregate_N / (24 * 30)
             dropdown = get_max_dropdown(wealths)
@@ -435,7 +431,7 @@ def find_optimal_aggregated_strategy(
             best_dropdown = dropdown
             best_params = params
 
-        aggregate_N_prev, w_prev, m_prev, m_bear_prev, p_prev = aggregate_N, w, m, m_bear, p
+        aggregate_N_prev, w_prev, m_prev, m_bear_prev = aggregate_N, w, m, m_bear
 
     if verbose:
         print(best_params)
@@ -446,111 +442,111 @@ def find_optimal_aggregated_strategy(
     return best_params
 
 
-def find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable, return_buys_output = False):
-    best_p = 0.0
-    best_m = 0
-    best_wealth = -1
 
-    buys, sells, N = get_buys_and_sells(X_agg, w)
-
-    X_agg = X_agg[-N:, :]
-    X = X[-aggregate_N * N:, :]
-
-    n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
-
-    for m in tqdm(np.arange(1.0, 3.0, 0.1), disable = disable):
-        for p in np.arange(0, 0.01, 0.00025):
-
-            wealths = get_wealths_oco(
-                X, X_agg, aggregate_N, p, m, buys, sells, commissions = 0.00075
-            )
-
-            wealth = wealths[-1] ** (1 / n_months)
-
-            if wealth > best_wealth:
-                best_wealth = wealth
-                best_p = p
-                best_m = m
-
-    if return_buys_output:
-        return best_m, best_p, buys, sells, N
-
-    return best_m, best_p
-
-def find_optimal_oco_order_params(aggregate_N, w, verbose = True, disable = False):
+# TODO: transfer changes related to X_orig and m ** 2 to parameter_search, etc.
+def get_take_profits(params_list, short, N_repeat, randomize, commissions, step, verbose = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    X = load_all_data(test_files, 0)
+    Xs = load_all_data(test_files, [0, 1])
 
-    X_agg = aggregate(X, aggregate_N)
+    if not isinstance(Xs, list):
+        Xs = [Xs]
 
-    best_m, best_p = find_optimal_oco_order_params_helper(X, X_agg, w, aggregate_N, disable)
+    take_profit_long_list = []
+    take_profit_short_list = []
 
-    return best_m, best_p
+    for params in params_list:
+        aggregate_N, w, m, m_bear = params
 
+        long_trade_wealths = []
+        max_long_trade_wealths = []
 
-def find_optimal_aggregated_oco_strategy(verbose = True, N_repeat = 1):
-    test_files = glob.glob('data/ETH/*.json')
-    test_files.sort(key = get_time)
-
-    X = load_all_data(test_files, 0)
-
-    commissions = 0.00075
-
-    best_wealth = 0
-    best_w = -1
-    best_aggregate_N = -1
-    best_p = 0.0
-    best_m = 0
-
-    for aggregate_N in tqdm(range(60, 60*13, 60)):
-        _, w = find_optimal_aggregated_strategy([aggregate_N], range(1, 51), 1, False, True)
+        short_trade_wealths = []
+        max_short_trade_wealths = []
 
         total_months = 0
-        total_wealth = 1.0
+        total_log_wealth = 0
 
-        for n in range(N_repeat):
-            rand_N = np.random.randint(aggregate_N)
-            if rand_N > 0:
-                X1 = X[:-rand_N, :]
-            else:
-                X1 = X
-            X_agg = aggregate(X1, aggregate_N)
+        for i, X in enumerate(Xs):
+            X_orig = X
+            if short:
+                X_bear = get_multiplied_X(X, -m_bear)
+            if m > 1:
+                X = get_multiplied_X(X, m)
 
-            m, p, buys, sells, N = find_optimal_oco_order_params_helper(X1, X_agg, w, aggregate_N, True, True)
+            for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+                rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    X1_orig = X_orig[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    X1_orig = X_orig
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1, aggregate_N)
+                X1_orig_agg = aggregate(X1_orig, aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
 
-            X_agg1 = X_agg[-N:, :]
-            X1 = X1[-aggregate_N * N:, :]
+                buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
 
-            wealths = get_wealths_oco(
-                X1, X_agg1, aggregate_N, p, m, buys, sells, commissions = 0.00075
-            )
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
-            n_months = buys.shape[0] * aggregate_N / (60 * 24 * 30)
+                wealths = get_wealths(
+                    X1_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
+                )
 
-            total_wealth *= wealths[-1]
-            total_months += n_months
+                n_months = buys.shape[0] * aggregate_N / (24 * 30)
+                total_months += n_months
 
-        wealth = total_wealth ** (1 / total_months)
+                total_log_wealth += np.log(wealths[-1])
 
-        if wealth > best_wealth:
-            best_wealth = wealth
-            best_w = w
-            best_aggregate_N = aggregate_N
-            best_p = p
-            best_m = m
+                append_trade_wealths(wealths, buys, sells, N, long_trade_wealths, max_long_trade_wealths)
+                append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
 
-    if verbose:
-        print(best_aggregate_N // 60, best_w, best_m, best_p)
-        print(best_wealth, best_wealth ** 12)
-        print()
+        take_profits_long = np.arange(1.0 + step, max(max_long_trade_wealths) + step*2, step)
+        take_profit_wealths_long = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, x, total_months, commissions, m ** 2), take_profits_long)))
 
-    return best_aggregate_N, best_w, best_m, best_p
+        take_profits_short = np.arange(1.0 + step, max(max_short_trade_wealths) + step*2, step)
+        take_profit_wealths_short = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, x, total_months, commissions, m_bear), take_profits_short)))
 
-def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = False, randomize = True):
+        take_profit_long = take_profits_long[np.argmax(take_profit_wealths_long)]
+        take_profit_short = take_profits_short[np.argmax(take_profit_wealths_short)]
+
+        if verbose:
+            print(take_profit_long, take_profit_short)
+
+            take_profit_wealth = get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, take_profit_long, total_months, commissions, m ** 2) * \
+                get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, take_profit_short, total_months, commissions, m_bear)
+            print(take_profit_wealth, take_profit_wealth ** 12)
+            wealth = np.exp(total_log_wealth / total_months)
+            print(wealth, wealth ** 12)
+            print()
+
+            plt.plot(take_profits_long, take_profit_wealths_long ** 12, 'g')
+            plt.plot(take_profits_short, take_profit_wealths_short ** 12, 'r')
+            plt.show()
+
+        take_profit_long_list.append(take_profit_long)
+        take_profit_short_list.append(take_profit_short)
+
+    if len(take_profit_long_list) == 1:
+        return take_profit_long, take_profit_short
+
+    return take_profit_long_list, take_profit_short_list
+
+def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, randomize = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -568,7 +564,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
         Xs = [Xs]
 
     for i, params in enumerate(params_list):
-        aggregate_N, w, m, m_bear, p = params
+        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
         print(params)
 
         total_log_wealths = []
@@ -583,6 +579,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
             total_months1 = 0
 
             for X in Xs:
+                X_orig = X
                 if short:
                     X_bear = get_multiplied_X(X, -m_bear)
                 if m > 1:
@@ -592,17 +589,20 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
                 # rand_N = 20 + 60*2
                 if rand_N > 0:
                     X = X[:-rand_N, :]
+                    X_orig = X_orig[:-rand_N, :]
                     if short:
                         X_bear = X_bear[:-rand_N, :]
                 else:
                     X = X
+                    X_orig = X_orig
                     if short:
                         X_bear = X_bear
                 X_agg = aggregate(X, aggregate_N)
+                X_orig_agg = aggregate(X_orig, aggregate_N)
                 if short:
                     X_bear_agg = aggregate(X_bear, aggregate_N)
 
-                buys, sells, N = get_buys_and_sells(X_agg, w)
+                buys, sells, N = get_buys_and_sells(X_orig_agg, w)
 
                 X_agg = X_agg[-N:, :]
                 if short:
@@ -611,23 +611,13 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
                 if short:
                     X_bear = X_bear[-aggregate_N * 60 * N:, :]
 
-                if trailing_stop and p > 0:
-                    wealths = get_wealths_trailing_stop(
-                        X, X_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X_bear, X_bear_agg = X_bear_agg, m_bear = m_bear
-                    )
-                else:
-                    if short:
-                        try:
-                            wealths = get_wealths(
-                                X_agg, buys, sells, m, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
-                            )
-                        except AssertionError as e:
-                            print(rand_N)
-                            continue
-                    else:
-                        wealths = get_wealths_oco(
-                            X, X_agg, aggregate_N, p, m, buys, sells, commissions = commissions, verbose = N_repeat == 1
-                        )
+                wealths = get_wealths(
+                    X_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
+                )
+
+                if take_profit:
+                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, m ** 2)
+                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, m_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
                 dropdown, I, J = get_max_dropdown(wealths, True)
@@ -676,13 +666,13 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
 
         if N_repeat > 1:
             ax[0].hist(
-                np.exp(np.array(total_log_wealths) / np.array(total_months) * 12),
+                np.array(total_log_wealths) / np.array(total_months) * 12,
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
                 alpha=0.9 / np.sqrt(len(params_list)),
                 density = True
             )
-            ax[0].set_xscale('log')
+            # ax[0].set_xscale('log')
             ax[1].hist(
                 np.exp((np.array(total_log_wealths) + np.array(total_log_dropdowns)) / np.array(total_months)),
                 np.sqrt(N_repeat).astype(int),
@@ -694,15 +684,13 @@ def plot_performance(params_list, N_repeat = 1, short = False, trailing_stop = F
     plt.show()
 
 # TODO: improve visualization for a list of params
-def plot_displacement(params_list):
+def plot_displacement(params_list, short = True, take_profit = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
     commissions = 0.00075
-    short = True
-    trailing_stop = True
 
     Xs, time1 = load_all_data(test_files, [0, 1], True)
     _, time2 = get_recent_data('ETH', 10, 'h', 1)
@@ -712,8 +700,9 @@ def plot_displacement(params_list):
         time1 = [time1]
 
     for params in params_list:
-        aggregate_N, w, m, m_bear, p = params
+        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
         for i, X in enumerate(Xs):
+            X_orig = X
             if short:
                 X_bear = get_multiplied_X(X, -m_bear)
             if m > 1:
@@ -726,17 +715,20 @@ def plot_displacement(params_list):
             for rand_N in tqdm(range(aggregate_N * 60)):
                 if rand_N > 0:
                     X1 = X[:-rand_N, :]
+                    X1_orig = X_orig[:-rand_N, :]
                     if short:
                         X1_bear = X_bear[:-rand_N, :]
                 else:
                     X1 = X
+                    X1_orig = X_orig
                     if short:
                         X1_bear = X_bear
                 X1_agg = aggregate(X1, aggregate_N)
+                X1_orig_agg = aggregate(X1_orig, aggregate_N)
                 if short:
                     X1_bear_agg = aggregate(X1_bear, aggregate_N)
 
-                buys, sells, N = get_buys_and_sells(X1_agg, w)
+                buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
 
                 X1_agg = X1_agg[-N:, :]
                 if short:
@@ -745,23 +737,13 @@ def plot_displacement(params_list):
                 if short:
                     X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
-                if trailing_stop and p > 0:
-                    wealths = get_wealths_trailing_stop(
-                        X1, X1_agg, aggregate_N, m, p, buys, sells, commissions = commissions, X_bear = X1_bear, X_bear_agg = X1_bear_agg, m_bear = m_bear
-                    )
-                else:
-                    if short:
-                        try:
-                            wealths = get_wealths(
-                                X1_agg, buys, sells, m, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
-                            )
-                        except AssertionError as e:
-                            print(rand_N)
-                            continue
-                    else:
-                        wealths = get_wealths_oco(
-                            X1, X1_agg, aggregate_N, p, m, buys, sells, commissions = commissions, verbose = N_repeat == 1
-                        )
+                wealths = get_wealths(
+                    X1_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
+                )
+
+                if take_profit:
+                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, m ** 2)
+                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, m_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
 
@@ -788,68 +770,41 @@ def plot_displacement(params_list):
 
 
 if __name__ == '__main__':
-    # aggregate_N_list = range(60, 60*25, 60)
-    # w_list = range(1, 51)
-    #
-    # aggregate_N, w = find_optimal_aggregated_strategy(aggregate_N_list, w_list, 1, False)
-    # print(aggregate_N // 60, w)
-    # m, p = find_optimal_oco_order_params(aggregate_N, w, True)
-    # print(m, p)
-
-    # aggregate_N, w, m, p = find_optimal_aggregated_oco_strategy(False, 40)
-    #
-    # plot_performance([(aggregate_N, w, m, p),
-    #                   (5 * 60, 9, 1.0, 0.0),
-    #                   (1 * 60, 46, 1.6, 0.0065)],
-    #                   N_repeat = 500)
-
     aggregate_N_list = range(1, 13)
     w_list = range(1, 51)
     # m_list = range(1, 4, 2)
     m_list = [1]
     m_bear_list = [3]
-    # p_list = np.arange(0, 0.6, 0.1)
-    p_list = [0]
 
     short = True
-    trailing_stop = True
 
     params = find_optimal_aggregated_strategy(
                 aggregate_N_list,
                 w_list,
                 m_list,
                 m_bear_list,
-                p_list,
                 N_repeat = 40,
                 verbose = True,
                 disable = False,
                 randomize = True,
                 short = True,
-                trailing_stop=True
     )
 
+    take_profits = get_take_profits([
+                        params
+                      ],
+                      short = short,
+                      N_repeat = 500,
+                      randomize = True,
+                      commissions = 0.00075,
+                      step = 0.01,
+                      verbose = False)
+
     plot_performance([
-                        params,
-                        (3, 16, 1, 3, 0),
-                        (4, 12, 1, 3, 0),
+                        params + take_profits,
+                        (3, 16, 1, 3, 1.19, 2.14),
+                        (4, 12, 1, 3, 1.19, 2.14),
                       ],
                       N_repeat = 500,
                       short = short,
-                      trailing_stop = trailing_stop)
-
-    # n_runs = 800
-    # kappa = 1
-    # p = 0.9
-    # strategy_class = Main_Strategy
-    # stop_loss_take_profit = True
-    # restrictive = True
-    #
-    # coin = 'ETH'
-    #
-    # dir = 'data/' + coin + '/'
-    # files = glob.glob(dir + '*.json')
-    # files.sort(key = get_time)
-    # # print(dir, len(files), round(len(files) * 2001 / (60 * 24)))
-    #
-    # optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p)
-    # random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive)
+                      take_profit = True)

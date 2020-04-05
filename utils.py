@@ -501,6 +501,19 @@ def get_or_create(d, k, create_func, *args):
     return d[k]
 
 
+def get_entry_and_exit_idx(entries, exits, N):
+    idx = np.arange(N)
+
+    entries_li = np.diff(np.concatenate((np.array([0]), entries))) == 1
+    entries_idx = idx[entries_li]
+
+    exits_li = np.diff(np.concatenate((np.array([0]), exits))) == 1
+    exits_idx = idx[exits_li]
+
+    return entries_idx, exits_idx
+
+
+
 # TODO: try candlestick patterns with support and resistance lines?
 # TODO: try using stoch when abs of ma is low
 def get_buys_and_sells(X, w, as_boolean = False):
