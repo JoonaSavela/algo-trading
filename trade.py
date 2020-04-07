@@ -119,9 +119,9 @@ def place_take_profit(client, symbol, take_profit):
 
     client.place_conditional_order(
         market = symbol,
-        side = 'buy',
+        side = 'sell',
         size = balance,
-        type = 'take_profit',
+        type = 'takeProfit',
         trigger_price = price * take_profit
     )
     time.sleep(0.05)
