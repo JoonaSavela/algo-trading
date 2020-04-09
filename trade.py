@@ -205,7 +205,6 @@ def trading_pipeline():
                 action = 'SELL'
                 buy_flag = False
                 sell_flag = True
-            place_take_profit(client, bear_symbol, take_profit_short)
 
 
             if action != 'DO NOTHING':
@@ -224,7 +223,7 @@ def trading_pipeline():
         print()
         print('Exiting trading pipeline...')
 
-        cancel_orders(client)
+        # cancel_orders(client)
         total_balance, balances = get_total_balance(client, True)
         print()
         print(balances)
