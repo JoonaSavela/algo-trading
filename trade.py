@@ -121,7 +121,7 @@ def place_take_profit(client, symbol, take_profit):
         market = symbol,
         side = 'sell',
         size = balance,
-        type = 'takeProfit',
+        order_type = 'takeProfit',
         trigger_price = price * take_profit
     )
     time.sleep(0.05)
@@ -159,7 +159,7 @@ def trading_pipeline():
     take_profit_long = params_dict['take_profit_long']
     take_profit_short = params_dict['take_profit_short']
     buy_flag = False
-    sell_flag = False
+    sell_flag = True
 
     if m > 1:
         bull_symbol += 'BULL'
@@ -205,6 +205,7 @@ def trading_pipeline():
                 action = 'SELL'
                 buy_flag = False
                 sell_flag = True
+            place_take_profit(client, bear_symbol, take_profit_short)
 
 
             if action != 'DO NOTHING':
