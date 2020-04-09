@@ -159,7 +159,7 @@ def trading_pipeline():
     take_profit_long = params_dict['take_profit_long']
     take_profit_short = params_dict['take_profit_short']
     buy_flag = False
-    sell_flag = True
+    sell_flag = False
 
     if m > 1:
         bull_symbol += 'BULL'
