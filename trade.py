@@ -161,6 +161,12 @@ def trading_pipeline():
     buy_flag = False
     sell_flag = False
 
+    flag = input('Which event has happened? ')
+    if flag == 'buy':
+        buy_flag = True
+    elif flag == 'sell':
+        sell_flag = True
+
     if m > 1:
         bull_symbol += 'BULL'
 

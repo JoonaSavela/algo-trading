@@ -23,26 +23,26 @@ from itertools import product
 
 def main():
 
-    take_profit_long, take_profit_short = \
-    get_take_profits([
-                        # (4, 12, 1, 3),
-                        (3, 16, 1, 3), # best
-                        # (3, 16, 3, 3),
-                      ],
-                      short = True,
-                      N_repeat = 500,
-                      randomize = True,
-                      step = 0.01,
-                      verbose = True)
-
-    # plot_performance([
-    #                     (3, 16, 1, 3, 1.19, 2.14), # best
-    #                     (3, 16, 3, 3, 1.69, 2.14),
-    #                     # (4, 12, 1, 3, 1.19, 2.14),
+    # take_profit_long, take_profit_short = \
+    # get_take_profits([
+    #                     # (4, 12, 1, 3),
+    #                     (3, 16, 1, 3), # best
+    #                     # (3, 16, 3, 3),
     #                   ],
-    #                   N_repeat = 500,
     #                   short = True,
-    #                   take_profit = True)
+    #                   N_repeat = 500,
+    #                   randomize = True,
+    #                   step = 0.01,
+    #                   verbose = True)
+
+    plot_performance([
+                        (3, 16, 1, 3, 1.19, 2.17), # best
+                        (3, 16, 3, 3, 1.69, 2.17),
+                        # (4, 12, 1, 3, 1.19, 2.14),
+                      ],
+                      N_repeat = 1,
+                      short = True,
+                      take_profit = True)
 
     # plot_displacement([
     #                     (4, 12, 1, 3, 1.19, 2.14),
