@@ -19,34 +19,35 @@ from itertools import product
 
 # TODO: find different ways of optimizing parameters?
 
-
+# TODO: split commissions and spread
 
 def main():
 
-    # take_profit_long, take_profit_short = \
-    # get_take_profits([
-    #                     # (4, 12, 1, 3),
-    #                     (3, 16, 1, 3), # best
+    take_profit_long, take_profit_short = \
+    get_take_profits([
+                        # (4, 12, 1, 3),
+                        (3, 16, 1, 3), # best
+                        # (3, 16, 3, 3),
+                      ],
+                      short = True,
+                      N_repeat = 500,
+                      randomize = True,
+                      step = 0.01,
+                      verbose = True)
+
+    # plot_performance([
+    #                     (3, 16, 1, 3, 1.19, 2.14), # best
+    #                     (3, 16, 3, 3, 1.69, 2.14),
+    #                     # (4, 12, 1, 3, 1.19, 2.14),
     #                   ],
-    #                   short = True,
     #                   N_repeat = 500,
-    #                   randomize = True,
-    #                   commissions = 0.00075,
-    #                   step = 0.01,
-    #                   verbose = True)
+    #                   short = True,
+    #                   take_profit = True)
 
     # plot_displacement([
     #                     (4, 12, 1, 3, 1.19, 2.14),
     #                     (3, 16, 1, 3, 1.19, 2.14), # best
     #                   ])
-
-    # plot_performance([
-    #                     (3, 16, 1, 3, 1.19, 2.14), # best
-    #                     # (4, 12, 1, 3, 1.19, 2.14),
-    #                   ],
-    #                   N_repeat = 1,
-    #                   short = True,
-    #                   take_profit = True)
 
 
 

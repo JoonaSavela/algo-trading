@@ -9,330 +9,7 @@ from parameters import parameters
 from tqdm import tqdm
 from optimize import *
 from itertools import product
-
-from bayes_opt import BayesianOptimization
-from bayes_opt.observer import JSONLogger
-from bayes_opt.event import Events
-from bayes_opt.util import load_logs
-
-def random_search(files, n_runs, strategy_class, stop_loss_take_profit, restrictive):
-    X = load_all_data(files)
-
-    options = strategy_class.get_options(stop_loss_take_profit, restrictive)
-    #print('options:', options)
-
-    if not os.path.exists('search_results/'):
-        os.mkdir('search_results/')
-
-    filename = 'search_results/random_search_{}_{}_{}.csv'.format(
-        options['name'],
-        stop_loss_take_profit,
-        restrictive
-    )
-    print(filename)
-
-    try:
-        resulting_df = pd.read_csv(filename, index_col = 0)
-    except FileNotFoundError as e:
-        print(e)
-        resulting_df = pd.DataFrame()
-    print(resulting_df)
-
-    for run in range(n_runs):
-        try:
-            chosen_params = dict()
-
-            for k, v in options.items():
-                if k != 'name':
-                    type, args = v
-                    if type == 'range':
-                        chosen_params[k] = int(np.random.choice(np.arange(*args)))
-                    elif type == 'uniform':
-                        chosen_params[k] = float(np.random.uniform(*args))
-
-            strategy = strategy_class(chosen_params, stop_loss_take_profit, restrictive)
-
-            profit, min_profit, max_profit = evaluate_strategy(X, strategy, 0, False)
-
-            chosen_params['profit'] = float(profit)
-            chosen_params['min_profit'] = float(min_profit)
-            chosen_params['max_profit'] = float(max_profit)
-
-            ser = pd.DataFrame({len(resulting_df): chosen_params}).T
-            resulting_df = pd.concat([resulting_df, ser], ignore_index=True)
-
-            print()
-            print(resulting_df.loc[resulting_df.index[-1]:, ['profit', 'max_profit', 'min_profit']])
-            resulting_df.to_csv(filename)
-        except ValueError as e:
-            print(e)
-
-    print(resulting_df.loc[resulting_df['profit'].idxmax(), :])
-
-def optimise_smoothing_strategy(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs):
-    X = load_all_data(files)
-
-    if restrictive:
-        starts = [0, X.shape[0] // 2]
-    else:
-        starts = [0]
-
-    n_months = (X.shape[0] * len(starts) - sum(starts)) / (60 * 24 * 30)
-
-    print('Number of months:', n_months)
-
-    def objective_function(stop_loss,
-                       decay,
-                       take_profit,
-                       maxlen,
-                       waiting_time,
-                       alpha):
-
-        maxlen = int(maxlen)
-        waiting_time = int(waiting_time)
-
-        params = {
-            'stop_loss': stop_loss,
-            'decay': decay,
-            'take_profit': take_profit,
-            'maxlen': maxlen,
-            'waiting_time': waiting_time,
-            'alpha': alpha,
-        }
-
-        strategy = Smoothing_Strategy(params, stop_loss_take_profit, restrictive)
-        if strategy.size() > 2000:
-            return -1
-
-        profits = []
-        trades_list = []
-
-        for start in starts:
-            profit, min_profit, max_profit, trades, biggest_loss = evaluate_strategy(X, strategy, start, 0, False)
-
-            profits.append(profit)
-            trades_list.append(trades)
-
-        profit = np.prod(profits) * biggest_loss
-        trades = np.concatenate(trades_list)
-
-        if trades.shape[0] == 0:
-            return -1
-
-        score = profit ** (1 / n_months) - 1
-        if score > 0 and trades.shape[0] > 2:
-            score /= np.std(trades)
-
-        print('Profit:', profit ** (1 / n_months), 'Score:', score, 'Biggest loss:', biggest_loss)
-
-        return score
-
-
-    options = Smoothing_Strategy.get_options(stop_loss_take_profit, restrictive)
-
-    # Bounded region of parameter space
-    pbounds = {}
-
-    for k, v in options.items():
-        if k != 'name':
-            type, bounds = v
-            pbounds[k] = bounds # TODO: set bounds differently if not in strategy class
-
-    # print(pbounds)
-
-    optimizer = BayesianOptimization(
-        f = objective_function,
-        pbounds = pbounds,
-        # random_state = 1,
-    )
-
-    filename = 'optim_results/{}_{}_{}_{}.json'.format(
-        coin,
-        options['name'],
-        stop_loss_take_profit,
-        restrictive
-    )
-
-    # load_logs(optimizer, logs=[filename])
-
-    logger = JSONLogger(path=filename)
-    optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
-
-    # for obj in parameters:
-    #     params = obj['params']
-    #     for k, v in options.items():
-    #         if k != 'name' and k not in params:
-    #             type, bounds = v
-    #             params[k] = bounds[0]
-    #
-    #     keys_to_pop = []
-    #     for k, v in params.items():
-    #         if k not in options:
-    #             keys_to_pop.append(k)
-    #
-    #     for k in keys_to_pop:
-    #         params.pop(k)
-    #
-    #     optimizer.probe(
-    #         params=params,
-    #         lazy=True,
-    #     )
-
-    optimizer.maximize(
-        init_points = int(np.sqrt(n_runs)),
-        n_iter = n_runs,
-    )
-
-    # fix_optim_log(filename)
-
-    print(optimizer.max)
-
-
-def optimise(coin, files, strategy_class, stop_loss_take_profit, restrictive, kappa, n_runs, p):
-    X = load_all_data(files)
-    X = X[:round(p * X.shape[0]), :]
-
-    if restrictive:
-        starts = [0, X.shape[0] // 2]
-    else:
-        starts = [0]
-
-    n_months = (X.shape[0] * len(starts) - sum(starts)) / (60 * 24 * 30)
-
-    print('Number of months:', n_months)
-
-    def objective_function(stop_loss,
-                       decay,
-                       take_profit,
-                       maxlen,
-                       waiting_time,
-                       window_size1,
-                       window_size2,
-                       window_size,
-                       look_back_size,
-                       rolling_min_window_size,
-                       min_threshold,
-                       change_threshold,
-                       buy_threshold,
-                       sell_threshold,
-                       ha_threshold,
-                       c,
-                       alpha):
-
-        maxlen = int(maxlen)
-        waiting_time = int(waiting_time)
-        window_size1 = int(window_size1)
-        window_size2 = int(window_size2)
-        window_size = int(window_size)
-        look_back_size = int(look_back_size)
-        rolling_min_window_size = int(rolling_min_window_size)
-
-        params = {
-            'stop_loss': stop_loss,
-            'decay': decay,
-            'take_profit': take_profit,
-            'maxlen': maxlen,
-            'waiting_time': waiting_time,
-            'window_size1': window_size1,
-            'window_size2': window_size2,
-            'window_size': window_size,
-            'look_back_size': look_back_size,
-            'rolling_min_window_size': rolling_min_window_size,
-            'min_threshold': min_threshold,
-            'change_threshold': change_threshold,
-            'buy_threshold': buy_threshold,
-            'sell_threshold': sell_threshold,
-            'ha_threshold': ha_threshold,
-            'c': c,
-            'alpha': alpha,
-        }
-
-        strategy = strategy_class(params, stop_loss_take_profit, restrictive)
-        if strategy.size() > 2000:
-            return -1
-
-        profits = []
-        trades_list = []
-
-        for start in starts:
-            profit, min_profit, max_profit, trades, biggest_loss = evaluate_strategy(X, strategy, start, 0, False)
-
-            profits.append(profit)
-            trades_list.append(trades)
-
-        profit = np.prod(profits) * biggest_loss
-        trades = np.concatenate(trades_list)
-
-        if trades.shape[0] == 0:
-            return -1
-
-        score = profit ** (1 / n_months) - 1
-        if score > 0 and trades.shape[0] > 2:
-            score /= np.std(trades)
-
-        print('Profit:', profit ** (1 / n_months), 'Score:', score, 'Biggest loss:', biggest_loss)
-
-        return score
-
-
-    options = strategy_class.get_options(stop_loss_take_profit, restrictive)
-
-    # Bounded region of parameter space
-    pbounds = {}
-
-    for k, v in options.items():
-        if k != 'name':
-            type, bounds = v
-            pbounds[k] = bounds # TODO: set bounds differently if not in strategy class
-
-    # print(pbounds)
-
-    optimizer = BayesianOptimization(
-        f = objective_function,
-        pbounds = pbounds,
-        # random_state = 1,
-    )
-
-    filename = 'optim_results/{}_{}_{}_{}.json'.format(
-        coin,
-        options['name'],
-        stop_loss_take_profit,
-        restrictive
-    )
-
-    # load_logs(optimizer, logs=[filename])
-
-    logger = JSONLogger(path=filename)
-    optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
-
-    for obj in parameters:
-        params = obj['params']
-        for k, v in options.items():
-            if k != 'name' and k not in params:
-                type, bounds = v
-                params[k] = bounds[0]
-
-        keys_to_pop = []
-        for k, v in params.items():
-            if k not in options:
-                keys_to_pop.append(k)
-
-        for k in keys_to_pop:
-            params.pop(k)
-
-        optimizer.probe(
-            params=params,
-            lazy=True,
-        )
-
-    optimizer.maximize(
-        init_points = int(np.sqrt(n_runs)),
-        n_iter = n_runs,
-    )
-
-    # fix_optim_log(filename)
-
-    print(optimizer.max)
+from parameters import commissions, spread, spread_bear, spread_bull
 
 
 # TODO: make as general as possible
@@ -352,8 +29,6 @@ def find_optimal_aggregated_strategy(
     test_files.sort(key = get_time)
 
     X_orig = load_all_data(test_files, 0)
-
-    commissions = 0.00075
 
     best_reward = -np.Inf
     best_wealth = 0
@@ -412,7 +87,13 @@ def find_optimal_aggregated_strategy(
                 X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
             wealths = get_wealths(
-                X_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
+                X_agg,
+                buys,
+                sells,
+                commissions = commissions,
+                spread_bull = spread if m <= 1.0 else spread_bull,
+                X_bear = X_bear_agg,
+                spread_bear = spread_bear
             )
 
             n_months = buys.shape[0] * aggregate_N / (24 * 30)
@@ -444,7 +125,7 @@ def find_optimal_aggregated_strategy(
 
 
 # TODO: transfer changes related to X_orig and m ** 2 to parameter_search, etc.
-def get_take_profits(params_list, short, N_repeat, randomize, commissions, step, verbose = True):
+def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -504,7 +185,13 @@ def get_take_profits(params_list, short, N_repeat, randomize, commissions, step,
                     X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
                 wealths = get_wealths(
-                    X1_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
                 )
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
@@ -516,10 +203,10 @@ def get_take_profits(params_list, short, N_repeat, randomize, commissions, step,
                 append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
 
         take_profits_long = np.arange(1.0 + step, max(max_long_trade_wealths) + step*2, step)
-        take_profit_wealths_long = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, x, total_months, commissions, m ** 2), take_profits_long)))
+        take_profit_wealths_long = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, x, total_months, commissions, spread if m <= 1.0 else spread_bull), take_profits_long)))
 
         take_profits_short = np.arange(1.0 + step, max(max_short_trade_wealths) + step*2, step)
-        take_profit_wealths_short = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, x, total_months, commissions, m_bear), take_profits_short)))
+        take_profit_wealths_short = np.array(list(map(lambda x: get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, x, total_months, commissions, spread_bear), take_profits_short)))
 
         take_profit_long = take_profits_long[np.argmax(take_profit_wealths_long)]
         take_profit_short = take_profits_short[np.argmax(take_profit_wealths_short)]
@@ -527,8 +214,8 @@ def get_take_profits(params_list, short, N_repeat, randomize, commissions, step,
         if verbose:
             print(take_profit_long, take_profit_short)
 
-            take_profit_wealth = get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, take_profit_long, total_months, commissions, m ** 2) * \
-                get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, take_profit_short, total_months, commissions, m_bear)
+            take_profit_wealth = get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, take_profit_long, total_months, commissions, spread if m <= 1.0 else spread_bull) * \
+                get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, take_profit_short, total_months, commissions, spread_bear)
             print(take_profit_wealth, take_profit_wealth ** 12)
             wealth = np.exp(total_log_wealth / total_months)
             print(wealth, wealth ** 12)
@@ -553,7 +240,6 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
     test_files.sort(key = get_time)
 
     c_list = ['g', 'c', 'm', 'r']
-    commissions = 0.00075
 
     Xs = load_all_data(test_files, [0, 1])
 
@@ -612,12 +298,18 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     X_bear = X_bear[-aggregate_N * 60 * N:, :]
 
                 wealths = get_wealths(
-                    X_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X_bear_agg, m_bear = m_bear
+                    X_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X_bear_agg,
+                    spread_bear = spread_bear
                 )
 
                 if take_profit:
-                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, m ** 2)
-                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, m_bear)
+                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
+                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
                 dropdown, I, J = get_max_dropdown(wealths, True)
@@ -690,8 +382,6 @@ def plot_displacement(params_list, short = True, take_profit = True):
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    commissions = 0.00075
-
     Xs, time1 = load_all_data(test_files, [0, 1], True)
     _, time2 = get_recent_data('ETH', 10, 'h', 1)
 
@@ -738,12 +428,18 @@ def plot_displacement(params_list, short = True, take_profit = True):
                     X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
                 wealths = get_wealths(
-                    X1_agg, buys, sells, m ** 2, commissions = commissions, X_bear = X1_bear_agg, m_bear = m_bear
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
                 )
 
                 if take_profit:
-                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, m ** 2)
-                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, m_bear)
+                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
+                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
 
@@ -787,7 +483,7 @@ if __name__ == '__main__':
                 verbose = True,
                 disable = False,
                 randomize = True,
-                short = True,
+                short = short,
     )
 
     take_profits = get_take_profits([
@@ -796,14 +492,12 @@ if __name__ == '__main__':
                       short = short,
                       N_repeat = 500,
                       randomize = True,
-                      commissions = 0.00075,
                       step = 0.01,
                       verbose = False)
 
     plot_performance([
                         params + take_profits,
                         (3, 16, 1, 3, 1.19, 2.14),
-                        (4, 12, 1, 3, 1.19, 2.14),
                       ],
                       N_repeat = 500,
                       short = short,

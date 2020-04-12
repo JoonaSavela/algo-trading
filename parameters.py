@@ -13,9 +13,14 @@ params = {
     'ETH': {
         'aggregate': 3,
         'w': 16,
-        'm': 1,
+        'm': 3,
         'm_bear': 3,
-        'take_profit_long': 1.19,
+        'take_profit_long': 1.69,
         'take_profit_short': 2.14,
     },
 }
+
+commissions = 0.0007
+spread = 0.0002 / 2
+spread_bull = 0.0054 / 2
+spread_bear = 0.002 / 2
