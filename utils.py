@@ -467,12 +467,13 @@ def get_multiplied_X(X, multiplier = 1):
         np.cumprod(returns + 1)
     ])
 
-    other_returns = X[:, 1:4] / X[:, 0].reshape((-1, 1)) - 1
-    other_returns = multiplier * other_returns
-    assert(np.all(other_returns > -1.0))
-    X_res[:, 1:4] = X_res[:, 0].reshape((-1, 1)) * (other_returns + 1)
+    if X.shape[1] > 1:
+        other_returns = X[:, 1:4] / X[:, 0].reshape((-1, 1)) - 1
+        other_returns = multiplier * other_returns
+        assert(np.all(other_returns > -1.0))
+        X_res[:, 1:4] = X_res[:, 0].reshape((-1, 1)) * (other_returns + 1)
 
-    X_res[:, 4:] = X[:, 4:]
+        X_res[:, 4:] = X[:, 4:]
 
     return X_res
 
@@ -514,14 +515,21 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 
 
+# TODO: fix bug with use_diff = True and get_take_profits
 # TODO: try candlestick patterns with support and resistance lines?
-# TODO: try using stoch when abs of ma is low
-def get_buys_and_sells(X, w, as_boolean = False):
+def get_buys_and_sells(X, w, as_boolean = False, use_diff = False):
     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
     N = ma.shape[0]
+    if use_diff:
+        diff = np.diff(X[:, 0] / X[0, 0])
+        diff = diff[-N:]
 
     buys = ma > 0
-    sells = ~buys
+    sells = ma < 0
+
+    if use_diff:
+        buys = buys & (diff > 0)
+        sells = sells & (diff < 0)
 
     if as_boolean:
         if N == 1:
@@ -531,5 +539,9 @@ def get_buys_and_sells(X, w, as_boolean = False):
 
     buys = buys.astype(float)
     sells = sells.astype(float)
+
+    # print(N)
+    # print(buys.mean())
+    # print(sells.mean())
 
     return buys, sells, N
