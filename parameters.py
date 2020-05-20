@@ -16,7 +16,7 @@ params = {
         'm': 3,
         'm_bear': 3,
         'take_profit_long': 1.69,
-        'take_profit_short': 2.17,
+        'take_profit_short': 2.13,
     },
 }
 

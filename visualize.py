@@ -6,82 +6,55 @@ import numpy as np
 import pandas as pd
 import json
 import glob
-from keys import binance_api_key, binance_secret_key
-import binance
-from binance.client import Client
-from binance.enums import *
+import time
+import datetime
+from keys import ftx_api_key, ftx_secret_key
+from ftx.rest.client import FtxClient
 
-def get_trades(count = None):
-    client = Client(binance_api_key, binance_secret_key)
-    symbol1 = 'ETH'
-    symbol = symbol1 + 'USDT'
-    trades = client.get_my_trades(symbol=symbol, fromId = 83689922)
-    # print(trades[:3])
-    df = pd.DataFrame(trades)
+# TODO: implement
+def aggregate_trades(year):
+    pass
 
-    df = df[df['isBuyer'] == False]
-
-    df['quoteQty'] = df['quoteQty'].apply(float)
-    df['price'] = df['price'].apply(float)
-    df['time'] = df['time'].apply(int)
-
-    prices = df.groupby('time')['price'].mean()
-    wealths = df.groupby('time')['quoteQty'].sum()
-    times = (df['time'].unique() - df['time'].iloc[0]) / (1000 * 60 * 60 * 24)
-
-    prices = prices / prices.iloc[0]
-    wealths = wealths / wealths.iloc[0]
-
-    if count is not None:
-        return wealths.values[-count:]
-
-    return times, wealths, prices
+# TODO: group by chosen years and months
+def plot_trades(years = None, months = None):
+    trades = pd.read_csv('trading_logs/trades.csv')
+    trades = trades[['time', 'market', 'side', 'size', 'price']]
 
 
-def main(from_local = True):
-    if from_local:
-        times = []
-        capitals = []
-        bnbs = []
 
-        for file in glob.glob('trading_logs/*.json'):
-            with open(file, 'r') as f:
-                obj = json.load(f)
-                times.append(int(obj['initial_time']))
-                times.append(int(obj['final_time']))
-                capitals.append(float(obj['initial_capital']))
-                capitals.append(float(obj['final_capital']))
-                bnbs.append(float(obj['initial_bnb']))
-                bnbs.append(float(obj['final_bnb']))
+    trades['float_time'] = trades['time'].map(lambda x: time.mktime(datetime.datetime.strptime(x[:13], "%Y-%m-%dT%H").timetuple()))
 
-        times = np.array(times)
-        capitals = np.array(capitals)
-        bnbs = np.array(bnbs)
+    usd_value = trades.groupby(['float_time', 'market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
+    full_time = trades.groupby(['float_time', 'market', 'side'])['time'].min()
 
-        i = np.argsort(times)
-        times = times[i]
-        capitals = capitals[i]
-        bnbs = bnbs[i]
+    df = usd_value.rename('usdValue').reset_index()
+    df = df.merge(full_time.reset_index())
+    df = df.sort_values('time')
+    df = df[df['usdValue'] > 10]
 
-        times = (times - times[0]) / 60
-        capitals = capitals / capitals[0]
-        bnbs = bnbs / bnbs[0]
+    if months is None or 4 in months:
+        df.loc[7, 'usdValue'] += df.loc[6, 'usdValue']
+        df = df.drop(6)
 
-        plt.plot(times, capitals)
-        plt.plot(times, bnbs)
-        plt.show()
-    else:
-        times, wealths, prices = get_trades()
+    df['usdValue'] /= df['usdValue'].iloc[0]
+    df['t'] = (df['float_time'] - df['float_time'].min()) / (60 * 60 * 24)
+    xlab = 'days'
+    n_months = df['t'].max() / 30
+    # print(n_months)
 
-        print('Profit:', wealths.iloc[-1])
-        print('min, max:', np.min(wealths), np.max(wealths))
+    if n_months > 3:
+        df['t'] /= 30
+        xlab = 'months'
 
-        plt.plot(times, prices)
-        plt.plot(times, wealths)
-        plt.xlabel('Days')
-        plt.ylabel('Profit')
-        plt.show()
+    wealth = df['usdValue'].iloc[-1] ** (1 / n_months)
+    print(wealth, wealth ** 12)
+
+    # TODO: plot the price action between the events
+    plt.plot(df['t'], df['usdValue'])
+    plt.xlabel(xlab)
+    plt.ylabel('profit')
+    plt.show()
 
 
 if __name__ == "__main__":
-    main(False)
+    plot_trades()

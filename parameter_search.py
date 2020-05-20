@@ -354,6 +354,8 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         print()
         print(total_wealth, total_wealth ** 12)
         print(total_dropdown, total_wealth * total_dropdown)
+        if N_repeat == 1:
+            print(np.sum(total_months))#, np.sum(total_months) / 12)
         print()
 
         if N_repeat > 1:
@@ -469,7 +471,7 @@ if __name__ == '__main__':
     aggregate_N_list = range(1, 13)
     w_list = range(1, 51)
     # m_list = range(1, 4, 2)
-    m_list = [1]
+    m_list = [1, 3]
     m_bear_list = [3]
 
     short = True
@@ -497,7 +499,8 @@ if __name__ == '__main__':
 
     plot_performance([
                         params + take_profits,
-                        (3, 16, 1, 3, 1.19, 2.14),
+                        (3, 16, 1, 3, 1.2, 2.14),
+                        (3, 16, 3, 3, 1.69, 2.13),
                       ],
                       N_repeat = 500,
                       short = short,
