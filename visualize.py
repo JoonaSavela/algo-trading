@@ -11,19 +11,45 @@ import datetime
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
 
-# TODO: implement
-def aggregate_trades(year):
-    pass
+# Assumes no FTT is ever bought
+def get_taxable_profit(year):
+    trades = pd.read_csv('trading_logs/trades.csv')
+    trades['year'] = trades['time'].map(lambda x: int(x[:4]))
+    trades = trades[trades['year'] == year]
+    trades = trades.sort_values('time')
 
-# TODO: group by chosen years and months
+    # ignores last buy
+    if (trades.tail(1)['side'] == 'buy').all():
+        trades.drop(trades.tail(1).index, inplace=True)
+
+    li = trades['feeCurrency'] != 'USDT'
+    trades.loc[li, 'fee'] = trades.loc[li, 'fee'] * trades.loc[li, 'price']
+    trades['feeCurrency'] = 'USDT'
+
+    profits_df = trades.groupby(['market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
+    profits_df = profits_df.rename('total').reset_index()
+
+    buys = profits_df[profits_df['side'] == 'buy']['total'].values
+    sells = profits_df[profits_df['side'] == 'sell']['total'].values
+    profits = sells - buys
+
+    profit = profits.sum()
+    total_fees = trades['fee'].sum()
+
+    print(f'Total profit (after fees): {profit}')
+    print(f'Fees payed: {total_fees}')
+    print(f'Taxable profit: {profit - total_fees}')
+
+
 def plot_trades(years = None, months = None):
     trades = pd.read_csv('trading_logs/trades.csv')
     trades = trades[['time', 'market', 'side', 'size', 'price']]
 
-
+    # TODO: group by chosen years and months
 
     trades['float_time'] = trades['time'].map(lambda x: time.mktime(datetime.datetime.strptime(x[:13], "%Y-%m-%dT%H").timetuple()))
 
+    # TODO: DRY DRY
     usd_value = trades.groupby(['float_time', 'market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
     full_time = trades.groupby(['float_time', 'market', 'side'])['time'].min()
 
@@ -57,4 +83,5 @@ def plot_trades(years = None, months = None):
 
 
 if __name__ == "__main__":
-    plot_trades()
+    # plot_trades()
+    get_taxable_profit(2020)
