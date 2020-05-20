@@ -36,9 +36,8 @@ def get_taxable_profit(year):
     profit = profits.sum()
     total_fees = trades['fee'].sum()
 
-    print(f'Total profit (after fees): {profit}')
+    print(f'Taxable profit: {profit}')
     print(f'Fees payed: {total_fees}')
-    print(f'Taxable profit: {profit - total_fees}')
 
 
 def plot_trades(years = None, months = None):
