@@ -23,4 +23,4 @@ params = {
 commissions = 0.0007
 spread = 0.0002 / 2
 spread_bull = 0.0054 / 2
-spread_bear = 0.002 / 2
+spread_bear = 0.0025 / 2
