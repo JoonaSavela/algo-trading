@@ -53,9 +53,9 @@ def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
 
     while s > 0:
         if s == size:
-            X, timeTo, timeFrom = _get_recent_data('ETH', timeFrom, min(2000, s), type, aggregate)
+            X, timeTo, timeFrom = _get_recent_data(coin, timeFrom, min(2000, s), type, aggregate)
         else:
-            X, _, timeFrom = _get_recent_data('ETH', timeFrom, min(2000, s), type, aggregate)
+            X, _, timeFrom = _get_recent_data(coin, timeFrom, min(2000, s), type, aggregate)
 
         s -= X.shape[0]
 
