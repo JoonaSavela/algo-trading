@@ -2,10 +2,12 @@ from keys import ftx_api_key, ftx_secret_key
 # from model import build_model
 from ftx.rest.client import FtxClient
 import time
+from datetime import datetime
 from data import coins, get_recent_data
 import numpy as np
 import pandas as pd
-from utils import *
+from utils import aggregate as aggregate_F
+from utils import get_buys_and_sells
 from math import floor, log10
 import json
 from strategy import *
@@ -134,7 +136,10 @@ def wait(time_delta, initial_time, verbose = False):
         waiting_time += time_delta
     if verbose:
         print()
-        print('waiting', waiting_time / (60 * 60), 'hours')
+        if waiting_time / (60 * 60) < 1:
+            print('waiting', waiting_time / 60, 'minutes')
+        else:
+            print('waiting', waiting_time / (60 * 60), 'hours')
     time.sleep(waiting_time)
 
 def cancel_orders(client):
@@ -142,6 +147,8 @@ def cancel_orders(client):
     time.sleep(0.05)
 
 
+# TODO: move all changeable parameters into a text/json file(s)
+# TODO: implement displacement
 def trading_pipeline():
     print('Starting trading pipeline...')
 
@@ -158,6 +165,7 @@ def trading_pipeline():
     m_bear = params_dict['m_bear']
     take_profit_long = params_dict['take_profit_long']
     take_profit_short = params_dict['take_profit_short']
+    displacement = params_dict['displacement']
     buy_flag = False
     sell_flag = False
 
@@ -166,6 +174,15 @@ def trading_pipeline():
         buy_flag = True
     elif flag == 'sell':
         sell_flag = True
+
+    debug_flag = True
+
+    debug = input('Is this a debug run? ')
+    if 'y' in debug:
+        debug_flag = True
+
+    if debug_flag:
+        print('Debug flag set')
 
     if m > 1:
         bull_symbol += 'BULL'
@@ -178,7 +195,17 @@ def trading_pipeline():
         print(balances)
 
         while True:
-            X, timeTo = get_recent_data(target_symbol, size = w + 1, type='h', aggregate=aggregate)
+            # rounds the current time into the previous hour,
+            # or the next hour if the displacement minute has passed
+            seconds = time.time() + (59 - displacement) * 60
+            localtime = time.localtime(seconds)
+            now_string = time.strftime("%d/%m/%Y %H:%M:%S", localtime)
+            timeTo = time.mktime(datetime.strptime(now_string[:-6], "%d/%m/%Y %H").timetuple())
+            wait(displacement * 60, timeTo, verbose = debug_flag)
+
+            X, _ = get_recent_data(target_symbol, size = (w + 1) * 60 * aggregate, type='m')
+            X = aggregate_F(X, aggregate, type = 'h')
+
             balance_target, balance_short, balance_source = asset_balance(
                 client,
                 [bull_symbol, bear_symbol, source_symbol],
@@ -186,12 +213,14 @@ def trading_pipeline():
             )
             total_balance = sum([balance_target, balance_short, balance_source])
 
-            buy, sell, N = get_buys_and_sells(X, w, True)
+            buy, sell, _ = get_buys_and_sells(X, w, True)
+            if debug_flag:
+                print(buy, sell)
 
             price = X[-1, 0]
             action = 'DO NOTHING'
 
-            if buy and not buy_flag and (
+            if buy and not buy_flag and not debug_flag and (
                     balance_source / total_balance > min_amount or
                     balance_short / total_balance > min_amount
                 ):
@@ -201,7 +230,7 @@ def trading_pipeline():
                 action = 'BUY'
                 buy_flag = True
                 sell_flag = False
-            elif sell and not sell_flag and (
+            elif sell and not sell_flag and not debug_flag and (
                     balance_target / total_balance > min_amount or
                     balance_source / total_balance > min_amount
                 ):
@@ -220,7 +249,7 @@ def trading_pipeline():
                 print(balances)
                 print()
 
-            wait(time_delta, timeTo, False)
+            wait(time_delta, timeTo, verbose = debug_flag)
 
 
     except KeyboardInterrupt:
