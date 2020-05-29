@@ -517,7 +517,7 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 # TODO: fix bug with use_diff = True and get_take_profits
 # TODO: try candlestick patterns with support and resistance lines?
-def get_buys_and_sells(X, w, as_boolean = False, use_diff = False):
+def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, use_diff = False):
     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
     N = ma.shape[0]
     if use_diff:
@@ -531,11 +531,15 @@ def get_buys_and_sells(X, w, as_boolean = False, use_diff = False):
         buys = buys & (diff > 0)
         sells = sells & (diff < 0)
 
+    return_tuple = (N,)
+    if return_ma:
+        return_tuple = return_tuple + (std(X, w + 1),)
+
     if as_boolean:
         if N == 1:
-            return buys[0], sells[0], N
+            return (buys[0], sells[0]) + return_tuple
         else:
-            return buys, sells, N
+            return (buys, sells) + return_tuple
 
     buys = buys.astype(float)
     sells = sells.astype(float)
@@ -544,4 +548,4 @@ def get_buys_and_sells(X, w, as_boolean = False, use_diff = False):
     # print(buys.mean())
     # print(sells.mean())
 
-    return buys, sells, N
+    return (buys, sells) + return_tuple
