@@ -233,7 +233,7 @@ def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = Tr
 
     return take_profit_long_list, take_profit_short_list
 
-def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, randomize = True):
+def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, randomize = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -241,7 +241,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     c_list = ['g', 'c', 'm', 'r']
 
-    Xs = load_all_data(test_files, [0, 1])
+    Xs = load_all_data(test_files, Xs_index)
 
     if N_repeat > 1:
         fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = [6.4 * 2, 4.8])
@@ -377,15 +377,19 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     plt.show()
 
-# TODO: improve visualization for a list of params
-def plot_displacement(params_list, short = True, take_profit = True):
+def plot_displacement(params_list, short = True, take_profit = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    Xs, time1 = load_all_data(test_files, [0, 1], True)
+    Xs, time1 = load_all_data(test_files, Xs_index, True)
     _, time2 = get_recent_data('ETH', 10, 'h', 1)
+
+    Ns = np.array(list(map(lambda x: x.shape[0], Xs))).reshape((-1, 1))
+    N = np.sum(Ns)
+    weights = Ns / N
+    print(weights.flatten())
 
     if not isinstance(Xs, list):
         Xs = [Xs]
@@ -393,6 +397,8 @@ def plot_displacement(params_list, short = True, take_profit = True):
 
     for params in params_list:
         aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
+
+        wealth_lists = []
         for i, X in enumerate(Xs):
             X_orig = X
             if short:
@@ -402,7 +408,7 @@ def plot_displacement(params_list, short = True, take_profit = True):
 
             wealth_list = []
             time_diff = ((time2 - time1[i]) // 60) % (aggregate_N * 60)
-            print(time_diff)
+            # print(time_diff)
 
             for rand_N in tqdm(range(aggregate_N * 60)):
                 if rand_N > 0:
@@ -447,7 +453,7 @@ def plot_displacement(params_list, short = True, take_profit = True):
 
                 wealth = wealths[-1] ** (1 / n_months)
 
-                # TODO: calculate std here
+                # TODO: calculate std here?
 
                 wealth_list.append(wealth)
 
@@ -455,7 +461,7 @@ def plot_displacement(params_list, short = True, take_profit = True):
             wealth_list = np.flip(np.array(wealth_list))
             wealth_list = np.roll(wealth_list, -time_diff + 1)
 
-            # TODO: include trade profit standard deviation in the plots
+            # TODO: include trade profit standard deviation in the plots?
             new_wealth_list = np.ones((60,))
 
             for n in range(aggregate_N):
@@ -463,8 +469,14 @@ def plot_displacement(params_list, short = True, take_profit = True):
 
             wealth_list = new_wealth_list ** (1 / aggregate_N)
 
-            plt.plot(wealth_list)
-        plt.show()
+            wealth_lists.append(wealth_list)
+
+        wealth_lists = np.stack(wealth_lists)
+        wealth_list = np.exp(np.sum(np.log(wealth_lists) * weights, axis = 0))
+        wealth_i = np.argmax(wealth_list)
+        print(wealth_i, wealth_list[wealth_i], wealth_list[wealth_i] ** 12)
+        plt.plot(wealth_list)
+    plt.show()
 
 
 if __name__ == '__main__':
