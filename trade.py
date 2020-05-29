@@ -148,7 +148,6 @@ def cancel_orders(client):
 
 
 # TODO: move all changeable parameters into a text/json file(s)
-# TODO: implement displacement
 def trading_pipeline():
     print('Starting trading pipeline...')
 
@@ -175,7 +174,7 @@ def trading_pipeline():
     elif flag == 'sell':
         sell_flag = True
 
-    debug_flag = True
+    debug_flag = False
 
     debug = input('Is this a debug run? ')
     if 'y' in debug:
