@@ -7,7 +7,7 @@ from data import coins, get_recent_data
 import numpy as np
 import pandas as pd
 from utils import aggregate as aggregate_F
-from utils import get_buys_and_sells
+from utils import get_buys_and_sells, floor_to_n
 from math import floor, log10
 import json
 from strategy import *
