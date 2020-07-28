@@ -254,6 +254,8 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         print(params)
 
         total_log_wealths = []
+        total_wealths_list = []
+        t_list = []
         total_log_dropdowns = []
         total_months = []
 
@@ -332,10 +334,12 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                         sells_li = buys_diff == -1.0
                         idx = np.arange(N)
                         plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
-                        plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
-                        plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
+                        # plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
+                        # plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
 
                     total_wealths = wealths * np.exp(total_log_wealth)
+                    total_wealths_list.append(total_wealths)
+                    t_list.append(t)
                     plt.plot(t, total_wealths, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
                     plt.plot(t[[I, J]], total_wealths[[I, J]], 'r.', alpha=0.85, markersize=15)
                     plt.yscale('log')
@@ -349,13 +353,19 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
             total_log_dropdowns.append(total_log_dropdown)
             total_months.append(total_months1)
 
-        total_wealth = np.exp(np.sum(total_log_wealths) / np.sum(total_months))
-        total_dropdown = np.exp(np.sum(total_log_dropdowns) / np.sum(total_months))
+        total_months = np.sum(total_months)
+        total_wealth = np.exp(np.sum(total_log_wealths) / total_months)
+        total_dropdown = np.exp(np.sum(total_log_dropdowns) / total_months)
         print()
         print(total_wealth, total_wealth ** 12)
         print(total_dropdown, total_wealth * total_dropdown)
-        if N_repeat == 1:
-            print(np.sum(total_months))#, np.sum(total_months) / 12)
+        if N_repeat == 1 and len(params_list) == 1:
+            total_wealths = np.concatenate(total_wealths_list)
+            t = np.concatenate(t_list)
+            monthly_returns = total_wealths ** (1 / ((np.arange(total_wealths.shape[0]) + 1) * aggregate_N / (24 * 30)))
+            plt.plot(t, monthly_returns ** 12, c = 'b', alpha=0.9 / np.sqrt(N_repeat))
+            plt.axhline(y = 1, color = 'k', alpha = 0.25)
+            print(round_to_n(total_months / 12, n = 3))
         print()
 
         if N_repeat > 1:
