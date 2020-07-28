@@ -10,16 +10,26 @@ import time
 import datetime
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
+from utils import *
 
+# TODO: merge two trade log csv files
+#       - check if fetching of logs can be automated
+
+# TODO: handle new year
 # Assumes no FTT is ever bought
+# Assumes no new money is ever deposited
 def get_taxable_profit(year):
     trades = pd.read_csv('trading_logs/trades.csv')
     trades['year'] = trades['time'].map(lambda x: int(x[:4]))
     trades = trades[trades['year'] == year]
     trades = trades.sort_values('time')
 
-    # ignores last buy
-    if (trades.tail(1)['side'] == 'buy').all():
+    # ignores first sells
+    while (trades.head(1)['side'] == 'sell').all():
+        trades.drop(trades.head(1).index, inplace=True)
+
+    # ignores last buys
+    while (trades.tail(1)['side'] == 'buy').all():
         trades.drop(trades.tail(1).index, inplace=True)
 
     li = trades['feeCurrency'] != 'USDT'
@@ -27,6 +37,7 @@ def get_taxable_profit(year):
     trades['feeCurrency'] = 'USDT'
 
     profits_df = trades.groupby(['market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
+    # print(profits_df)
     profits_df = profits_df.rename('total').reset_index()
 
     buys = profits_df[profits_df['side'] == 'buy']['total'].values
@@ -40,9 +51,23 @@ def get_taxable_profit(year):
     print(f'Fees payed: {total_fees}')
 
 
-def plot_trades(years = None, months = None):
+def plot_trades(years = None, months = None, normalize = False):
+    plt.style.use('seaborn')
+
     trades = pd.read_csv('trading_logs/trades.csv')
     trades = trades[['time', 'market', 'side', 'size', 'price']]
+    trades = trades.sort_values('time')
+
+    # ignores first sells
+    while (trades.head(1)['side'] == 'sell').all():
+        trades.drop(trades.head(1).index, inplace=True)
+
+    # ignores last buys
+    while (trades.tail(1)['side'] == 'buy').all():
+        trades.drop(trades.tail(1).index, inplace=True)
+
+    if years is None and months is None:
+        print(trades['time'].min()[:10])
 
     # TODO: group by chosen years and months
 
@@ -52,35 +77,42 @@ def plot_trades(years = None, months = None):
     usd_value = trades.groupby(['float_time', 'market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
     full_time = trades.groupby(['float_time', 'market', 'side'])['time'].min()
 
+    # print(usd_value.groupby(['market', 'side']).sum())
+
     df = usd_value.rename('usdValue').reset_index()
     df = df.merge(full_time.reset_index())
     df = df.sort_values('time')
-    df = df[df['usdValue'] > 10]
 
-    if months is None or 4 in months:
-        df.loc[7, 'usdValue'] += df.loc[6, 'usdValue']
-        df = df.drop(6)
-
-    df['usdValue'] /= df['usdValue'].iloc[0]
+    if normalize:
+        df['usdValue'] /= df['usdValue'].iloc[0]
     df['t'] = (df['float_time'] - df['float_time'].min()) / (60 * 60 * 24)
     xlab = 'days'
     n_months = df['t'].max() / 30
-    # print(n_months)
 
-    if n_months > 3:
+    if n_months > 2 * 12:
+        df['t'] /= 365
+        xlab = 'years'
+    elif n_months > 3:
         df['t'] /= 30
         xlab = 'months'
 
-    wealth = df['usdValue'].iloc[-1] ** (1 / n_months)
+    wealth = (df['usdValue'].iloc[-1] / df['usdValue'].iloc[0]) ** (1 / n_months)
     print(wealth, wealth ** 12)
+
+    # print(df['usdValue'].iloc[-1])
+    # print(df['usdValue'].iloc[0])
+    # print(df['usdValue'].iloc[-1] - df['usdValue'].iloc[0])
+
+    # test_files = glob.glob('data/ETH/*.json')
+    # test_files.sort(key = get_time)
 
     # TODO: plot the price action between the events
     plt.plot(df['t'], df['usdValue'])
     plt.xlabel(xlab)
-    plt.ylabel('profit')
+    plt.ylabel('Strategy')
     plt.show()
 
 
 if __name__ == "__main__":
-    # plot_trades()
     get_taxable_profit(2020)
+    plot_trades()
