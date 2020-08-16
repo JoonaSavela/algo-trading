@@ -12,14 +12,28 @@ from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
 from utils import *
 
-# TODO: merge two trade log csv files
-#       - check if fetching of logs can be automated
+# TODO: check if fetching of logs can be automated
+
+def combine_files(main_filename):
+    files = glob.glob('trading_logs/*.csv')
+
+    dataFrames = [pd.read_csv(file) for file in files]
+
+    # print([len(df) for df in dataFrames])
+
+    df = pd.concat(dataFrames, sort = False, ignore_index = True).drop_duplicates('id')
+
+    df = df.sort_values('time')
+
+    print(len(df))
+
+    df.to_csv('trading_logs/' + main_filename, index = False)
 
 # TODO: handle new year
 # Assumes no FTT is ever bought
 # Assumes no new money is ever deposited
-def get_taxable_profit(year):
-    trades = pd.read_csv('trading_logs/trades.csv')
+def get_taxable_profit(main_filename, year):
+    trades = pd.read_csv('trading_logs/' + main_filename)
     trades['year'] = trades['time'].map(lambda x: int(x[:4]))
     trades = trades[trades['year'] == year]
     trades = trades.sort_values('time')
@@ -51,10 +65,10 @@ def get_taxable_profit(year):
     print(f'Fees payed: {total_fees}')
 
 
-def plot_trades(years = None, months = None, normalize = False):
+def plot_trades(main_filename, years = None, months = None, normalize = False):
     plt.style.use('seaborn')
 
-    trades = pd.read_csv('trading_logs/trades.csv')
+    trades = pd.read_csv('trading_logs/' + main_filename)
     trades = trades[['time', 'market', 'side', 'size', 'price']]
     trades = trades.sort_values('time')
 
@@ -114,5 +128,7 @@ def plot_trades(years = None, months = None, normalize = False):
 
 
 if __name__ == "__main__":
-    get_taxable_profit(2020)
-    plot_trades()
+    main_filename = 'trades_all.csv'
+    combine_files(main_filename)
+    get_taxable_profit(main_filename, 2020)
+    plot_trades(main_filename)
