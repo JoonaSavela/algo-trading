@@ -257,6 +257,27 @@ def trading_pipeline():
         print()
         print('Exiting trading pipeline...')
 
+        cancel_orders()
+        if buy_flag:
+            sell_assets(
+                client,
+                bull_symbol,
+                amount = 0.5,
+                round_n = 5 if m <= 1 else 4
+            )
+            time.sleep(1)
+            place_take_profit(client, bull_symbol, take_profit_long)
+
+        elif sell_flag:
+            sell_assets(
+                client,
+                bear_symbol,
+                amount = 0.5,
+                round_n = 4
+            )
+            time.sleep(1)
+            place_take_profit(client, bear_symbol, take_profit_short)
+
         # cancel_orders(client)
         total_balance, balances = get_total_balance(client, True)
         print()
