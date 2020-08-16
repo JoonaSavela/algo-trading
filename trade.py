@@ -188,6 +188,8 @@ def trading_pipeline():
 
     time_delta = 60 * 60 * aggregate
 
+    error_flag = True
+
     try:
         total_balance, balances = get_total_balance(client, True)
         print()
@@ -252,31 +254,32 @@ def trading_pipeline():
 
 
     except KeyboardInterrupt:
-        pass
+        error_flag = False
     finally:
         print()
         print('Exiting trading pipeline...')
 
-        cancel_orders()
-        if buy_flag:
-            sell_assets(
-                client,
-                bull_symbol,
-                amount = 0.5,
-                round_n = 5 if m <= 1 else 4
-            )
-            time.sleep(1)
-            place_take_profit(client, bull_symbol, take_profit_long)
+        if error_flag:
+            cancel_orders()
+            if buy_flag:
+                sell_assets(
+                    client,
+                    bull_symbol,
+                    amount = 0.5,
+                    round_n = 5 if m <= 1 else 4
+                )
+                time.sleep(1)
+                place_take_profit(client, bull_symbol, take_profit_long)
 
-        elif sell_flag:
-            sell_assets(
-                client,
-                bear_symbol,
-                amount = 0.5,
-                round_n = 4
-            )
-            time.sleep(1)
-            place_take_profit(client, bear_symbol, take_profit_short)
+            elif sell_flag:
+                sell_assets(
+                    client,
+                    bear_symbol,
+                    amount = 0.5,
+                    round_n = 4
+                )
+                time.sleep(1)
+                place_take_profit(client, bear_symbol, take_profit_short)
 
         # cancel_orders(client)
         total_balance, balances = get_total_balance(client, True)
