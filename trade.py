@@ -292,7 +292,8 @@ def trading_pipeline(buy_flag, sell_flag):
 
 if __name__ == '__main__':
     error_flag = True
-    buy_flag, sell_flag = None
+    buy_flag = None
+    sell_flag = None
 
     while error_flag:
         time.sleep(60)
