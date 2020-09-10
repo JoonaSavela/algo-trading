@@ -148,7 +148,7 @@ def cancel_orders(client):
 
 
 # TODO: move all changeable parameters into a text/json file(s)
-def trading_pipeline():
+def trading_pipeline(buy_flag, sell_flag):
     print('Starting trading pipeline...')
 
     global bull_symbol
@@ -165,23 +165,25 @@ def trading_pipeline():
     take_profit_long = params_dict['take_profit_long']
     take_profit_short = params_dict['take_profit_short']
     displacement = params_dict['displacement']
-    buy_flag = False
-    sell_flag = False
-
-    flag = input('Which event has happened? ')
-    if flag == 'buy':
-        buy_flag = True
-    elif flag == 'sell':
-        sell_flag = True
 
     debug_flag = False
 
-    debug = input('Is this a debug run? ')
-    if 'y' in debug:
-        debug_flag = True
+    if buy_flag is None and sell_flag is None:
+        buy_flag = False
+        sell_flag = False
 
-    if debug_flag:
-        print('Debug flag set')
+        flag = input('Which event has happened? ')
+        if flag == 'buy':
+            buy_flag = True
+        elif flag == 'sell':
+            sell_flag = True
+
+        debug = input('Is this a debug run? ')
+        if 'y' in debug:
+            debug_flag = True
+
+        if debug_flag:
+            print('Debug flag set')
 
     if m > 1:
         bull_symbol += 'BULL'
@@ -286,5 +288,12 @@ def trading_pipeline():
         print()
         print(balances)
 
+        return error_flag, buy_flag, sell_flag
+
 if __name__ == '__main__':
-    trading_pipeline()
+    error_flag = True
+    buy_flag, sell_flag = None
+
+    while error_flag:
+        time.sleep(60)
+        error_flag, buy_flag, sell_flag = trading_pipeline(buy_flag, sell_flag)
