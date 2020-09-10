@@ -260,7 +260,7 @@ def trading_pipeline():
         print('Exiting trading pipeline...')
 
         if error_flag:
-            cancel_orders()
+            cancel_orders(client)
             if buy_flag:
                 sell_assets(
                     client,
