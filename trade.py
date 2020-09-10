@@ -296,5 +296,6 @@ if __name__ == '__main__':
     sell_flag = None
 
     while error_flag:
-        time.sleep(60)
+        if buy_flag is not None and sell_flag is not None:
+            time.sleep(60)
         error_flag, buy_flag, sell_flag = trading_pipeline(buy_flag, sell_flag)
