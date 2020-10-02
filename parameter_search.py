@@ -28,7 +28,7 @@ def find_optimal_aggregated_strategy(
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
 
-    X_orig = load_all_data(test_files, 0)
+    X_orig = load_all_data(test_files, 1)
 
     best_reward = -np.Inf
     best_wealth = 0
@@ -124,7 +124,6 @@ def find_optimal_aggregated_strategy(
 
 
 
-# TODO: transfer changes related to X_orig and m ** 2 to parameter_search, etc.
 def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = True):
     plt.style.use('seaborn')
 
@@ -232,6 +231,126 @@ def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = Tr
         return take_profit_long, take_profit_short
 
     return take_profit_long_list, take_profit_short_list
+
+def get_micro_stop_loss(params_list, short, take_profit, N_repeat, randomize, step, verbose = True):
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    Xs = load_all_data(test_files, [0, 1])
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    stop_loss_long_list = []
+    stop_loss_short_list = []
+
+    for params in params_list:
+        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
+
+        long_sub_trade_wealths = []
+        min_long_sub_trade_wealths = []
+
+        short_sub_trade_wealths = []
+        min_short_sub_trade_wealths = []
+
+        total_months = 0
+        total_log_wealth = 0
+
+        for i, X in enumerate(Xs):
+            X_orig = X
+            if short:
+                X_bear = get_multiplied_X(X, -m_bear)
+            if m > 1:
+                X = get_multiplied_X(X, m)
+
+            for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+                rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    X1_orig = X_orig[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    X1_orig = X_orig
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1, aggregate_N)
+                X1_orig_agg = aggregate(X1_orig, aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
+
+                buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+                wealths = get_wealths(
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
+                )
+
+                if take_profit:
+                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
+                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
+
+                n_months = buys.shape[0] * aggregate_N / (24 * 30)
+                total_months += n_months
+
+                total_log_wealth += np.log(wealths[-1])
+
+                append_sub_trade_wealths(X1_agg, buys, sells, N, long_sub_trade_wealths, min_long_sub_trade_wealths)
+                append_sub_trade_wealths(X1_bear_agg, sells, buys, N, short_sub_trade_wealths, min_short_sub_trade_wealths)
+
+        stop_losses_long = np.arange(0.0, 1.0, step)
+        stop_loss_wealths_long = np.array(list(map(lambda x: get_stop_loss_wealths_from_sub_trades(long_sub_trade_wealths, min_long_sub_trade_wealths, x, total_months, commissions, spread if m <= 1.0 else spread_bull), stop_losses_long)))
+
+        stop_losses_short = np.arange(0.0, 1.0, step)
+        stop_loss_wealths_short = np.array(list(map(lambda x: get_stop_loss_wealths_from_sub_trades(short_sub_trade_wealths, min_short_sub_trade_wealths, x, total_months, commissions, spread_bear), stop_losses_short)))
+
+        stop_loss_long = stop_losses_long[np.argmax(stop_loss_wealths_long)]
+        stop_loss_short = stop_losses_short[np.argmax(stop_loss_wealths_short)]
+
+        # stw = np.concatenate(short_sub_trade_wealths)
+        # plt.hist(stw, bins=100, alpha = 0.6, density=True)
+        # minstw = np.concatenate(min_short_sub_trade_wealths)
+        # stw[minstw < stop_loss_short] = stop_loss_short * (1 - commissions - spread) ** 2
+        # plt.hist(stw, bins=100, alpha = 0.6, density=True)
+        # plt.show()
+
+        if verbose:
+            print(stop_loss_long, stop_loss_short)
+
+            stop_loss_wealth = get_stop_loss_wealths_from_sub_trades(long_sub_trade_wealths, min_long_sub_trade_wealths, stop_loss_long, total_months, commissions, spread if m <= 1.0 else spread_bull) * \
+                get_stop_loss_wealths_from_sub_trades(short_sub_trade_wealths, min_short_sub_trade_wealths, stop_loss_short, total_months, commissions, spread_bear)
+            print(stop_loss_wealth, stop_loss_wealth ** 12)
+            wealth = np.exp(total_log_wealth / total_months)
+            print(wealth, wealth ** 12)
+            print()
+
+            plt.plot(stop_losses_long, stop_loss_wealths_long ** 12, 'g')
+            plt.plot(stop_losses_short, stop_loss_wealths_short ** 12, 'r')
+            plt.show()
+
+        stop_loss_long_list.append(stop_loss_long)
+        stop_loss_short_list.append(stop_loss_short)
+
+    if len(stop_loss_long_list) == 1:
+        return stop_loss_long, stop_loss_short
+
+    return stop_loss_long_list, stop_loss_short_list
+
 
 def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, randomize = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
@@ -521,7 +640,7 @@ if __name__ == '__main__':
 
     plot_performance([
                         params + take_profits,
-                        (3, 16, 1, 3, 1.2, 2.14),
+                        # (3, 16, 1, 3, 1.2, 2.14),
                         (3, 16, 3, 3, 1.69, 2.13),
                       ],
                       N_repeat = 500,
