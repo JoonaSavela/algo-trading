@@ -4,6 +4,7 @@ from data import *
 import numpy as np
 import pandas as pd
 import time
+from datetime import datetime
 from utils import *
 from model import *
 from optimize import *
@@ -11,8 +12,13 @@ from tqdm import tqdm
 from parameter_search import *
 from parameters import commissions, spread, spread_bear, spread_bull
 from itertools import product
+import matplotlib.animation as animation
+
+
 
 # TODO: train a (bayesian) NN on the (aggregated) data
+
+# TODO: train a network for predicitng the optimal take profit parameter(s)
 
 # TODO: find take profit parameters using highs instead of closes
 
@@ -22,42 +28,33 @@ from itertools import product
 
 # TODO: make algorithm long-biased (but tries short side frequently)
 
-def get_trade_lengths(entries, exits, N):
-    entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
+# TODO: detect when different take profit peaks are the most likely
 
-    res = []
+# TODO: make a "daily" script that saves new optimal values periodically
 
-    for entry_i in entries_idx:
-        larger_exits_idx = exits_idx[exits_idx > entry_i]
-        exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
-        res.append(exit_i - entry_i)
+# TODO: add comments; improve readability
+
+def calculate_optimal_take_profit(take_profit_options, trade_wealths, max_trade_wealths):
+    take_profit_options.sort()
+    res = np.ones((trade_wealths.shape[0],)) * take_profit_options[0]
+
+    for take_profit in take_profit_options[1:]:
+        li = max_trade_wealths > take_profit
+        res[li] = take_profit
 
     return res
 
-def get_extreme_prices_within_ma(X_orig_agg, entries, exits, N, w, long = True):
+def get_something(something, entries, exits, N):
     entries_idx, _ = get_entry_and_exit_idx(entries, exits, N)
 
-    res = []
+    return something[entries_idx]
 
-    for entry_i in entries_idx:
-        idx = np.arange(entry_i, entry_i + w)
-        if long:
-            extreme_i = np.argmax(X_orig_agg[idx, 0])
-        else:
-            extreme_i = np.argmin(X_orig_agg[idx, 0])
-        extreme = (X_orig_agg[idx[extreme_i], 0] / X_orig_agg[idx[-1], 0]) ** (1 / (extreme_i + 1))
-        res.append(extreme)
-
-    return res
-
+# Try to predict take_profit_short based on volatility (standard deviation)
 def asdf():
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
     test_files.sort(key = get_time)
-
-    X = load_all_data(test_files, 0)
-    X_orig = X
 
     aggregate_N, w, m, m_bear = (3, 16, 3, 3)
     N_repeat = 100
@@ -65,76 +62,161 @@ def asdf():
 
     long_trade_wealths = []
     max_long_trade_wealths = []
-    long_trade_lengths = []
-    long_trade_extremes = []
 
     short_trade_wealths = []
     max_short_trade_wealths = []
-    short_trade_lengths = []
-    short_trade_extremes = []
 
-    X_bear = get_multiplied_X(X, -m_bear)
-    if m > 1:
-        X = get_multiplied_X(X, m)
+    short_stds = []
 
-    for n in tqdm(range(N_repeat), disable = N_repeat == 1):
-        rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
-        if rand_N > 0:
-            X1 = X[:-rand_N, :]
-            X1_orig = X_orig[:-rand_N, :]
-            X1_bear = X_bear[:-rand_N, :]
-        else:
-            X1 = X
-            X1_orig = X_orig
-            X1_bear = X_bear
-        X1_agg = aggregate(X1, aggregate_N)
-        X1_orig_agg = aggregate(X1_orig, aggregate_N)
-        X1_bear_agg = aggregate(X1_bear, aggregate_N)
+    Xs = load_all_data(test_files, [0, 1])
 
-        buys, sells, N = get_buys_and_sells(X1_orig_agg, w, True)
+    if not isinstance(Xs, list):
+        Xs = [Xs]
 
-        X1_agg = X1_agg[-N:, :]
-        X1_bear_agg = X1_bear_agg[-N:, :]
+    for X in Xs:
+        X_orig = X
 
-        wealths = get_wealths(
-            X1_agg,
-            buys,
-            sells,
-            commissions = commissions,
-            spread_bull = spread if m <= 1.0 else spread_bull,
-            X_bear = X1_bear_agg,
-            spread_bear = spread_bear
-        )
+        X_bear = get_multiplied_X(X, -m_bear)
+        if m > 1:
+            X = get_multiplied_X(X, m)
 
-        append_trade_wealths(wealths, buys, sells, N, long_trade_wealths, max_long_trade_wealths)
-        append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
+        for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+            rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+            if rand_N > 0:
+                X1 = X[:-rand_N, :]
+                X1_orig = X_orig[:-rand_N, :]
+                X1_bear = X_bear[:-rand_N, :]
+            else:
+                X1 = X
+                X1_orig = X_orig
+                X1_bear = X_bear
+            X1_agg = aggregate(X1, aggregate_N)
+            X1_orig_agg = aggregate(X1_orig, aggregate_N)
+            X1_bear_agg = aggregate(X1_bear, aggregate_N)
 
-        long_trade_lengths1 = get_trade_lengths(buys, sells, N)
-        long_trade_lengths.extend(long_trade_lengths1)
-        short_trade_lengths1 = get_trade_lengths(sells, buys, N)
-        short_trade_lengths.extend(short_trade_lengths1)
+            buys, sells, N, std = get_buys_and_sells(X1_orig_agg, w, return_std = True)
 
-        long_extremes = get_extreme_prices_within_ma(X1_orig_agg, buys, sells, N, w, long = True)
-        long_trade_extremes.extend(long_extremes)
-        short_extremes = get_extreme_prices_within_ma(X1_orig_agg, sells, buys, N, w, long = False)
-        short_trade_extremes.extend(short_extremes)
+            X1_agg = X1_agg[-N:, :]
+            X1_bear_agg = X1_bear_agg[-N:, :]
 
-    print(np.corrcoef(long_trade_extremes, long_trade_wealths))
-    print(np.corrcoef(short_trade_extremes, short_trade_wealths))
+            wealths = get_wealths(
+                X1_agg,
+                buys,
+                sells,
+                commissions = commissions,
+                spread_bull = spread if m <= 1.0 else spread_bull,
+                X_bear = X1_bear_agg,
+                spread_bear = spread_bear
+            )
 
-    plt.plot(long_trade_extremes, long_trade_wealths, 'g.', markersize = 3)
-    # plt.plot(long_trade_extremes, max_long_trade_wealths, 'g.')
-    # plt.plot(long_trade_extremes, long_trade_lengths, 'g.')
-    # plt.plot(long_trade_lengths, long_trade_wealths, 'g.')
-    # plt.plot(long_trade_lengths, max_long_trade_wealths, 'c.')
-    # plt.show()
+            append_trade_wealths(wealths, buys, sells, N, long_trade_wealths, max_long_trade_wealths)
+            append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
 
-    plt.plot(short_trade_extremes, short_trade_wealths, 'r.', markersize = 3)
-    # plt.plot(short_trade_extremes, max_short_trade_wealths, 'r.')
-    # plt.plot(short_trade_extremes, short_trade_lengths, 'r.')
-    # plt.plot(short_trade_lengths, short_trade_wealths, 'r.')
-    # plt.plot(short_trade_lengths, max_short_trade_wealths, 'm.')
+            short_std = get_something(std, sells, buys, N)
+            short_stds.extend(short_std)
+
+    short_trade_wealths = np.array(short_trade_wealths)
+    max_short_trade_wealths = np.array(max_short_trade_wealths)
+    # take_profit_options = np.array([1.69, 2.13])
+    take_profit_options = max_short_trade_wealths
+    # print(take_profit_options)
+    optimal_take_profits = calculate_optimal_take_profit(take_profit_options, short_trade_wealths, max_short_trade_wealths)
+
+    short_stds = np.array(short_stds)
+    if take_profit_options.shape[0] <= 4:
+        for take_profit in take_profit_options:
+            plt.hist(
+                short_stds[optimal_take_profits == take_profit],
+                np.sqrt(N_repeat).astype(int) * 2,
+                density = True,
+                alpha = 0.9 / np.sqrt(take_profit_options.shape[0])
+            )
+    else:
+        plt.plot(short_stds, optimal_take_profits, '.', alpha = 0.25)
     plt.show()
+
+# Try to predict expected return based on volatility (standard deviation)
+def asdf2():
+    plt.style.use('seaborn')
+
+    test_files = glob.glob('data/ETH/*.json')
+    test_files.sort(key = get_time)
+
+    aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = (3, 16, 3, 3, 1.69, 2.13)
+    N_repeat = 100
+    randomize = True
+
+    long_trade_wealths = []
+    max_long_trade_wealths = []
+
+    short_trade_wealths = []
+    max_short_trade_wealths = []
+
+    short_stds = []
+    long_stds = []
+
+    Xs = load_all_data(test_files, [0, 1])
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    for X in Xs:
+        X_orig = X
+
+        X_bear = get_multiplied_X(X, -m_bear)
+        if m > 1:
+            X = get_multiplied_X(X, m)
+
+        for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+            rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
+            if rand_N > 0:
+                X1 = X[:-rand_N, :]
+                X1_orig = X_orig[:-rand_N, :]
+                X1_bear = X_bear[:-rand_N, :]
+            else:
+                X1 = X
+                X1_orig = X_orig
+                X1_bear = X_bear
+            X1_agg = aggregate(X1, aggregate_N)
+            X1_orig_agg = aggregate(X1_orig, aggregate_N)
+            X1_bear_agg = aggregate(X1_bear, aggregate_N)
+
+            buys, sells, N, std = get_buys_and_sells(X1_orig_agg, w, return_std = True)
+
+            X1_agg = X1_agg[-N:, :]
+            X1_bear_agg = X1_bear_agg[-N:, :]
+
+            wealths = get_wealths(
+                X1_agg,
+                buys,
+                sells,
+                commissions = commissions,
+                spread_bull = spread if m <= 1.0 else spread_bull,
+                X_bear = X1_bear_agg,
+                spread_bear = spread_bear
+            )
+
+            append_trade_wealths(wealths, buys, sells, N, long_trade_wealths, max_long_trade_wealths)
+            append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
+
+            short_std = get_something(std, sells, buys, N)
+            short_stds.extend(short_std)
+
+            long_std = get_something(std, buys, sells, N)
+            long_stds.extend(long_std)
+
+    long_trade_wealths = get_take_profit_wealths_from_trades(long_trade_wealths, max_long_trade_wealths, take_profit_long, 1, commissions, spread if m <= 1.0 else spread_bull, return_total = False)
+    short_trade_wealths = get_take_profit_wealths_from_trades(short_trade_wealths, max_short_trade_wealths, take_profit_short, 1, commissions, spread_bear, return_total = False)
+
+    long_stds = np.array(long_stds)
+    short_stds = np.array(short_stds)
+
+    plt.plot(long_stds, long_trade_wealths, 'g.', alpha = 0.1)
+    plt.show()
+    plt.plot(short_stds, short_trade_wealths, 'r.', alpha = 0.1)
+    plt.show()
+
+
 
 
 def wave_visualizer(params, short = True, take_profit = True):
@@ -179,33 +261,73 @@ def wave_visualizer(params, short = True, take_profit = True):
     plt.show()
 
 
+
+def try_rounding_hours():
+    seconds = time.time()
+    localtime = time.localtime(seconds)
+    now_string = time.strftime("%d/%m/%Y %H:%M:%S", localtime)
+    print(now_string)
+    timeTo = time.mktime(datetime.strptime(now_string[:-6], "%d/%m/%Y %H").timetuple())
+    print(timeTo)
+    print(time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(timeTo)))
+    print()
+
+    seconds = timeTo + 45 * 60
+    localtime = time.localtime(seconds)
+    now_string = time.strftime("%d/%m/%Y %H:%M:%S", localtime)
+    print(now_string)
+
+    seconds += (59 - 44) * 60
+    localtime = time.localtime(seconds)
+    now_string = time.strftime("%d/%m/%Y %H:%M:%S", localtime)
+    timeTo = time.mktime(datetime.strptime(now_string[:-6], "%d/%m/%Y %H").timetuple())
+    print(timeTo)
+    print(time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(timeTo)))
+
+
 def main():
-    # asdf()
+    # TODO: visualize this
+    # TODO: combine with take profit?
+    # 0.0 0.98 optimal
+    get_micro_stop_loss(
+        [
+            (3, 16, 3, 3, 1.69, 2.13),
+        ],
+        short = True,
+        take_profit = False,
+        N_repeat = 400,
+        randomize = True,
+        step = 0.005,
+        verbose = True)
+
+    # asdf2()
     # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
 
     # take_profit_long, take_profit_short = \
     # get_take_profits([
     #                     # (4, 12, 1, 3),
-    #                     (3, 16, 1, 3),
+    #                     # (4, 12, 3, 3),
+    #                     # (3, 16, 1, 3),
     #                     (3, 16, 3, 3), # best
     #                   ],
     #                   short = True,
-    #                   N_repeat = 500,
+    #                   N_repeat = 400,
     #                   randomize = True,
     #                   step = 0.01,
     #                   verbose = True)
 
-    plot_performance([
-                        (3, 16, 1, 3, 1.2, 2.14),
-                        (3, 16, 3, 3, 1.69, 2.13), # best
-                        # (4, 12, 1, 3, 1.19, 2.14),
-                      ],
-                      N_repeat = 1,
-                      short = True,
-                      take_profit = True)
+    # plot_performance([
+    #                     (3, 16, 1, 3, 1.2, 2.14),
+    #                     (3, 16, 3, 3, 1.69, 2.13), # best
+    #                     # (4, 12, 1, 3, 1.19, 2.14),
+    #                   ],
+    #                   N_repeat = 1,
+    #                   short = True,
+    #                   take_profit = True,
+    #                   Xs_index = [0, 1])
 
     # plot_displacement([
-    #                     (3, 16, 1, 3, 1.2, 2.14), # best
+    #                     # (3, 16, 1, 3, 1.2, 2.14),
     #                     (3, 16, 3, 3, 1.69, 2.13),
     #                   ])
 
