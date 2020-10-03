@@ -106,19 +106,33 @@ def get_stop_loss_wealths_from_sub_trades(sub_trade_wealths, min_sub_trade_wealt
 
     return trade_wealths
 
-def transform_wealths(wealths, entries, exits, N, take_profit, commissions, spread):
+def transform_wealths(wealths, X, entries, exits, N, take_profit, stop_loss, commissions, spread):
+    assert(take_profit == np.Inf or stop_loss == 0)
     entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
 
     for entry_i in entries_idx:
         larger_exits_idx = exits_idx[exits_idx > entry_i]
         exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
-        sub_wealths = wealths[entry_i:exit_i]
-        li = sub_wealths / sub_wealths[0] > take_profit
-        if np.any(li):
-            first_i = np.arange(entry_i, exit_i)[li][0]
-            old_wealth = wealths[exit_i - 1]
-            wealths[first_i:exit_i] = wealths[entry_i] * take_profit * (1 - commissions - spread)
-            wealths[exit_i:] *= wealths[exit_i - 1] / old_wealth
+
+        # Process take_profit
+        if take_profit != np.Inf:
+            sub_wealths = wealths[entry_i:exit_i]
+            li = sub_wealths / sub_wealths[0] > take_profit
+            if np.any(li):
+                first_i = np.arange(entry_i, exit_i)[li][0]
+                old_wealth = wealths[exit_i - 1]
+                wealths[first_i:exit_i] = wealths[entry_i] * take_profit * (1 - commissions - spread)
+                wealths[exit_i:] *= wealths[exit_i - 1] / old_wealth
+
+        # Process stop_loss
+        if stop_loss != 0:
+            sub_X = X[entry_i:exit_i, :]
+            li = sub_X[1:, 2] / sub_X[:-1, 0] < stop_loss
+            for i in np.arange(entry_i + 1, exit_i)[li]:
+                old_wealth = wealths[i]
+                wealths[i:] *= wealths[i - 1] * stop_loss * (1 - commissions - spread) ** 2 / old_wealth
+
+
 
 if __name__ == '__main__':
     pass

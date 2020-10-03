@@ -286,19 +286,18 @@ def try_rounding_hours():
 
 
 def main():
-    # TODO: visualize this
     # TODO: combine with take profit?
     # 0.0 0.98 optimal
-    get_micro_stop_loss(
-        [
-            (3, 16, 3, 3, 1.69, 2.13),
-        ],
-        short = True,
-        take_profit = False,
-        N_repeat = 400,
-        randomize = True,
-        step = 0.005,
-        verbose = True)
+    # sll, sls = get_stop_loss(
+    #     [
+    #         # (3, 16, 1, 3),
+    #         (3, 16, 3, 3),
+    #     ],
+    #     short = True,
+    #     N_repeat = 100,
+    #     randomize = True,
+    #     step = 0.005,
+    #     verbose = True)
 
     # asdf2()
     # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
@@ -316,20 +315,22 @@ def main():
     #                   step = 0.01,
     #                   verbose = True)
 
-    # plot_performance([
-    #                     (3, 16, 1, 3, 1.2, 2.14),
-    #                     (3, 16, 3, 3, 1.69, 2.13), # best
-    #                     # (4, 12, 1, 3, 1.19, 2.14),
-    #                   ],
-    #                   N_repeat = 1,
-    #                   short = True,
-    #                   take_profit = True,
-    #                   Xs_index = [0, 1])
+    plot_performance([
+                        (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
+                        (3, 16, 3, 3, 1.69, np.Inf, 0, 0.98), # best
+                        # (3, 16, 3, 3, 1.69, 2.13), # best
+                        # (4, 12, 1, 3, 1.19, 2.14),
+                      ],
+                      N_repeat = 200,
+                      short = True,
+                      take_profit = True,
+                      stop_loss = True,
+                      Xs_index = [0, 1])
 
-    # plot_displacement([
-    #                     # (3, 16, 1, 3, 1.2, 2.14),
-    #                     (3, 16, 3, 3, 1.69, 2.13),
-    #                   ])
+    plot_displacement([
+                        # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
+                        (3, 16, 3, 3, 1.69, np.Inf, 0, 0.98), # best
+                      ])
 
 
 

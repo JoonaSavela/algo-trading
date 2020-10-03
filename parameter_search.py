@@ -227,12 +227,12 @@ def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = Tr
         take_profit_long_list.append(take_profit_long)
         take_profit_short_list.append(take_profit_short)
 
-    if len(take_profit_long_list) == 1:
+    if len(params_list) == 1:
         return take_profit_long, take_profit_short
 
     return take_profit_long_list, take_profit_short_list
 
-def get_micro_stop_loss(params_list, short, take_profit, N_repeat, randomize, step, verbose = True):
+def get_stop_loss(params_list, short, N_repeat, randomize, step, verbose = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -247,7 +247,7 @@ def get_micro_stop_loss(params_list, short, take_profit, N_repeat, randomize, st
     stop_loss_short_list = []
 
     for params in params_list:
-        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
+        aggregate_N, w, m, m_bear = params
 
         long_sub_trade_wealths = []
         min_long_sub_trade_wealths = []
@@ -301,10 +301,6 @@ def get_micro_stop_loss(params_list, short, take_profit, N_repeat, randomize, st
                     spread_bear = spread_bear
                 )
 
-                if take_profit:
-                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
-                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
-
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
                 total_months += n_months
 
@@ -346,13 +342,13 @@ def get_micro_stop_loss(params_list, short, take_profit, N_repeat, randomize, st
         stop_loss_long_list.append(stop_loss_long)
         stop_loss_short_list.append(stop_loss_short)
 
-    if len(stop_loss_long_list) == 1:
+    if len(params_list) == 1:
         return stop_loss_long, stop_loss_short
 
     return stop_loss_long_list, stop_loss_short_list
 
 
-def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, randomize = True, Xs_index = [0, 1]):
+def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, stop_loss = True, randomize = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -369,7 +365,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         Xs = [Xs]
 
     for i, params in enumerate(params_list):
-        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
+        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = params
         print(params)
 
         total_log_wealths = []
@@ -428,9 +424,9 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     spread_bear = spread_bear
                 )
 
-                if take_profit:
-                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
-                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
+                if take_profit or stop_loss:
+                    transform_wealths(wealths, X_agg, buys, sells, N, take_profit_long, stop_loss_long, commissions, spread if m <= 1.0 else spread_bull)
+                    transform_wealths(wealths, X_bear_agg, sells, buys, N, take_profit_short, stop_loss_short, commissions, spread_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
                 dropdown, I, J = get_max_dropdown(wealths, True)
@@ -506,7 +502,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     plt.show()
 
-def plot_displacement(params_list, short = True, take_profit = True, Xs_index = [0, 1]):
+def plot_displacement(params_list, short = True, take_profit = True, stop_loss = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -525,7 +521,7 @@ def plot_displacement(params_list, short = True, take_profit = True, Xs_index = 
         time1 = [time1]
 
     for params in params_list:
-        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short = params
+        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = params
 
         wealth_lists = []
         for i, X in enumerate(Xs):
@@ -574,9 +570,9 @@ def plot_displacement(params_list, short = True, take_profit = True, Xs_index = 
                     spread_bear = spread_bear
                 )
 
-                if take_profit:
-                    transform_wealths(wealths, buys, sells, N, take_profit_long, commissions, spread if m <= 1.0 else spread_bull)
-                    transform_wealths(wealths, sells, buys, N, take_profit_short, commissions, spread_bear)
+                if take_profit or stop_loss:
+                    transform_wealths(wealths, X1_agg, buys, sells, N, take_profit_long, stop_loss_long, commissions, spread if m <= 1.0 else spread_bull)
+                    transform_wealths(wealths, X1_bear_agg, sells, buys, N, take_profit_short, stop_loss_short, commissions, spread_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
 
