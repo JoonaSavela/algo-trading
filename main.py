@@ -22,17 +22,13 @@ import matplotlib.animation as animation
 
 # TODO: find take profit parameters using highs instead of closes
 
-# TODO: try stop loss orders (must use lows)
-
-# TODO: make take profit parameters dependent on long term trend (e.g. 5-10x w)
-
-# TODO: make algorithm long-biased (but tries short side frequently)
-
-# TODO: detect when different take profit peaks are the most likely
+# TODO: make a generator for calculating wealths
 
 # TODO: make a "daily" script that saves new optimal values periodically
 
 # TODO: add comments; improve readability
+
+# TODO: combine get_take_profit with get_stop_loss
 
 def calculate_optimal_take_profit(take_profit_options, trade_wealths, max_trade_wealths):
     take_profit_options.sort()
@@ -286,7 +282,6 @@ def try_rounding_hours():
 
 
 def main():
-    # TODO: combine with take profit?
     # 0.0 0.98 optimal
     # sll, sls = get_stop_loss(
     #     [
@@ -303,7 +298,7 @@ def main():
     # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
 
     # take_profit_long, take_profit_short = \
-    # get_take_profits([
+    # get_take_profit([
     #                     # (4, 12, 1, 3),
     #                     # (4, 12, 3, 3),
     #                     # (3, 16, 1, 3),

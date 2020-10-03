@@ -124,7 +124,7 @@ def find_optimal_aggregated_strategy(
 
 
 
-def get_take_profits(params_list, short, N_repeat, randomize, step, verbose = True):
+def get_take_profit(params_list, short, N_repeat, randomize, step, verbose = True):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -625,7 +625,7 @@ if __name__ == '__main__':
                 short = short,
     )
 
-    take_profits = get_take_profits([
+    take_profits = get_take_profit([
                         params
                       ],
                       short = short,
