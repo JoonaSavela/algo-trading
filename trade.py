@@ -128,6 +128,20 @@ def place_take_profit(client, symbol, take_profit):
     )
     time.sleep(0.05)
 
+def place_stop_loss(client, symbol, stop_loss):
+    price = ftx_price(client, symbol)
+    balance = float(asset_balance(client, symbol))
+    symbol += '/' +  source_symbol
+
+    client.place_conditional_order(
+        market = symbol,
+        side = 'sell',
+        size = balance,
+        order_type = 'stop',
+        trigger_price = price * stop_loss
+    )
+    time.sleep(0.05)
+
 
 def wait(time_delta, initial_time, verbose = False):
     time_diff = time.time() - initial_time
@@ -164,6 +178,8 @@ def trading_pipeline(buy_flag, sell_flag):
     m_bear = params_dict['m_bear']
     take_profit_long = params_dict['take_profit_long']
     take_profit_short = params_dict['take_profit_short']
+    stop_loss_long = params_dict['stop_loss_long']
+    stop_loss_short = params_dict['stop_loss_short']
     displacement = params_dict['displacement']
 
     debug_flag = False
@@ -229,7 +245,8 @@ def trading_pipeline(buy_flag, sell_flag):
                 ):
                 cancel_orders(client)
                 buy_assets_short(client, m, balance_short / total_balance, min_amount)
-                place_take_profit(client, bull_symbol, take_profit_long)
+                if take_profit_long != np.Inf and stop_loss_long == 0:
+                    place_take_profit(client, bull_symbol, take_profit_long)
                 action = 'BUY'
                 buy_flag = True
                 sell_flag = False
@@ -239,10 +256,19 @@ def trading_pipeline(buy_flag, sell_flag):
                 ):
                 cancel_orders(client)
                 sell_assets_short(client, m, m_bear, balance_target / total_balance, min_amount)
-                place_take_profit(client, bear_symbol, take_profit_short)
+                if take_profit_short != np.Inf and stop_loss_short == 0:
+                    place_take_profit(client, bear_symbol, take_profit_short)
                 action = 'SELL'
                 buy_flag = False
                 sell_flag = True
+
+            if buy_flag and stop_loss_long > 0 and take_profit_long == np.Inf:
+                cancel_orders(client)
+                place_stop_loss(client, bull_symbol, stop_loss_long)
+
+            if sell_flag and stop_loss_short > 0 and take_profit_short == np.Inf:
+                cancel_orders(client)
+                place_stop_loss(client, bear_symbol, stop_loss_short)
 
 
             if action != 'DO NOTHING':
@@ -271,7 +297,10 @@ def trading_pipeline(buy_flag, sell_flag):
                     round_n = 5 if m <= 1 else 4
                 )
                 time.sleep(1)
-                place_take_profit(client, bull_symbol, take_profit_long)
+                if take_profit_long != np.Inf and stop_loss_long == 0:
+                    place_take_profit(client, bull_symbol, take_profit_long)
+                if stop_loss_long > 0 and take_profit_long == np.Inf:
+                    place_stop_loss(client, bull_symbol, stop_loss_long)
 
             elif sell_flag:
                 sell_assets(
@@ -281,9 +310,11 @@ def trading_pipeline(buy_flag, sell_flag):
                     round_n = 4
                 )
                 time.sleep(1)
-                place_take_profit(client, bear_symbol, take_profit_short)
+                if take_profit_short != np.Inf and stop_loss_short == 0:
+                    place_take_profit(client, bear_symbol, take_profit_short)
+                if stop_loss_short > 0 and take_profit_short == np.Inf:
+                    place_stop_loss(client, bear_symbol, stop_loss_short)
 
-        # cancel_orders(client)
         total_balance, balances = get_total_balance(client, True)
         print()
         print(balances)
