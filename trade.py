@@ -181,6 +181,8 @@ def trading_pipeline(buy_flag, sell_flag):
     stop_loss_long = params_dict['stop_loss_long']
     stop_loss_short = params_dict['stop_loss_short']
     displacement = params_dict['displacement']
+    use_stop_loss_long = stop_loss_long > 0 and take_profit_long == np.Inf
+    use_stop_loss_short = stop_loss_short > 0 and take_profit_short == np.Inf
 
     debug_flag = False
 
@@ -239,34 +241,34 @@ def trading_pipeline(buy_flag, sell_flag):
             price = X[-1, 0]
             action = 'DO NOTHING'
 
-            if buy and not buy_flag and not debug_flag and (
+            if buy and (not buy_flag or use_stop_loss_long) and not debug_flag and (
                     balance_source / total_balance > min_amount or
                     balance_short / total_balance > min_amount
                 ):
                 cancel_orders(client)
                 buy_assets_short(client, m, balance_short / total_balance, min_amount)
-                if take_profit_long != np.Inf and stop_loss_long == 0:
+                if not use_stop_loss_long:
                     place_take_profit(client, bull_symbol, take_profit_long)
                 action = 'BUY'
                 buy_flag = True
                 sell_flag = False
-            elif sell and not sell_flag and not debug_flag and (
+            elif sell and (not sell_flag or use_stop_loss_short) and not debug_flag and (
                     balance_target / total_balance > min_amount or
                     balance_source / total_balance > min_amount
                 ):
                 cancel_orders(client)
                 sell_assets_short(client, m, m_bear, balance_target / total_balance, min_amount)
-                if take_profit_short != np.Inf and stop_loss_short == 0:
+                if not use_stop_loss_short:
                     place_take_profit(client, bear_symbol, take_profit_short)
                 action = 'SELL'
                 buy_flag = False
                 sell_flag = True
 
-            if buy_flag and stop_loss_long > 0 and take_profit_long == np.Inf:
+            if buy_flag and use_stop_loss_long:
                 cancel_orders(client)
                 place_stop_loss(client, bull_symbol, stop_loss_long)
 
-            if sell_flag and stop_loss_short > 0 and take_profit_short == np.Inf:
+            if sell_flag and use_stop_loss_short:
                 cancel_orders(client)
                 place_stop_loss(client, bear_symbol, stop_loss_short)
 
