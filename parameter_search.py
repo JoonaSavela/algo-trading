@@ -408,6 +408,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                 buys, sells, N = get_buys_and_sells(X_orig_agg, w)
 
                 X_agg = X_agg[-N:, :]
+                X_orig_agg = X_orig_agg[-N:, :]
                 if short:
                     X_bear_agg = X_bear_agg[-N:, :]
                 X = X[-aggregate_N * 60 * N:, :]
@@ -448,7 +449,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                         buys_li = buys_diff == 1.0
                         sells_li = buys_diff == -1.0
                         idx = np.arange(N)
-                        plt.plot(t, X_agg[:, 0] / X_agg[0, 0] * prev_price, c='k', alpha=0.5)
+                        plt.plot(t, X_orig_agg[:, 0] / X_orig_agg[0, 0] * prev_price, c='k', alpha=0.5)
                         # plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
                         # plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
 
@@ -461,13 +462,14 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
                 total_log_wealth += np.log(wealths[-1])
                 total_log_dropdown += np.log(dropdown)
-                prev_price *= X[-1, 0] / X[0, 0]
+                prev_price *= X_orig_agg[-1, 0] / X_orig_agg[0, 0]
                 total_months1 += n_months
 
             total_log_wealths.append(total_log_wealth)
             total_log_dropdowns.append(total_log_dropdown)
             total_months.append(total_months1)
 
+        total_months_array = np.array(total_months)
         total_months = np.sum(total_months)
         total_wealth = np.exp(np.sum(total_log_wealths) / total_months)
         total_dropdown = np.exp(np.sum(total_log_dropdowns) / total_months)
@@ -485,7 +487,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
         if N_repeat > 1:
             ax[0].hist(
-                np.array(total_log_wealths) / np.array(total_months) * 12,
+                np.array(total_log_wealths) * 12 / total_months_array,
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
                 alpha=0.9 / np.sqrt(len(params_list)),
@@ -493,7 +495,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
             )
             # ax[0].set_xscale('log')
             ax[1].hist(
-                np.exp((np.array(total_log_wealths) + np.array(total_log_dropdowns)) / np.array(total_months)),
+                np.exp((np.array(total_log_wealths) + np.array(total_log_dropdowns)) / total_months_array),
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
                 alpha=0.9 / np.sqrt(len(params_list)),
