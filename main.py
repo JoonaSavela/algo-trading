@@ -294,6 +294,17 @@ def main():
     #     step = 0.005,
     #     verbose = True)
 
+    # get_stop_loss_and_take_profit(
+    #     [
+    #         # (3, 16, 1, 3),
+    #         (3, 16, 3, 3),
+    #     ],
+    #     short = True,
+    #     N_repeat = 100,
+    #     randomize = True,
+    #     step = 0.005,
+    #     verbose = True)
+
     # asdf2()
     # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
 
@@ -305,27 +316,28 @@ def main():
     #                     (3, 16, 3, 3), # best
     #                   ],
     #                   short = True,
-    #                   N_repeat = 400,
+    #                   N_repeat = 200,
     #                   randomize = True,
     #                   step = 0.01,
     #                   verbose = True)
 
     plot_performance([
-                        (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
-                        (3, 16, 3, 3, 1.69, np.Inf, 0, 0.98), # best
-                        # (3, 16, 3, 3, 1.69, 2.13), # best
-                        # (4, 12, 1, 3, 1.19, 2.14),
+                        # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
+                        (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
+                        (3, 16, 3, 3, 1.79, 2.13, 0, 0),
                       ],
-                      N_repeat = 200,
+                      N_repeat = 300,
                       short = True,
                       take_profit = True,
                       stop_loss = True,
-                      Xs_index = [0, 1])
+                      Xs_index = [1],
+                      N_ts_plots = 10,
+                      last_N_to_plot = 60 * 24 * 60)
 
-    plot_displacement([
-                        # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
-                        (3, 16, 3, 3, 1.69, np.Inf, 0, 0.98), # best
-                      ])
+    # plot_displacement([
+    #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
+    #                     (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
+    #                   ])
 
 
 

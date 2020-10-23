@@ -503,7 +503,7 @@ def get_stop_loss_and_take_profit(params_list, short, N_repeat, randomize, step,
     return take_profit_long_list, take_profit_short_list, stop_loss_long_list, stop_loss_short_list
 
 
-def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, stop_loss = True, randomize = True, Xs_index = [0, 1]):
+def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, stop_loss = True, randomize = True, Xs_index = [0, 1], N_ts_plots = 10, last_N_to_plot = None):
     plt.style.use('seaborn')
 
     test_files = glob.glob('data/ETH/*.json')
@@ -513,11 +513,14 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     Xs = load_all_data(test_files, Xs_index)
 
-    if N_repeat > 1:
+    if N_repeat > N_ts_plots:
         fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = [6.4 * 2, 4.8])
 
     if not isinstance(Xs, list):
         Xs = [Xs]
+
+    if last_N_to_plot is not None:
+        Xs = [X[-last_N_to_plot:, :] for X in Xs]
 
     for i, params in enumerate(params_list):
         aggregate_N, w, m, m_bear, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = params
@@ -529,7 +532,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         total_log_dropdowns = []
         total_months = []
 
-        for n in tqdm(range(N_repeat), disable = N_repeat == 1):
+        for n in tqdm(range(N_repeat), disable = N_repeat <= N_ts_plots):
             prev_price = 1.0
             count = 0
             total_log_wealth = 0
@@ -589,17 +592,17 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
                 wealth = wealths[-1] ** (1 / n_months)
 
-                if N_repeat == 1:
-                    print(wealth, wealth ** 12)
-                    # dropdown = dropdown ** (1 / n_months)
-                    # print(dropdown, wealth * dropdown)
+                # if N_repeat <= N_ts_plots:
+                #     print(wealth, wealth ** 12)
+                #     # dropdown = dropdown ** (1 / n_months)
+                #     # print(dropdown, wealth * dropdown)
 
                 t = np.arange(N) + count
                 t *= aggregate_N * 60
                 count += N
 
-                if N_repeat == 1:
-                    if i == 0:
+                if N_repeat <= N_ts_plots:
+                    if i == 0 and n == 0:
                         buys_diff = np.diff(np.concatenate([np.array([0]), buys]))
                         buys_li = buys_diff == 1.0
                         sells_li = buys_diff == -1.0
@@ -612,7 +615,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     total_wealths_list.append(total_wealths)
                     t_list.append(t)
                     plt.plot(t, total_wealths, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
-                    plt.plot(t[[I, J]], total_wealths[[I, J]], 'r.', alpha=0.85, markersize=15)
+                    # plt.plot(t[[I, J]], total_wealths[[I, J]], 'r.', alpha=0.85, markersize=15)
                     plt.yscale('log')
 
                 total_log_wealth += np.log(wealths[-1])
@@ -630,17 +633,17 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         total_dropdown = np.exp(np.sum(total_log_dropdowns) / total_months)
         print()
         print(total_wealth, total_wealth ** 12)
-        print(total_dropdown, total_wealth * total_dropdown)
-        if N_repeat == 1 and len(params_list) == 1:
-            total_wealths = np.concatenate(total_wealths_list)
-            t = np.concatenate(t_list)
-            monthly_returns = total_wealths ** (1 / ((np.arange(total_wealths.shape[0]) + 1) * aggregate_N / (24 * 30)))
-            plt.plot(t, monthly_returns ** 12, c = 'b', alpha=0.9 / np.sqrt(N_repeat))
-            plt.axhline(y = 1, color = 'k', alpha = 0.25)
-            print(round_to_n(total_months / 12, n = 3))
+        # print(total_dropdown, total_wealth * total_dropdown)
+        # if N_repeat <= N_ts_plots and len(params_list) == 1:
+        #     total_wealths = np.concatenate(total_wealths_list)
+        #     t = np.concatenate(t_list)
+        #     monthly_returns = total_wealths ** (1 / ((np.arange(total_wealths.shape[0]) + 1) * aggregate_N / (24 * 30)))
+        #     plt.plot(t, monthly_returns ** 12, c = 'b', alpha=0.9 / np.sqrt(N_repeat))
+        #     plt.axhline(y = 1, color = 'k', alpha = 0.25)
+        #     print(round_to_n(total_months / 12, n = 3))
         print()
 
-        if N_repeat > 1:
+        if N_repeat > N_ts_plots:
             ax[0].hist(
                 np.array(total_log_wealths) * 12 / total_months_array,
                 np.sqrt(N_repeat).astype(int),
