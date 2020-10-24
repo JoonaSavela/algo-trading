@@ -1,4 +1,4 @@
-from keys import ftx_api_key, ftx_secret_key
+from keys import ftx_api_key, ftx_secret_key, email_address, email_password
 # from model import build_model
 from ftx.rest.client import FtxClient
 import time
@@ -12,6 +12,7 @@ from math import floor, log10
 import json
 from strategy import *
 from parameters import params
+import smtplib
 
 target_symbol = 'ETH'
 bull_symbol = target_symbol
@@ -161,6 +162,24 @@ def cancel_orders(client):
     time.sleep(0.05)
 
 
+def send_error_email(address, password):
+    with smtplib.SMTP('smtp.gmail.com', 587) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+
+        smtp.login(address, password)
+
+        subject = 'Error in trading algorithm'
+
+        now = datetime.now()
+        dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+        body = f'The error occurred at {dt_string}'
+
+        msg = f'Subject: {subject}\n\n{body}'
+
+        smtp.sendmail(address, address, msg)
+
 # TODO: move all changeable parameters into a text/json file(s)
 def trading_pipeline(buy_flag, sell_flag):
     print('Starting trading pipeline...')
@@ -290,32 +309,7 @@ def trading_pipeline(buy_flag, sell_flag):
         print('Exiting trading pipeline...')
 
         if error_flag:
-            cancel_orders(client)
-            if buy_flag:
-                sell_assets(
-                    client,
-                    bull_symbol,
-                    amount = 0.5,
-                    round_n = 5 if m <= 1 else 4
-                )
-                time.sleep(1)
-                if take_profit_long != np.Inf and stop_loss_long == 0:
-                    place_take_profit(client, bull_symbol, take_profit_long)
-                if stop_loss_long > 0 and take_profit_long == np.Inf:
-                    place_stop_loss(client, bull_symbol, stop_loss_long)
-
-            elif sell_flag:
-                sell_assets(
-                    client,
-                    bear_symbol,
-                    amount = 0.5,
-                    round_n = 4
-                )
-                time.sleep(1)
-                if take_profit_short != np.Inf and stop_loss_short == 0:
-                    place_take_profit(client, bear_symbol, take_profit_short)
-                if stop_loss_short > 0 and take_profit_short == np.Inf:
-                    place_stop_loss(client, bear_symbol, stop_loss_short)
+            send_error_email(email_address, email_password)
 
         total_balance, balances = get_total_balance(client, True)
         print()
