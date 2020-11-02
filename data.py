@@ -7,6 +7,7 @@ import requests
 import glob
 from keys import cryptocompare_key
 from utils import get_time
+import time
 
 def _get_recent_data(coin, TimeTo, size, type, aggregate):
     if type == 'm':
@@ -63,7 +64,10 @@ def get_recent_data(coin, size = 3 * 14, type = 'm', aggregate = 1):
 
     return res, timeTo
 
-def get_and_save(coin, time_str):
+def get_and_save(coin, t):
+    if t > time.time():
+        return False
+    time_str = str(t)
     url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&toTs=' + time_str + '&api_key=' + cryptocompare_key
     request = requests.get(url)
     content = json.loads(request._content)
@@ -92,45 +96,39 @@ def get_and_save_all():
     for coin in coins:
         if not os.path.exists('data/' + coin):
             os.mkdir('data/' + coin)
-        time_max = -1
+        t_max = -1
         for filename in glob.glob('data/' + coin + '/*.json'):
             split1 = filename.split('/')
             split2 = split1[2].split('.')
-            if int(split2[0]) > time_max:
-                time_max = int(split2[0])
+            if int(split2[0]) > t_max:
+                t_max = int(split2[0])
 
-        if time_max != -1:
-            time = time_max + 2000 * 60
+        if t_max != -1:
+            t = t_max + 2000 * 60
         else:
             url = 'https://min-api.cryptocompare.com/data/histominute?fsym=' + coin + '&tsym=USD&limit=2000&api_key=' + cryptocompare_key
             request = requests.get(url)
             content = json.loads(request._content)
-            time = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
+            t = content['TimeTo'] - 7 * 24 * 60 * 60 + 2000 * 60
             print(coin + ': No previous files found')
 
         count = 0
 
-        while get_and_save(coin, str(time)):
-            time += 2000 * 60
+        while get_and_save(coin, t):
+            t += 2000 * 60
             count += 1
 
         print('Coin', coin, 'processed,', count, 'interval(s) added')
         print()
 
-
-def load_data(filename, sequence_length, latency, window_size, k = 1, return_start_index = False):
+# TODO: use pandas
+def load_data(filename, sequence_length):
     obj = {}
 
     with open(filename, 'r') as file:
         obj = json.load(file)
 
-    try:
-        # start_index = np.random.choice(len(obj['Data']) - sequence_length - latency - window_size + 1 - k + 1)
-        start_index = 0
-    except ValueError:
-        start_index = 0
-
-    data = obj['Data'][start_index:start_index + sequence_length + latency + window_size - 1 + k - 1]
+    data = obj['Data'][:sequence_length]
 
     X = np.zeros(shape=(len(data), 6))
     for i in range(len(data)):
@@ -140,9 +138,6 @@ def load_data(filename, sequence_length, latency, window_size, k = 1, return_sta
             if key != 'time':
                 tmp.append(value)
         X[i, :] = tmp
-
-    if return_start_index:
-        return X, start_index
 
     return X
 
@@ -176,7 +171,7 @@ def load_all_data(filenames, index = 0, return_time = False):
         Xs = []
 
         for filename in fnames:
-            X = load_data(filename, 2001, 0, 1)
+            X = load_data(filename, 2001)
             Xs.append(X[:2000, :]) # remove duplicates
 
         X = np.concatenate(Xs)
