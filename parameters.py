@@ -18,14 +18,16 @@ params = {
         'm': 3,
         'm_bear': 3,
         'take_profit_long': 1.79,
-        'take_profit_short': np.Inf,
+        'take_profit_short': 2.13,
         'stop_loss_long': 0,
-        'stop_loss_short': 0.98,
-        'displacement': 37,
+        'stop_loss_short': 0,
+        'displacement': 54,
     },
 }
 
 commissions = 0.0007
 spread = 0.0002 / 2
-spread_bull = 0.0054 / 2
-spread_bear = 0.0025 / 2
+# spread_bull = 0.0029#54 / 2
+# spread_bear = 0.003#25 / 2
+spread_bull = 0.0025
+spread_bear = 0.0025
