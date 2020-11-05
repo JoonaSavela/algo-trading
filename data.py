@@ -8,6 +8,8 @@ import glob
 from keys import cryptocompare_key
 from utils import get_time
 import time
+from keys import ftx_api_key, ftx_secret_key
+from ftx.rest.client import FtxClient
 
 def _get_recent_data(coin, TimeTo, size, type, aggregate):
     if type == 'm':
@@ -90,6 +92,7 @@ def get_and_save(coin, t):
 
     return is_same_time
 
+# TODO: move this somewhere more sensible
 coins = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC']
 
 def get_and_save_all():
@@ -186,7 +189,33 @@ def load_all_data(filenames, index = 0, return_time = False):
         return res, list(map(lambda x: get_time(filenames[points[x][1] - 1]), idx))
     return res
 
+def save_orderbook_data():
+    source_symbol = 'USD'
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+    for coin in coins:
+        if not os.path.exists('data/orderbooks/' + coin):
+            os.mkdir('data/orderbooks/' + coin)
+
+        symbols = [
+            coin,
+            'BULL' if coin == 'BTC' else coin + 'BULL',
+            'BEAR' if coin == 'BTC' else coin + 'BEAR'
+        ]
+
+        for symbol in symbols:
+            if not os.path.exists('data/orderbooks/' + coin + '/' + symbol):
+                os.mkdir('data/orderbooks/' + coin + '/' + symbol)
+            orderbook = client.get_orderbook(symbol + '/' + source_symbol, 100)
+            time.sleep(0.05)
+
+            filename = 'data/orderbooks/' + coin + '/' + symbol + '/' \
+                + str(round(time.time())) + '.json'
+            with open(filename, 'w') as fp:
+                json.dump(orderbook, fp)
+
+        print(coin, "orderbook data saved")
 
 
 if __name__ == "__main__":
     get_and_save_all()
+    save_orderbook_data()
