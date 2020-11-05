@@ -10,7 +10,6 @@ import os
 from tqdm import tqdm
 import copy
 
-# TODO: combine all versions into a single function?
 def get_wealths(X, buys, sells = None, commissions = 0.0007, spread_bull = 0.0001, X_bear = None, spread_bear = 0.001):
     short = X_bear is not None
     if sells is None:
@@ -54,6 +53,51 @@ def get_wealths(X, buys, sells = None, commissions = 0.0007, spread_bull = 0.000
         wealths[i] = capital_usd + capital_coin * price + capital_coin_bear * price_bear
 
     wealths = np.array(wealths) / wealths[0]
+
+    return wealths
+
+# TODO: handle situation: short == False
+# TODO: can this be made faster?
+def get_wealths_fast(X, buys, sells = None, commissions = 0.0007, spread_bull = 0.0001, X_bear = None, spread_bear = 0.001):
+    short = X_bear is not None
+    if sells is None:
+        sells = 1 - buys
+    N = buys.shape[0]
+    buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
+
+    wealths = np.ones((N,))
+
+    if buys_idx[0] < sells_idx[0]:
+        buy_state = True
+        entry_i = buys_idx[0]
+    else:
+        buy_state = False
+        entry_i = sells_idx[0]
+
+    while entry_i < N - 1:
+        if buy_state:
+            larger_exits_idx = sells_idx[sells_idx > entry_i]
+        else:
+            larger_exits_idx = buys_idx[buys_idx > entry_i]
+        exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
+        # print(entry_i, exit_i, buy_state)
+
+        if buy_state:
+            sub_X = X[entry_i:exit_i, 0] / X[entry_i, 0]
+            commissions_and_spread = (1 - commissions - spread_bull)
+        else:
+            sub_X = X_bear[entry_i:exit_i, 0] / X_bear[entry_i, 0]
+            commissions_and_spread = (1 - commissions - spread_bear)
+
+        old_wealth = wealths[entry_i]
+
+        wealths[entry_i:exit_i] = sub_X * old_wealth * commissions_and_spread
+        wealths[exit_i - 1] *= commissions_and_spread
+
+        entry_i = exit_i - 1
+        buy_state = not buy_state
+
+    # print(wealths)
 
     return wealths
 
