@@ -245,20 +245,40 @@ def diff_loss(out, batch_size, use_tanh, e, n_epochs):
     return torch.cat(diffs).mean() * (1 - 0.99 ** (e / n_epochs))
 
 def aggregate(X, n = 5, type = 'h'):
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
     if type == 'h':
         n *= 60
+
     aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))
-    X = X[-n * aggregated_X.shape[0]:, :]
 
-    for i in range(aggregated_X.shape[0]):
-        js = np.arange(i * n, (i + 1) * n)
+    idx = np.arange((X.shape[0] % n) + n - 1, X.shape[0], n)
+    aggregated_X[:, 0] = X[idx, 0] # close
 
-        aggregated_X[i, 0] = X[js[-1], 0] # close
-        aggregated_X[i, 1] = np.max(X[js, 1]) # high
-        aggregated_X[i, 2] = np.min(X[js, 2]) # low
-        aggregated_X[i, 3] = X[js[0], 3] # open
-        aggregated_X[i, 4] = np.sum(X[js, 4])
-        aggregated_X[i, 5] = np.sum(X[js, 5])
+    if X.shape[1] >= 2:
+        highs = rolling_max(X[:, 1], n)
+        idx = np.arange(X.shape[0] % n, len(highs), n)
+        aggregated_X[:, 1] = highs[idx] # high
+
+    if X.shape[1] >= 3:
+        lows = rolling_min(X[:, 2], n)
+        idx = np.arange(X.shape[0] % n, len(lows), n)
+        aggregated_X[:, 2] = lows[idx] # low
+
+    if X.shape[1] >= 4:
+        idx = np.arange(X.shape[0] % n, X.shape[0], n)
+        aggregated_X[:, 3] = X[idx, 3] # open
+
+    if X.shape[1] > 4:
+        X = X[-n * aggregated_X.shape[0]:, :]
+
+        for i in range(aggregated_X.shape[0]):
+            js = np.arange(i * n, (i + 1) * n)
+
+            # aggregated_X[i, 1] = np.max(X[js, 1])
+            # aggregated_X[i, 2] = np.min(X[js, 2])
+            aggregated_X[i, 4] = np.sum(X[js, 4])
+            aggregated_X[i, 5] = np.sum(X[js, 5])
 
     return aggregated_X
 
@@ -457,23 +477,36 @@ def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
 
 # TODO: test that with m = 1, X doesn't change
 def get_multiplied_X(X, multiplier = 1):
-    returns = X[1:, 0] / X[:-1, 0] - 1
-    returns = multiplier * returns
-    assert(np.all(returns > -1.0))
-
-    X_res = np.zeros(X.shape)
-    X_res[:, 0] = np.concatenate([
-        [1.0],
-        np.cumprod(returns + 1)
-    ])
-
     if X.shape[1] > 1:
-        other_returns = X[:, 1:4] / X[:, 0].reshape((-1, 1)) - 1
+        returns = X[1:, 3] / X[:-1, 3] - 1
+        returns = multiplier * returns
+        assert(np.all(returns > -1.0))
+
+        X_res = np.zeros_like(X)
+        X_res[:, 3] = np.concatenate([
+            [1.0],
+            np.cumprod(returns + 1)
+        ])
+
+        other_returns = X[:, :3] / X[:, 3].reshape((-1, 1)) - 1
         other_returns = multiplier * other_returns
         assert(np.all(other_returns > -1.0))
-        X_res[:, 1:4] = X_res[:, 0].reshape((-1, 1)) * (other_returns + 1)
+        X_res[:, :3] = X_res[:, 3].reshape((-1, 1)) * (other_returns + 1)
+
+        if multiplier < 0:
+            X_res[:, [1, 2]] = X_res[:, [2, 1]]
 
         X_res[:, 4:] = X[:, 4:]
+    else:
+        returns = X[1:, 0] / X[:-1, 0] - 1
+        returns = multiplier * returns
+        assert(np.all(returns > -1.0))
+
+        X_res = np.zeros_like(X)
+        X_res[:, 0] = np.concatenate([
+            [1.0],
+            np.cumprod(returns + 1)
+        ])
 
     return X_res
 
@@ -517,8 +550,10 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 # TODO: fix bug with use_diff = True and get_take_profits
 # TODO: try candlestick patterns with support and resistance lines?
-def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std = False, use_diff = False):
+def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std = False, use_diff = False, verbose_i = None):
     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+    if verbose_i is not None:
+        print(ma[verbose_i])
     N = ma.shape[0]
     if use_diff:
         diff = np.diff(X[:, 0] / X[0, 0])
@@ -549,5 +584,28 @@ def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std =
     # print(N)
     # print(buys.mean())
     # print(sells.mean())
+
+    return (buys, sells) + return_tuple
+
+def get_buys_and_sells2(X, w, as_boolean = False, verbose_i = None):
+    # ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+    diff = X[w:, 0] - X[:-w, 0]
+    if verbose_i is not None:
+        print(diff[verbose_i])
+    N = diff.shape[0]
+
+    buys = diff > 0
+    sells = diff < 0
+
+    return_tuple = (N,)
+
+    if as_boolean:
+        if N == 1:
+            return (buys[0], sells[0]) + return_tuple
+        else:
+            return (buys, sells) + return_tuple
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
 
     return (buys, sells) + return_tuple
