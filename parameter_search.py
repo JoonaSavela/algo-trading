@@ -12,6 +12,264 @@ from itertools import product
 from parameters import commissions, spread, spread_bear, spread_bull
 
 
+# TODO: make as general as possible (in particular for get_buys_and_sells_fn)
+def find_optimal_aggregated_strategy_new(
+        coin,
+        aggregate_N_list,
+        w_list,
+        m,
+        m_bear,
+        objective_fn,
+        get_buys_and_sells_fn,
+        spreads,
+        N_repeat = None,
+        step = 0.01,
+        verbose = True,
+        disable = False,
+        short = True,
+        Xs_index = [0, 1]):
+    files = glob.glob(f'data/{coin}/*.json')
+    files.sort(key = get_time)
+
+    Xs = load_all_data(files, Xs_index)
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+    X_origs = Xs
+    if m > 1:
+        Xs = [get_multiplied_X(X, m) for X in Xs]
+
+    params_dict = {}
+    objective_dict = {}
+
+    for spread in spreads:
+        # wealths_dict[spread] = []
+        objective_dict[spread] = -np.Inf
+
+    middle_spread = spreads[len(spreads) // 2]
+    pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
+    for aggregate_N, w in pbar:
+        if N_repeat is None:
+            N_repeat = aggregate_N * 60
+
+        N_repeat = min(N_repeat, aggregate_N * 60)
+        total_months = 0
+
+        N_transactions_buy = 0
+        N_transactions_sell = 0
+
+        all_sub_trade_wealths_long = []
+        all_min_sub_trade_wealths_long = []
+
+        all_sub_trade_wealths_short = []
+        all_min_sub_trade_wealths_short = []
+
+        all_trade_wealths_long = []
+        all_max_trade_wealths_long = []
+
+        all_trade_wealths_short = []
+        all_max_trade_wealths_short = []
+
+        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, aggregate_N * 60 * w)
+
+            for rand_N in np.arange(0, aggregate_N * 60, aggregate_N * 60 // N_repeat):
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1[:, :3], aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
+
+                N_skip = (N_orig - rand_N) % (aggregate_N * 60)
+
+                start_i = N_skip + aggregate_N * 60 - 1
+                idx = np.arange(start_i, N_orig, aggregate_N * 60)
+
+                buys = buys_orig[idx]
+                sells = sells_orig[idx]
+                N = buys.shape[0]
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+
+                n_months = N * aggregate_N / (24 * 30)
+                total_months += n_months
+
+                buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
+                N_transactions_buy += len(buys_idx) * 2
+                N_transactions_sell += len(sells_idx) * 2
+
+                sub_trade_wealths_long, min_sub_trade_wealths_long = get_sub_trade_wealths(X1_agg, buys, sells, N)
+                sub_trade_wealths_short, min_sub_trade_wealths_short = get_sub_trade_wealths(X1_bear_agg, sells, buys, N)
+                trade_wealths_long, max_trade_wealths_long = get_trade_wealths(X1_agg, buys, sells, N)
+                trade_wealths_short, max_trade_wealths_short = get_trade_wealths(X1_bear_agg, sells, buys, N)
+
+                all_sub_trade_wealths_long.extend(sub_trade_wealths_long)
+                all_min_sub_trade_wealths_long.extend(min_sub_trade_wealths_long)
+
+                all_sub_trade_wealths_short.extend(sub_trade_wealths_short)
+                all_min_sub_trade_wealths_short.extend(min_sub_trade_wealths_short)
+
+                all_trade_wealths_long.extend(trade_wealths_long)
+                all_max_trade_wealths_long.extend(max_trade_wealths_long)
+
+                all_trade_wealths_short.extend(trade_wealths_short)
+                all_max_trade_wealths_short.extend(max_trade_wealths_short)
+
+        stop_losses = np.arange(0.0, 1.0, step)
+        stop_loss_wealths_long = np.array(list(map(lambda x:
+            get_stop_loss_wealths_from_sub_trades(
+                all_sub_trade_wealths_long,
+                all_min_sub_trade_wealths_long,
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_as_log = True,
+                return_N_transactions=True
+            ),
+            stop_losses
+        )))
+        N_stop_loss_transactions_buy = stop_loss_wealths_long[:, 1]
+        stop_loss_wealths_long = stop_loss_wealths_long[:, 0]
+
+        stop_loss_wealths_short = np.array(list(map(lambda x:
+            get_stop_loss_wealths_from_sub_trades(
+                all_sub_trade_wealths_short,
+                all_min_sub_trade_wealths_short,
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_as_log = True,
+                return_N_transactions=True
+            ),
+            stop_losses
+        )))
+        N_stop_loss_transactions_sell = stop_loss_wealths_short[:, 1]
+        stop_loss_wealths_short = stop_loss_wealths_short[:, 0]
+
+        take_profits_long = np.arange(1.0 + step, max(max_trade_wealths_long) + step*2, step)
+        take_profit_wealths_long = np.array(list(map(lambda x:
+            get_take_profit_wealths_from_trades(
+                all_trade_wealths_long,
+                all_max_trade_wealths_long,
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_as_log = True
+            ),
+            take_profits_long
+        )))
+
+        take_profits_short = np.arange(1.0 + step, max(max_trade_wealths_short) + step*2, step)
+        take_profit_wealths_short = np.array(list(map(lambda x:
+            get_take_profit_wealths_from_trades(
+                all_trade_wealths_short,
+                all_max_trade_wealths_short,
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_as_log = True
+            ),
+            take_profits_short
+        )))
+
+        for spread in spreads:
+            stop_loss_wealths_long_with_spread = np.zeros_like(stop_loss_wealths_long)
+            stop_loss_wealths_short_with_spread = np.zeros_like(stop_loss_wealths_short)
+            for i in range(len(stop_losses)):
+                stop_loss_wealths_long_with_spread[i] = apply_commissions_and_spreads_fast(
+                    stop_loss_wealths_long[i],
+                    N_transactions_buy + N_stop_loss_transactions_buy[i],
+                    commissions,
+                    spread,
+                    n_months = total_months,
+                    from_log = True
+                )
+                stop_loss_wealths_short_with_spread[i] = apply_commissions_and_spreads_fast(
+                    stop_loss_wealths_short[i],
+                    N_transactions_sell + N_stop_loss_transactions_sell[i],
+                    commissions,
+                    spread,
+                    n_months = total_months,
+                    from_log = True
+                )
+
+            take_profit_wealths_long_with_spread = np.zeros_like(take_profit_wealths_long)
+            for i in range(len(take_profit_wealths_long)):
+                take_profit_wealths_long_with_spread[i] = apply_commissions_and_spreads_fast(
+                    take_profit_wealths_long[i],
+                    N_transactions_buy,
+                    commissions,
+                    spread,
+                    n_months = total_months,
+                    from_log = True
+                )
+
+            take_profit_wealths_short_with_spread = np.zeros_like(take_profit_wealths_short)
+            for i in range(len(take_profit_wealths_short)):
+                take_profit_wealths_short_with_spread[i] = apply_commissions_and_spreads_fast(
+                    take_profit_wealths_short[i],
+                    N_transactions_sell,
+                    commissions,
+                    spread,
+                    n_months = total_months,
+                    from_log = True
+                )
+
+            stop_loss_long = stop_losses[np.argmax(stop_loss_wealths_long_with_spread)]
+            stop_loss_short = stop_losses[np.argmax(stop_loss_wealths_short_with_spread)]
+
+            take_profit_long = take_profits_long[np.argmax(take_profit_wealths_long_with_spread)]
+            take_profit_short = take_profits_short[np.argmax(take_profit_wealths_short_with_spread)]
+
+            if np.max(stop_loss_wealths_long_with_spread) > np.max(take_profit_wealths_long_with_spread):
+                take_profit_long = np.Inf
+            else:
+                stop_loss_long = 0
+
+            if np.max(stop_loss_wealths_short_with_spread) > np.max(take_profit_wealths_short_with_spread):
+                take_profit_short = np.Inf
+            else:
+                stop_loss_short = 0
+
+            stop_loss_take_profit_wealth = max(
+                    np.max(stop_loss_wealths_long_with_spread),
+                    np.max(take_profit_wealths_long_with_spread)
+            ) * \
+            max(
+                np.max(stop_loss_wealths_short_with_spread),
+                np.max(take_profit_wealths_short_with_spread)
+            )
+
+            # print(stop_loss_take_profit_wealth, stop_loss_take_profit_wealth ** 12)
+            objective = objective_fn(stop_loss_take_profit_wealth)
+            if objective > objective_dict[spread]:
+                objective_dict[spread] = objective
+                d = {
+                    "objective": objective,
+                    "params": (aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short),
+                }
+                params_dict[spread] = d
+
+        pbar.set_description(str(round_to_n(objective_dict[middle_spread], 4)))
+
+
+    return params_dict
+
+
 # TODO: make as general as possible
 # TODO: add an option to not use dropdown
 def find_optimal_aggregated_strategy(
@@ -87,7 +345,7 @@ def find_optimal_aggregated_strategy(
             if short:
                 X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
 
-            wealths = get_wealths(
+            wealths = get_wealths_fast(
                 X_agg,
                 buys,
                 sells,
@@ -368,6 +626,8 @@ def get_stop_loss_and_take_profit(params_list, short, N_repeat, randomize, step,
     take_profit_long_list = []
     take_profit_short_list = []
 
+    X1_bear_agg = None
+
     for params in params_list:
         aggregate_N, w, m, m_bear = params
 
@@ -405,10 +665,10 @@ def get_stop_loss_and_take_profit(params_list, short, N_repeat, randomize, step,
                     X1_orig = X_orig
                     if short:
                         X1_bear = X_bear
-                X1_agg = aggregate(X1, aggregate_N)
-                X1_orig_agg = aggregate(X1_orig, aggregate_N)
+                X1_agg = aggregate(X1[:, :3], aggregate_N)
+                X1_orig_agg = aggregate(X1_orig[:, :3], aggregate_N)
                 if short:
-                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
+                    X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
 
                 buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
 
@@ -439,7 +699,7 @@ def get_stop_loss_and_take_profit(params_list, short, N_repeat, randomize, step,
                 append_trade_wealths(wealths, buys, sells, N, long_trade_wealths, max_long_trade_wealths)
                 append_trade_wealths(wealths, sells, buys, N, short_trade_wealths, max_short_trade_wealths)
 
-        # TODO: fix this
+
         stop_losses_long = np.arange(0.0, 1.0, step)
         stop_loss_wealths_long = np.array(list(map(lambda x: get_stop_loss_wealths_from_sub_trades(long_sub_trade_wealths, min_long_sub_trade_wealths, x, total_months, commissions, spread if m <= 1.0 else spread_bull), stop_losses_long)))
 
@@ -513,9 +773,6 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     Xs = load_all_data(test_files, Xs_index)
 
-    if N_repeat > N_ts_plots:
-        fig, ax = plt.subplots(nrows = 1, ncols = 2, figsize = [6.4 * 2, 4.8])
-
     if not isinstance(Xs, list):
         Xs = [Xs]
 
@@ -558,10 +815,10 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     X_orig = X_orig
                     if short:
                         X_bear = X_bear
-                X_agg = aggregate(X, aggregate_N)
-                X_orig_agg = aggregate(X_orig, aggregate_N)
+                X_agg = aggregate(X[:, :3], aggregate_N)
+                X_orig_agg = aggregate(X_orig[:, :3], aggregate_N)
                 if short:
-                    X_bear_agg = aggregate(X_bear, aggregate_N)
+                    X_bear_agg = aggregate(X_bear[:, :3], aggregate_N)
 
                 buys, sells, N = get_buys_and_sells(X_orig_agg, w)
 
@@ -573,7 +830,17 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                 if short:
                     X_bear = X_bear[-aggregate_N * 60 * N:, :]
 
-                wealths = get_wealths(
+                # wealths = get_wealths(
+                #     X_agg,
+                #     buys,
+                #     sells,
+                #     commissions = commissions,
+                #     spread_bull = spread if m <= 1.0 else spread_bull,
+                #     X_bear = X_bear_agg,
+                #     spread_bear = spread_bear
+                # )
+
+                wealths_fast = get_wealths_fast(
                     X_agg,
                     buys,
                     sells,
@@ -583,20 +850,18 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     spread_bear = spread_bear
                 )
 
+                # print(wealths[-1], wealths_fast[-1])
+                wealths = wealths_fast
+
                 if take_profit or stop_loss:
                     transform_wealths(wealths, X_agg, buys, sells, N, take_profit_long, stop_loss_long, commissions, spread if m <= 1.0 else spread_bull)
                     transform_wealths(wealths, X_bear_agg, sells, buys, N, take_profit_short, stop_loss_short, commissions, spread_bear)
 
                 n_months = buys.shape[0] * aggregate_N / (24 * 30)
-                dropdown, I, J = get_max_dropdown(wealths, True)
 
                 wealth = wealths[-1] ** (1 / n_months)
 
-                # if N_repeat <= N_ts_plots:
-                #     print(wealth, wealth ** 12)
-                #     # dropdown = dropdown ** (1 / n_months)
-                #     # print(dropdown, wealth * dropdown)
-
+                # TODO: transform these into more sensible units
                 t = np.arange(N) + count
                 t *= aggregate_N * 60
                 count += N
@@ -619,21 +884,17 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
                     plt.yscale('log')
 
                 total_log_wealth += np.log(wealths[-1])
-                total_log_dropdown += np.log(dropdown)
                 prev_price *= X_orig_agg[-1, 0] / X_orig_agg[0, 0]
                 total_months1 += n_months
 
             total_log_wealths.append(total_log_wealth)
-            total_log_dropdowns.append(total_log_dropdown)
             total_months.append(total_months1)
 
         total_months_array = np.array(total_months)
         total_months = np.sum(total_months)
         total_wealth = np.exp(np.sum(total_log_wealths) / total_months)
-        total_dropdown = np.exp(np.sum(total_log_dropdowns) / total_months)
         print()
         print(total_wealth, total_wealth ** 12)
-        # print(total_dropdown, total_wealth * total_dropdown)
         # if N_repeat <= N_ts_plots and len(params_list) == 1:
         #     total_wealths = np.concatenate(total_wealths_list)
         #     t = np.concatenate(t_list)
@@ -644,16 +905,8 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
         print()
 
         if N_repeat > N_ts_plots:
-            ax[0].hist(
+            plt.hist(
                 np.array(total_log_wealths) * 12 / total_months_array,
-                np.sqrt(N_repeat).astype(int),
-                color=c_list[i % len(c_list)],
-                alpha=0.9 / np.sqrt(len(params_list)),
-                density = True
-            )
-            # ax[0].set_xscale('log')
-            ax[1].hist(
-                np.exp((np.array(total_log_wealths) + np.array(total_log_dropdowns)) / total_months_array),
                 np.sqrt(N_repeat).astype(int),
                 color=c_list[i % len(c_list)],
                 alpha=0.9 / np.sqrt(len(params_list)),
@@ -662,6 +915,7 @@ def plot_performance(params_list, N_repeat = 1, short = False, take_profit = Tru
 
     plt.show()
 
+# FIXME: output when the length of params_list is more than 1
 def plot_displacement(params_list, short = True, take_profit = True, stop_loss = True, Xs_index = [0, 1]):
     plt.style.use('seaborn')
 
@@ -769,7 +1023,6 @@ def plot_displacement(params_list, short = True, take_profit = True, stop_loss =
 if __name__ == '__main__':
     aggregate_N_list = range(1, 13)
     w_list = range(1, 51)
-    # m_list = range(1, 4, 2)
     m_list = [3]
     m_bear_list = [3]
 
