@@ -102,7 +102,66 @@ def get_wealths_fast(X, buys, sells = None, commissions = 0.0007, spread_bull = 
     return wealths
 
 
-# TODO: remove trade_wealths from input, add output?
+def apply_commissions_and_spreads_fast(wealth, N_transactions, commissions, spread, n_months = 1, from_log = False):
+    commissions_and_spread = (1 - commissions - spread)
+
+    if from_log:
+        res = wealth + np.log(commissions_and_spread) * N_transactions
+        return np.exp(res / n_months)
+
+    res = wealth * commissions_and_spread ** N_transactions
+    return np.exp(np.log(res) / n_months)
+
+
+def apply_commissions_and_spreads(wealths, buys, sells, N, commissions, spread, inplace = True):
+    buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
+
+    if not inplace:
+        wealths = np.copy(wealths)
+
+    if buys_idx[0] < sells_idx[0]:
+        buy_state = True
+        entry_i = buys_idx[0]
+    else:
+        buy_state = False
+        entry_i = sells_idx[0]
+
+    commissions_and_spread = (1 - commissions - spread)
+
+    while entry_i < N - 1:
+        if buy_state:
+            larger_exits_idx = sells_idx[sells_idx > entry_i]
+        else:
+            larger_exits_idx = buys_idx[buys_idx > entry_i]
+        exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
+
+        wealths[entry_i:] *= commissions_and_spread
+        wealths[exit_i - 1:] *= commissions_and_spread
+
+        entry_i = exit_i - 1
+        buy_state = not buy_state
+
+    return wealths
+
+
+# TODO: add min_trade_wealths
+def get_trade_wealths(X, entries, exits, N):
+    entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
+
+    trade_wealths = []
+    max_trade_wealths = []
+
+    for entry_i in entries_idx:
+        larger_exits_idx = exits_idx[exits_idx > entry_i]
+        exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
+        sub_X = X[entry_i:exit_i, :]
+        if sub_X.shape[0] > 1:
+            trade_wealths.append(sub_X[-1, 0] / sub_X[0, 0])
+            max_trade_wealths.append(np.max(sub_X[1:, 1]) / sub_X[0, 0]) # use highs
+
+    return trade_wealths, max_trade_wealths
+
+
 def append_trade_wealths(wealths, entries, exits, N, trade_wealths, max_trade_wealths):
     entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
 
@@ -112,6 +171,23 @@ def append_trade_wealths(wealths, entries, exits, N, trade_wealths, max_trade_we
         sub_wealths = wealths[entry_i:exit_i]
         trade_wealths.append(sub_wealths[-1] / sub_wealths[0])
         max_trade_wealths.append(sub_wealths.max() / sub_wealths[0])
+
+def get_sub_trade_wealths(X, entries, exits, N):
+    entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
+
+    sub_trade_wealths = []
+    min_sub_trade_wealths = []
+
+    for entry_i in entries_idx:
+        larger_exits_idx = exits_idx[exits_idx > entry_i]
+        exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
+        sub_X = X[entry_i:exit_i, :]
+        sub_wealths = sub_X[1:, 0] / sub_X[:-1, 0]
+        min_sub_wealths = sub_X[1:, 2] / sub_X[:-1, 0]
+        sub_trade_wealths.append(sub_wealths)
+        min_sub_trade_wealths.append(min_sub_wealths)
+
+    return sub_trade_wealths, min_sub_trade_wealths
 
 def append_sub_trade_wealths(X, entries, exits, N, sub_trade_wealths, min_sub_trade_wealths):
     entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
@@ -126,29 +202,38 @@ def append_sub_trade_wealths(X, entries, exits, N, sub_trade_wealths, min_sub_tr
         min_sub_trade_wealths.append(min_sub_wealths)
 
 
-def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_profit, total_months, commissions, spread, return_total = True):
+def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_profit, total_months, commissions, spread, return_total = True, return_as_log = False):
     trade_wealths = np.array(trade_wealths)
     max_trade_wealths = np.array(max_trade_wealths)
     trade_wealths[max_trade_wealths > take_profit] = take_profit * (1 - commissions - spread)
 
     if return_total:
-        return np.exp(np.sum(np.log(trade_wealths)) / total_months)
+        res = np.sum(np.log(trade_wealths)) / total_months
+        return res if return_as_log else np.exp(res)
 
-    return trade_wealths
+    return np.log(trade_wealths) if return_as_log else trade_wealths
 
-def get_stop_loss_wealths_from_sub_trades(sub_trade_wealths, min_sub_trade_wealths, stop_loss, total_months, commissions, spread, return_total = True):
+def get_stop_loss_wealths_from_sub_trades(sub_trade_wealths, min_sub_trade_wealths, stop_loss, total_months, commissions, spread, return_total = True, return_as_log = False, return_N_transactions = False):
     trade_wealths = []
+    N_transactions = 0
     for i in range(len(sub_trade_wealths)):
         sub_trade_wealths_i = np.copy(sub_trade_wealths[i])
         li = min_sub_trade_wealths[i] < stop_loss
         sub_trade_wealths_i[li] = stop_loss * (1 - commissions - spread) ** 2
+        N_transactions += np.sum(li) * 2
         trade_wealths.append(np.prod(sub_trade_wealths_i) * (1 - commissions - spread) ** 2)
 
     trade_wealths = np.array(trade_wealths)
     if return_total:
-        return np.exp(np.sum(np.log(trade_wealths)) / total_months)
+        res = np.sum(np.log(trade_wealths)) / total_months
+        return_tuple = (res,) if return_as_log else (np.exp(res),)
+    else:
+        return_tuple = (np.log(trade_wealths),) if return_as_log else (trade_wealths,)
 
-    return trade_wealths
+    if return_N_transactions:
+        return_tuple = return_tuple + (N_transactions,)
+
+    return return_tuple
 
 def transform_wealths(wealths, X, entries, exits, N, take_profit, stop_loss, commissions, spread):
     assert(take_profit == np.Inf or stop_loss == 0)
