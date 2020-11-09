@@ -10,9 +10,21 @@ from tqdm import tqdm
 from optimize import *
 from itertools import product
 from parameters import commissions, spread, spread_bear, spread_bull
+from keys import ftx_api_key, ftx_secret_key
+from ftx.rest.client import FtxClient
 
 
-# TODO: make as general as possible (in particular for get_buys_and_sells_fn)
+# TODO: make as general as possible
+#   - instead of arg get_buys_and_sells_fn, have an argument for strategy type
+#     (and then choose get_buys_and_sells_fn accordingly)
+# TODO: multiple types of stop loss and take profit
+#   - only take profit (current)
+#   - only stop loss
+#   - both
+#   - only high frequency stop loss (current stop loss)
+#   - only trailing stop loss
+# TODO: save m and m_bear in the output somehow
+# TODO: handle short = False
 def find_optimal_aggregated_strategy_new(
         coin,
         aggregate_N_list,
@@ -20,14 +32,26 @@ def find_optimal_aggregated_strategy_new(
         m,
         m_bear,
         objective_fn,
-        get_buys_and_sells_fn,
         spreads,
-        N_repeat = None,
+        frequency = 'high',
+        strategy_type = 'ma',
+        N_repeat_inp = None,
         step = 0.01,
         verbose = True,
         disable = False,
         short = True,
         Xs_index = [0, 1]):
+
+    if strategy_type == 'ma':
+        get_buys_and_sells_fn = get_buys_and_sells2
+    else:
+        raise ValueError("strategy_type")
+
+    if frequency not in ['low', 'high']:
+        raise ValueError("'frequency' must be etiher 'low' or 'high'")
+
+    print(coin, frequency, strategy_type)
+
     files = glob.glob(f'data/{coin}/*.json')
     files.sort(key = get_time)
 
@@ -51,8 +75,15 @@ def find_optimal_aggregated_strategy_new(
     middle_spread = spreads[len(spreads) // 2]
     pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
     for aggregate_N, w in pbar:
-        if N_repeat is None:
+        high_freq_skip_condition = aggregate_N * w * 60 > 10000
+        if (frequency == 'high' and high_freq_skip_condition) or \
+                (frequency == 'low' and not high_freq_skip_condition):
+            continue
+
+        if N_repeat_inp is None:
             N_repeat = aggregate_N * 60
+        else:
+            N_repeat = N_repeat_inp
 
         N_repeat = min(N_repeat, aggregate_N * 60)
         total_months = 0
@@ -270,8 +301,159 @@ def find_optimal_aggregated_strategy_new(
     return params_dict
 
 
+# TODO: handle short = False
+def save_wealths(
+        strategies,
+        m,
+        m_bear,
+        weights,
+        N_repeat_inp = 60,
+        disable = False,
+        short = True,
+        Xs_index = [0, 1]
+        ):
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+
+    aggregate_Ns = []
+    ws = []
+
+    for strategy_key, strategy in strategies.items():
+        aggregate_Ns.extend([v['params'][0] for v in strategy.values()])
+        ws.extend([v['params'][1] for v in strategy.values()])
+
+    aggregate_Ns = np.unique(aggregate_Ns)
+    min_aggregate_N = np.min(aggregate_Ns)
+    max_aggregate_N = np.max(aggregate_Ns)
+
+    max_aggregate_N_times_w = np.max(np.prod(list(zip(aggregate_Ns, ws)), axis = 1))
+
+    if N_repeat_inp is None:
+        N_repeat = min_aggregate_N * 60
+    else:
+        N_repeat = N_repeat_inp
+
+    N_repeat = min(N_repeat, min_aggregate_N * 60)
+
+    wealths_dict = {}
+
+    for strategy_key, strategy in strategies.items():
+        strategy_type = strategy_key.split('_')[2]
+
+        if strategy_type == 'ma':
+            get_buys_and_sells_fn = get_buys_and_sells2
+        else:
+            raise ValueError("strategy_type")
+
+        coin = strategy_key.split('_')[0]
+        files = glob.glob(f'data/{coin}/*.json')
+        files.sort(key = get_time)
+
+        # TODO: have some of these as input parameters
+        # TODO: tie these into the length of X
+        total_balance = get_total_balance(client, False) * weights[strategy_key]
+        potential_balances = np.logspace(np.log10(total_balance / 100), np.log10(total_balance * 10000), 1000)
+        potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
+        spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance))]
+
+        Xs = load_all_data(files, Xs_index)
+
+        if not isinstance(Xs, list):
+            Xs = [Xs]
+
+        X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+        X_origs = Xs
+        if m > 1:
+            Xs = [get_multiplied_X(X, m) for X in Xs]
+
+        print(strategy_key)
+        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+            buys_orig_dict = {}
+            sells_orig_dict = {}
+            N_orig_dict = {}
+            min_N_orig = len(X_orig) - max_aggregate_N_times_w * 60
+            # print(min_N_orig)
+
+            for spread, obj in strategy.items():
+                aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = obj['params']
+                buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, aggregate_N * 60 * w)
+
+                buys_orig_dict[spread] = buys_orig
+                sells_orig_dict[spread] = sells_orig
+                N_orig_dict[spread] = N_orig
+
+            # continue
+            for rand_N in tqdm(np.arange(0, min_aggregate_N * 60, min_aggregate_N * 60 // N_repeat), disable = disable):
+                min_N = np.min([((min_N_orig - rand_N) // (agg_N * 60)) * agg_N * 60 for agg_N in aggregate_Ns])
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    if short:
+                        X1_bear = X_bear
+
+                buys_dict = {}
+                sells_dict = {}
+
+                for spread, obj in strategy.items():
+                    aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = obj['params']
+
+                    N_skip = (N_orig_dict[spread] - rand_N) % (aggregate_N * 60)
+
+                    start_i = N_skip + aggregate_N * 60 - 1
+                    idx = np.arange(start_i, N_orig_dict[spread], aggregate_N * 60)
+
+                    buys_candidate = np.zeros((len(idx) * aggregate_N * 60,))
+                    sells_candidate = np.zeros((len(idx) * aggregate_N * 60,))
+
+                    idx = np.append(idx, N_orig_dict[spread] - rand_N) - start_i
+
+                    for start, end in zip(idx[:-1], idx[1:]):
+                        buys_candidate[start:end] = buys_orig_dict[spread][start + start_i]
+                        sells_candidate[start:end] = sells_orig_dict[spread][start + start_i]
+
+                    buys_dict[spread] = buys_candidate[-min_N:]
+                    sells_dict[spread] = sells_candidate[-min_N:]
+
+                wealths = get_adaptive_wealths(
+                    X = X1[-min_N:, :],
+                    buys_dict = buys_dict,
+                    sells_dict = sells_dict,
+                    strategy = strategy,
+                    total_balance = total_balance,
+                    potential_balances = potential_balances,
+                    potential_spreads = potential_spreads,
+                    commissions = commissions,
+                    X_bear = X1_bear[-min_N:, :],
+                )
+
+                if rand_N > 0:
+                    X1_orig = X_orig[:-rand_N, :]
+                else:
+                    X1_orig = X_orig
+                X1_orig = X1_orig[-min_N:, :]
+                plt.style.use('seaborn')
+                plt.plot(X1_orig[:, 0] / X1_orig[0, 0], 'k', alpha = 0.5)
+                plt.plot(wealths, 'g', alpha=0.7)
+                plt.yscale('log')
+                plt.show()
+                # return
+
+                if strategy_key not in wealths_dict:
+                    wealths_dict[strategy_key] = [wealths]
+                else:
+                    latest_wealth = wealths_dict[strategy_key][-1][-1]
+                    wealths_dict[strategy_key].append(latest_wealth * wealths)
+
+        wealths_dict[strategy_key] = np.concatenate(wealths_dict[strategy_key])
+        print(wealths_dict[strategy_key].shape, wealths_dict[strategy_key][-1])
+        return
+
+        print()
+
+
 # TODO: make as general as possible
-# TODO: add an option to not use dropdown
 def find_optimal_aggregated_strategy(
         aggregate_N_list,
         w_list,
