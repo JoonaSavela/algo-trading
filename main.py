@@ -13,14 +13,18 @@ from parameter_search import *
 from parameters import commissions, spread, spread_bear, spread_bull
 from itertools import product
 import matplotlib.animation as animation
-
+from keys import ftx_api_key, ftx_secret_key
+from ftx.rest.client import FtxClient
+from trade import ftx_price, get_total_balance
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt import risk_models, expected_returns, black_litterman, \
+    objective_functions
+from pypfopt import BlackLittermanModel
 
 
 # TODO: train a (bayesian) NN on the (aggregated) data
 
 # TODO: train a network for predicitng the optimal take profit parameter(s)
-
-# TODO: find take profit parameters using highs instead of closes
 
 # TODO: make a generator for calculating wealths
 
@@ -28,7 +32,32 @@ import matplotlib.animation as animation
 
 # TODO: add comments; improve readability
 
-# TODO: combine get_take_profit with get_stop_loss
+# TODO: write a bunch of tests
+
+
+
+# TODO: what if stop losses were calculated from (minute time frame) closes?
+#   would speed up aggregate(...) massively, if take profits were also calculated
+#   from those.
+
+# TODO: take actual spreads into account in the strategies
+#   - visualize this somehow
+#       - use adaptive spread, calculated from historical average orderbook
+#   - how to manage sell side?
+
+# TODO: only trade with .../USD
+
+# TODO: trade with multiple coins (each with their own params)
+
+# TODO: make a maker strategy instead of taker
+
+# TODO: apply portfolio optimization to determine how to weigh multiple strategies
+#   - need to calculate average performance of strategies (same length)
+#       - need to have exactly same time stamps
+#   - needs to take into account adaptive spread
+
+# TODO: implement different objective functions in find_optimal_aggregated_strategy
+
 
 def calculate_optimal_take_profit(take_profit_options, trade_wealths, max_trade_wealths):
     take_profit_options.sort()
@@ -280,8 +309,414 @@ def try_rounding_hours():
     print(timeTo)
     print(time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(timeTo)))
 
+def orderbook_experiments(symbol, plots = True):
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+    # total_balance = get_total_balance(client, False)
+    total_balance = 1000
+    # print(total_balance)
+    print(symbol)
+
+    orderbook = client.get_orderbook(symbol + '/USD', 100)
+    time.sleep(0.05)
+    asks = np.array(orderbook['asks'])
+    bids = np.array(orderbook['bids'])
+    price = (asks[0, 0] + bids[0, 0]) / 2
+
+    usd_value_asks = np.prod(asks, axis=1)
+    usd_value_bids = np.prod(bids, axis=1)
+    percentage_ask = asks[:, 0] / price
+    percentage_bid = bids[:, 0] / price
+
+    # print(np.stack([usd_value_asks, percentage_ask], axis=1))
+
+    # TODO: check edge cases
+    #   - average spread is larger than the last profitable spread
+    #   - total balance is larger than total available asks
+    li_asks = np.cumsum(usd_value_asks) < total_balance
+    weights_ask = usd_value_asks[li_asks] / total_balance
+    weights_ask = np.concatenate([weights_ask, [1 - np.sum(weights_ask)]])
+    print(weights_ask, np.sum(weights_ask))
+
+    average_spread_ask = np.sum(percentage_ask[:len(weights_ask)] * weights_ask)
+    print(average_spread_ask)
+
+    if plots:
+        plt.style.use('seaborn')
+
+        plt.plot(percentage_ask, np.cumsum(usd_value_asks))
+        plt.plot(percentage_bid, np.cumsum(usd_value_bids))
+        plt.show()
+
+def experiment_with_porfolio_optimization():
+    coins = ['ETH', 'BTC', 'BCH', 'XRP']
+
+    d = {}
+
+    for coin in coins:
+        test_files = glob.glob('data/' + coin + '/*.json')
+        test_files.sort(key = get_time)
+
+        X = load_all_data(test_files, 1)
+
+        d[coin] = X[:, 0] / X[0, 0]
+
+    df = pd.DataFrame(d)
+
+    minutes_in_a_year = 525949
+    mu = expected_returns.mean_historical_return(df, frequency=minutes_in_a_year)
+    print(mu)
+    S = risk_models.sample_cov(df, frequency=minutes_in_a_year)
+    print(S)
+    S = risk_models.CovarianceShrinkage(df, frequency=minutes_in_a_year).ledoit_wolf()
+    print(S)
+
+    ef = EfficientFrontier(mu, S)
+    ef.max_sharpe(0.07)
+    weights = ef.clean_weights()
+    print(weights)
+
+    ef.portfolio_performance(verbose=True, risk_free_rate=0.07)
+
+    weights = np.array(list(weights.values()))
+
+    X = df.values
+    wealths = X[-1, :] / X[0, :]
+    wealths = wealths ** (minutes_in_a_year / len(X))
+    print()
+    print(wealths)
+    print(np.dot(wealths, weights))
+
+    X_diff = X[1:, :] / X[:-1, :]
+
+    wealths = np.prod(X_diff, axis = 0) ** (minutes_in_a_year / len(X))
+    print(wealths)
+
+    weighted_diffs = np.matmul(X_diff, weights)
+    wealths = np.prod(weighted_diffs) ** (minutes_in_a_year / len(X))
+    print(wealths)
+
+    views = dict([(coin, 0.2) for coin in coins])
+
+    bl = BlackLittermanModel(S, pi = np.zeros((len(coins), 1)), absolute_views = mu)
+    S_post = bl.bl_cov()
+    mu_post = bl.bl_returns()
+    print()
+    print(mu_post)
+    print(mu_post / mu)
+    print(S_post)
+
+    ef = EfficientFrontier(mu_post, S_post)
+    ef.max_sharpe(0.07)
+    weights = ef.clean_weights()
+    print(weights)
+
+    ef.portfolio_performance(verbose=True, risk_free_rate=0.07)
+
+    weights = np.array(list(weights.values()))
+
+    X = df.values
+    wealths = X[-1, :] / X[0, :]
+    wealths = wealths ** (minutes_in_a_year / len(X))
+    print()
+    print(wealths)
+    print(np.dot(wealths, weights))
+
+    X_diff = X[1:, :] / X[:-1, :]
+
+    wealths = np.prod(X_diff, axis = 0) ** (minutes_in_a_year / len(X))
+    print(wealths)
+
+    weighted_diffs = np.matmul(X_diff, weights)
+    wealths = np.prod(weighted_diffs) ** (minutes_in_a_year / len(X))
+    print(wealths)
+
+
+def calculate_average_spreads():
+    plt.style.use('seaborn')
+    step = 0.0001
+    total_balance = 628 * 0.25
+    print(total_balance)
+
+    foldernames = glob.glob('data/orderbooks/ETH/*/')
+
+    for folder in foldernames:
+        filenames = glob.glob(folder + '*.json')
+        print(folder)
+
+        distribution_ask = []
+        distribution_bid = []
+
+        for filename in filenames:
+            with open(filename, 'r') as fp:
+                orderbook = json.load(fp)
+
+            asks = np.array(orderbook['asks'])
+            bids = np.array(orderbook['bids'])
+            price = (asks[0, 0] + bids[0, 0]) / 2
+
+            usd_value_asks = np.prod(asks, axis=1)
+            usd_value_bids = np.prod(bids, axis=1)
+            percentage_ask = asks[:, 0] / price - 1
+            percentage_bid = bids[:, 0] / price - 1
+
+            while len(distribution_ask) * step < np.max(percentage_ask) + step:
+                distribution_ask.append(0.0)
+
+            idx_ask = np.ceil(percentage_ask / step).astype(int)
+
+            distribution_ask = np.array(distribution_ask)
+            distribution_ask[idx_ask] += usd_value_asks / len(filenames)
+            distribution_ask = list(distribution_ask)
+
+            while -len(distribution_bid) * step > np.min(percentage_bid) - step:
+                distribution_bid.append(0.0)
+
+            idx_bid = np.ceil(np.abs(percentage_bid) / step).astype(int)
+
+            distribution_bid = np.array(distribution_bid)
+            distribution_bid[idx_bid] += usd_value_bids / len(filenames)
+            distribution_bid = list(distribution_bid)
+
+        distribution_ask = np.array(distribution_ask)
+        percentage_ask = np.linspace(0, len(distribution_ask) * step, len(distribution_ask))
+
+        li_asks = np.cumsum(distribution_ask) < total_balance
+        weights_ask = distribution_ask[li_asks] / total_balance
+        weights_ask = np.concatenate([weights_ask, [1 - np.sum(weights_ask)]])
+        average_spread_ask = np.sum(percentage_ask[:len(weights_ask)] * weights_ask)
+        print(average_spread_ask)
+
+        distribution_bid = np.array(distribution_bid)
+        percentage_bid = np.linspace(0, -len(distribution_bid) * step, len(distribution_bid))
+
+        li_bids = np.cumsum(distribution_bid) < total_balance
+        weights_bid = distribution_bid[li_bids] / total_balance
+        weights_bid = np.concatenate([weights_bid, [1 - np.sum(weights_bid)]])
+        average_spread_bid = np.sum(percentage_bid[:len(weights_bid)] * weights_bid)
+        print(average_spread_bid)
+
+        plt.plot(percentage_ask, distribution_ask)
+        plt.plot(percentage_bid, distribution_bid)
+        plt.show()
+
+
+def test_calc_aggreagte_buys_and_sells():
+    aggregate_N_list = [3]
+    w_list = [16]
+    m = m_bear = 3
+    short = True
+
+    files = glob.glob(f'data/ETH/*.json')
+    files.sort(key = get_time)
+
+    Xs = load_all_data(files, 0)
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+    X_origs = Xs
+    if m > 1:
+        Xs = [get_multiplied_X(X, m) for X in Xs]
+
+    for aggregate_N, w in tqdm(list(product(aggregate_N_list, w_list)), disable = True):
+
+        t1 = time.time()
+        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+            buys_orig, sells_orig, N_orig = get_buys_and_sells2(X_orig, aggregate_N * 60 * w)
+
+            for rand_N in range(aggregate_N * 60):
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1[:, :3], aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
+
+                N_skip = (N_orig - rand_N) % (aggregate_N * 60)
+
+                start_i = N_skip + aggregate_N * 60 - 1
+                idx = np.arange(start_i, N_orig, aggregate_N * 60)
+
+                buys = buys_orig[idx]
+                sells = sells_orig[idx]
+                N = buys.shape[0]
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+                wealths = get_wealths_fast(
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
+                )
+        t2 = time.time()
+        print(round_to_n(t2 - t1, 3))
+        t1 = time.time()
+        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+            for rand_N in range(aggregate_N * 60):
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    X1_orig = X_orig[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    X1_orig = X_orig
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1, aggregate_N)
+                X1_orig_agg = aggregate(X1_orig, aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
+
+                buys, sells, N = get_buys_and_sells2(X1_orig_agg, w)
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+                wealths = get_wealths_fast(
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
+                )
+        t2 = time.time()
+        print(round_to_n(t2 - t1, 3))
+        t1 = time.time()
+        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+            for rand_N in range(aggregate_N * 60):
+                if rand_N > 0:
+                    X1 = X[:-rand_N, :]
+                    X1_orig = X_orig[:-rand_N, :]
+                    if short:
+                        X1_bear = X_bear[:-rand_N, :]
+                else:
+                    X1 = X
+                    X1_orig = X_orig
+                    if short:
+                        X1_bear = X_bear
+                X1_agg = aggregate(X1, aggregate_N)
+                X1_orig_agg = aggregate(X1_orig, aggregate_N)
+                if short:
+                    X1_bear_agg = aggregate(X1_bear, aggregate_N)
+
+                buys, sells, N = get_buys_and_sells(X1_orig_agg, w)
+
+                X1_agg = X1_agg[-N:, :]
+                if short:
+                    X1_bear_agg = X1_bear_agg[-N:, :]
+                X1 = X1[-aggregate_N * 60 * N:, :]
+                if short:
+                    X1_bear = X1_bear[-aggregate_N * 60 * N:, :]
+
+                wealths = get_wealths_fast(
+                    X1_agg,
+                    buys,
+                    sells,
+                    commissions = commissions,
+                    spread_bull = spread if m <= 1.0 else spread_bull,
+                    X_bear = X1_bear_agg,
+                    spread_bear = spread_bear
+                )
+        t2 = time.time()
+        print(round_to_n(t2 - t1, 3))
+
+
+def simple_objective(x):
+    return x
+
 
 def main():
+    # total_balances = np.logspace(np.log10(157 / 10), np.log10(157 * 100), 100)
+    # spreads = get_average_spread('ETH', 3, total_balances, m_bear = 3)
+    # spread = spreads[np.argmin(np.abs(total_balances - 157))]
+    # print(spread)
+    # plt.style.use('seaborn')
+    # plt.plot(total_balances, spreads)
+    # plt.show()
+
+    strategies = {}
+    for filename in glob.glob('optim_results/*.json'):
+        parts = filename.split('/')
+        strategy_key = parts[1].split('.')[0]
+        with open(filename, 'r') as file:
+            strategies[strategy_key] = json.load(file)
+
+    weights = dict(list(zip(
+        [k for k in strategies.keys()],
+        np.ones((len(strategies),)) / len(strategies)
+    )))
+    # print(weights)
+
+    save_wealths(
+        strategies = strategies,
+        m = 3,
+        m_bear = 3,
+        weights = weights,
+        N_repeat_inp = 10,
+        Xs_index = [1]
+    )
+
+    # coin = 'ETH'
+    # freq = 'low'
+    # strategy_type = 'ma'
+    # options = [coin, freq, strategy_type]
+    #
+    # params_dict = find_optimal_aggregated_strategy_new(
+    #         coin = coin,
+    #         aggregate_N_list = [10],#range(1, 13),
+    #         w_list = [44],#range(1, 51),
+    #         m = 3,
+    #         m_bear = 3,
+    #         objective_fn = simple_objective,
+    #         spreads = [0.0015],#np.arange(0.0005, 0.01, 0.0005),
+    #         frequency = freq,
+    #         strategy_type = strategy_type,
+    #         N_repeat_inp = 10,
+    #         step = 0.01,
+    #         verbose = True,
+    #         disable = False,
+    #         short = True,
+    #         Xs_index = [0, 1])
+    #
+    # with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
+    #     json.dump(params_dict, file)
+    #
+    # for key, value in params_dict.items():
+    #     print(key)
+    #     print(value)
+
+    # test_calc_aggreagte_buys_and_sells()
+
+    # calculate_average_spreads()
+
+    # experiment_with_porfolio_optimization()
+
+    # symbols = ['ETHBULL', 'ETHBEAR', 'BULL', 'BEAR']
+    # for symbol in symbols:
+    #     orderbook_experiments(symbol, False)
+
     # 0.0 0.98 optimal
     # sll, sls = get_stop_loss(
     #     [
@@ -300,7 +735,7 @@ def main():
     #         (3, 16, 3, 3),
     #     ],
     #     short = True,
-    #     N_repeat = 100,
+    #     N_repeat = 200,
     #     randomize = True,
     #     step = 0.005,
     #     verbose = True)
@@ -321,22 +756,22 @@ def main():
     #                   step = 0.01,
     #                   verbose = True)
 
-    plot_performance([
-                        # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
-                        (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
-                        (3, 16, 3, 3, 1.79, 2.13, 0, 0),
-                      ],
-                      N_repeat = 300,
-                      short = True,
-                      take_profit = True,
-                      stop_loss = True,
-                      Xs_index = [1],
-                      N_ts_plots = 10,
-                      last_N_to_plot = 60 * 24 * 60)
+    # plot_performance([
+    #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
+    #                     (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
+    #                     (3, 16, 3, 3, 1.79, 2.13, 0, 0),
+    #                   ],
+    #                   N_repeat = 300,
+    #                   short = True,
+    #                   take_profit = True,
+    #                   stop_loss = True,
+    #                   Xs_index = [0, 1],
+    #                   N_ts_plots = 5,
+    #                   last_N_to_plot = None)#90 * 24 * 60)
 
     # plot_displacement([
     #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
-    #                     (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
+    #                     (3, 16, 3, 3, 1.79, 2.13, 0, 0), # best
     #                   ])
 
 
