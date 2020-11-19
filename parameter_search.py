@@ -18,17 +18,12 @@ from pypfopt import risk_models, expected_returns, black_litterman, \
 from pypfopt import BlackLittermanModel
 
 
-# TODO: make as general as possible
-#   - instead of arg get_buys_and_sells_fn, have an argument for strategy type
-#     (and then choose get_buys_and_sells_fn accordingly)
-# TODO: multiple types of stop loss and take profit
-#   - only take profit (current)
-#   - only stop loss
-#   - both
-#   - only high frequency stop loss (current stop loss)
-#   - only trailing stop loss
+
+
+# TODO: possible strategy types:
+#   - stoch
 # TODO: save m and m_bear in the output somehow
-# TODO: handle short = False
+# TODO: check that short = False is handled correctly
 def find_optimal_aggregated_strategy_new(
         coin,
         aggregate_N_list,
@@ -39,6 +34,7 @@ def find_optimal_aggregated_strategy_new(
         spreads,
         frequency = 'high',
         strategy_type = 'ma',
+        stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
         N_repeat_inp = None,
         step = 0.01,
         verbose = True,
@@ -54,7 +50,15 @@ def find_optimal_aggregated_strategy_new(
     if frequency not in ['low', 'high']:
         raise ValueError("'frequency' must be etiher 'low' or 'high'")
 
-    print(coin, frequency, strategy_type)
+    if not (set(stop_loss_take_profit_types) & {'stop_loss', 'take_porfit', 'trailing'}):
+        raise ValueError("'stop_loss_take_profit_types' must contain 'stop_loss', 'take_porfit', or 'trailing'")
+
+    if verbose:
+        print(coin, frequency, strategy_type)
+
+    sides = ['long']
+    if short:
+        sides.append('short')
 
     files = glob.glob(f'data/{coin}/*.json')
     files.sort(key = get_time)
@@ -73,11 +77,14 @@ def find_optimal_aggregated_strategy_new(
     objective_dict = {}
 
     for spread in spreads:
-        # wealths_dict[spread] = []
         objective_dict[spread] = -np.Inf
 
     middle_spread = spreads[len(spreads) // 2]
+    if verbose:
+        print("Middle spread:", round_to_n(middle_spread))
+
     pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
+
     for aggregate_N, w in pbar:
         high_freq_skip_condition = aggregate_N * w * 60 > 10000
         if (frequency == 'high' and high_freq_skip_condition) or \
@@ -95,17 +102,18 @@ def find_optimal_aggregated_strategy_new(
         N_transactions_buy = 0
         N_transactions_sell = 0
 
-        all_sub_trade_wealths_long = []
-        all_min_sub_trade_wealths_long = []
+        trade_wealths_dict = {}
+        sub_trade_wealths_dict = {}
 
-        all_sub_trade_wealths_short = []
-        all_min_sub_trade_wealths_short = []
+        wealth_categories = ['base', 'min', 'max'] # TODO: better name?
 
-        all_trade_wealths_long = []
-        all_max_trade_wealths_long = []
+        for side in sides:
+            trade_wealths_dict[side] = {}
+            sub_trade_wealths_dict[side] = {}
 
-        all_trade_wealths_short = []
-        all_max_trade_wealths_short = []
+            for category in wealth_categories:
+                trade_wealths_dict[side][category] = []
+                sub_trade_wealths_dict[side][category] = []
 
         for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
             buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, aggregate_N * 60 * w)
@@ -143,159 +151,133 @@ def find_optimal_aggregated_strategy_new(
                 N_transactions_buy += len(buys_idx) * 2
                 N_transactions_sell += len(sells_idx) * 2
 
-                sub_trade_wealths_long, min_sub_trade_wealths_long = get_sub_trade_wealths(X1_agg, buys, sells, N)
-                sub_trade_wealths_short, min_sub_trade_wealths_short = get_sub_trade_wealths(X1_bear_agg, sells, buys, N)
-                trade_wealths_long, max_trade_wealths_long = get_trade_wealths(X1_agg, buys, sells, N)
-                trade_wealths_short, max_trade_wealths_short = get_trade_wealths(X1_bear_agg, sells, buys, N)
+                side_tuples = [
+                    ('long', X1_agg, buys, sells),
+                ]
 
-                all_sub_trade_wealths_long.extend(sub_trade_wealths_long)
-                all_min_sub_trade_wealths_long.extend(min_sub_trade_wealths_long)
+                if short:
+                    side_tuples.append(('short', X1_bear_agg, sells, buys))
 
-                all_sub_trade_wealths_short.extend(sub_trade_wealths_short)
-                all_min_sub_trade_wealths_short.extend(min_sub_trade_wealths_short)
+                for side, X1, entries, exits in side_tuples:
+                    for category, category_trade_wealths in zip(wealth_categories, get_trade_wealths(X1, entries, exits, N)):
+                        trade_wealths_dict[side][category].extend(category_trade_wealths)
 
-                all_trade_wealths_long.extend(trade_wealths_long)
-                all_max_trade_wealths_long.extend(max_trade_wealths_long)
+                    for category, category_sub_trade_wealths in zip(wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)):
+                        sub_trade_wealths_dict[side][category].extend(category_sub_trade_wealths)
 
-                all_trade_wealths_short.extend(trade_wealths_short)
-                all_max_trade_wealths_short.extend(max_trade_wealths_short)
+        max_take_profit = np.max([np.max(v['max']) for v in trade_wealths_dict.values()])
+        take_profit_candidates = np.arange(1.0, max_take_profit + step * 2, step)
 
-        stop_losses = np.arange(0.0, 1.0, step)
-        stop_loss_wealths_long = np.array(list(map(lambda x:
-            get_stop_loss_wealths_from_sub_trades(
-                all_sub_trade_wealths_long,
-                all_min_sub_trade_wealths_long,
-                x,
-                total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
-                return_as_log = True,
-                return_N_transactions=True
-            ),
-            stop_losses
-        )))
-        N_stop_loss_transactions_buy = stop_loss_wealths_long[:, 1]
-        stop_loss_wealths_long = stop_loss_wealths_long[:, 0]
+        stop_loss_candidates = np.arange(0.0, 1.0, step)
 
-        stop_loss_wealths_short = np.array(list(map(lambda x:
-            get_stop_loss_wealths_from_sub_trades(
-                all_sub_trade_wealths_short,
-                all_min_sub_trade_wealths_short,
-                x,
-                total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
-                return_as_log = True,
-                return_N_transactions=True
-            ),
-            stop_losses
-        )))
-        N_stop_loss_transactions_sell = stop_loss_wealths_short[:, 1]
-        stop_loss_wealths_short = stop_loss_wealths_short[:, 0]
+        stop_loss_take_profit_wealths_dict = {}
 
-        take_profits_long = np.arange(1.0 + step, max(max_trade_wealths_long) + step*2, step)
-        take_profit_wealths_long = np.array(list(map(lambda x:
-            get_take_profit_wealths_from_trades(
-                all_trade_wealths_long,
-                all_max_trade_wealths_long,
-                x,
-                total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
-                return_as_log = True
-            ),
-            take_profits_long
-        )))
+        for side in sides:
+            stop_loss_take_profit_wealths_dict[side] = {}
 
-        take_profits_short = np.arange(1.0 + step, max(max_trade_wealths_short) + step*2, step)
-        take_profit_wealths_short = np.array(list(map(lambda x:
-            get_take_profit_wealths_from_trades(
-                all_trade_wealths_short,
-                all_max_trade_wealths_short,
-                x,
-                total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
-                return_as_log = True
-            ),
-            take_profits_short
-        )))
+            if 'take_porfit' in stop_loss_take_profit_types:
+                take_profit_wealths = np.array(list(map(lambda x:
+                    get_take_profit_wealths_from_trades(
+                        trade_wealths_dict[side]['base'],
+                        trade_wealths_dict[side]['max'],
+                        x,
+                        total_months = 1,
+                        commissions = 0.0,
+                        spread = 0.0,
+                        return_as_log = True
+                    ),
+                    take_profit_candidates
+                )))
+
+                stop_loss_take_profit_wealths_dict[side]['take_profit'] = take_profit_wealths
+
+            if 'stop_loss' in stop_loss_take_profit_types:
+                stop_loss_wealths = np.array(list(map(lambda x:
+                    get_stop_loss_wealths_from_trades(
+                        trade_wealths_dict[side]['base'],
+                        trade_wealths_dict[side]['min'],
+                        x,
+                        total_months = 1,
+                        commissions = 0.0,
+                        spread = 0.0,
+                        return_as_log = True
+                    ),
+                    stop_loss_candidates
+                )))
+
+                stop_loss_take_profit_wealths_dict[side]['stop_loss'] = stop_loss_wealths
+
+            if 'trailing' in stop_loss_take_profit_types:
+                trailing_wealths = np.array(list(map(lambda x:
+                    get_trailing_stop_loss_wealths_from_sub_trades(
+                        sub_trade_wealths_dict[side]['base'],
+                        sub_trade_wealths_dict[side]['min'],
+                        sub_trade_wealths_dict[side]['max'],
+                        x,
+                        total_months = 1,
+                        commissions = 0.0,
+                        spread = 0.0,
+                        return_as_log = True
+                    ),
+                    stop_loss_candidates
+                )))
+
+                stop_loss_take_profit_wealths_dict[side]['trailing'] = trailing_wealths
 
         for spread in spreads:
-            stop_loss_wealths_long_with_spread = np.zeros_like(stop_loss_wealths_long)
-            stop_loss_wealths_short_with_spread = np.zeros_like(stop_loss_wealths_short)
-            for i in range(len(stop_losses)):
-                stop_loss_wealths_long_with_spread[i] = apply_commissions_and_spreads_fast(
-                    stop_loss_wealths_long[i],
-                    N_transactions_buy + N_stop_loss_transactions_buy[i],
-                    commissions,
-                    spread,
-                    n_months = total_months,
-                    from_log = True
-                )
-                stop_loss_wealths_short_with_spread[i] = apply_commissions_and_spreads_fast(
-                    stop_loss_wealths_short[i],
-                    N_transactions_sell + N_stop_loss_transactions_sell[i],
-                    commissions,
-                    spread,
-                    n_months = total_months,
-                    from_log = True
-                )
+            best_stop_loss_take_profit_wealths_with_spread_dict = {}
 
-            take_profit_wealths_long_with_spread = np.zeros_like(take_profit_wealths_long)
-            for i in range(len(take_profit_wealths_long)):
-                take_profit_wealths_long_with_spread[i] = apply_commissions_and_spreads_fast(
-                    take_profit_wealths_long[i],
-                    N_transactions_buy,
-                    commissions,
-                    spread,
-                    n_months = total_months,
-                    from_log = True
-                )
+            for side in sides:
+                N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
 
-            take_profit_wealths_short_with_spread = np.zeros_like(take_profit_wealths_short)
-            for i in range(len(take_profit_wealths_short)):
-                take_profit_wealths_short_with_spread[i] = apply_commissions_and_spreads_fast(
-                    take_profit_wealths_short[i],
-                    N_transactions_sell,
-                    commissions,
-                    spread,
-                    n_months = total_months,
-                    from_log = True
-                )
+                best_wealth = -1
+                best_param = -1
+                best_k = None
 
-            stop_loss_long = stop_losses[np.argmax(stop_loss_wealths_long_with_spread)]
-            stop_loss_short = stop_losses[np.argmax(stop_loss_wealths_short_with_spread)]
+                for k in stop_loss_take_profit_wealths_dict[side].keys():
+                    wealths_with_spread = np.zeros_like(stop_loss_take_profit_wealths_dict[side][k])
 
-            take_profit_long = take_profits_long[np.argmax(take_profit_wealths_long_with_spread)]
-            take_profit_short = take_profits_short[np.argmax(take_profit_wealths_short_with_spread)]
+                    for i in range(len(wealths_with_spread)):
+                        wealths_with_spread[i] = apply_commissions_and_spreads_fast(
+                            stop_loss_take_profit_wealths_dict[side][k][i],
+                            N_transactions,
+                            commissions,
+                            spread,
+                            n_months = total_months,
+                            from_log = True
+                        )
 
-            if np.max(stop_loss_wealths_long_with_spread) > np.max(take_profit_wealths_long_with_spread):
-                take_profit_long = np.Inf
-            else:
-                stop_loss_long = 0
+                    i = np.argmax(wealths_with_spread)
 
-            if np.max(stop_loss_wealths_short_with_spread) > np.max(take_profit_wealths_short_with_spread):
-                take_profit_short = np.Inf
-            else:
-                stop_loss_short = 0
+                    candidate_params = take_profit_candidates if k == 'take_profit' else stop_loss_candidates
 
-            stop_loss_take_profit_wealth = max(
-                    np.max(stop_loss_wealths_long_with_spread),
-                    np.max(take_profit_wealths_long_with_spread)
-            ) * \
-            max(
-                np.max(stop_loss_wealths_short_with_spread),
-                np.max(take_profit_wealths_short_with_spread)
-            )
+                    best_stop_loss_take_profit_param = candidate_params[i]
+                    best_stop_loss_take_profit_wealth = wealths_with_spread[i]
 
+                    if best_stop_loss_take_profit_wealth > best_wealth:
+                        best_wealth = best_stop_loss_take_profit_wealth
+                        best_param = best_stop_loss_take_profit_param
+                        best_k = k
+
+                best_stop_loss_take_profit_wealths_with_spread_dict[side] = (best_k, best_param, best_wealth)
+
+            stop_loss_take_profit_wealth = 1
+            stop_loss_take_profit_tuple = ()
+
+            for k, param, wealth in best_stop_loss_take_profit_wealths_with_spread_dict.values():
+                stop_loss_take_profit_wealth *= wealth
+                stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
+
+            # print(spread)
             # print(stop_loss_take_profit_wealth, stop_loss_take_profit_wealth ** 12)
+            # print(stop_loss_take_profit_tuple)
+
             objective = objective_fn(stop_loss_take_profit_wealth)
             if objective > objective_dict[spread]:
                 objective_dict[spread] = objective
                 d = {
                     "objective": objective,
-                    "params": (aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short),
+                    "params": (aggregate_N, w) + stop_loss_take_profit_tuple,
                 }
                 params_dict[spread] = d
 
@@ -303,6 +285,60 @@ def find_optimal_aggregated_strategy_new(
 
 
     return params_dict
+
+# TODO: implement
+def save_optimal_parameters(
+    coin = 'ETH',
+    freq = 'low',
+    strategy_type = 'ma',
+    stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
+    aggregate_N_list = range(1, 13),
+    w_list = range(1, 51),
+    m = 3,
+    m_bear = 3,
+    min_spread = 0.0005,
+    max_spread = 0.01,
+    spread_step = 0.0005,
+    N_repeat_inp = 10,
+    step = 0.01,
+    verbose = True,
+    disable = False,
+    short = True,
+    Xs_index = [0, 1],
+    debug = False
+
+):
+    options = [coin, freq, strategy_type]
+
+    def simple_objective(x):
+        return x
+
+    params_dict = find_optimal_aggregated_strategy_new(
+            coin = coin,
+            aggregate_N_list = aggregate_N_list,
+            w_list = w_list,
+            m = m,
+            m_bear = m_bear,
+            objective_fn = simple_objective,
+            spreads = np.arange(min_spread, max_spread, spread_step),
+            frequency = freq,
+            strategy_type = strategy_type,
+            stop_loss_take_profit_types = stop_loss_take_profit_types,
+            N_repeat_inp = N_repeat_inp,
+            step = step,
+            verbose = verbose,
+            disable = disable,
+            short = short,
+            Xs_index = Xs_index)
+
+    if not debug:
+        with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
+            json.dump(params_dict, file)
+
+    if verbose:
+        for key, value in params_dict.items():
+            print(key)
+            print(value)
 
 
 # TODO: handle short = False
@@ -490,6 +526,7 @@ def save_wealths(
         Xs_index = Xs_index
     )
 
+    # TODO: have this as a input parameter
     df.to_csv('optim_results/wealths.csv')
 
 def optimize_weights(save = True, verbose = False):
@@ -602,54 +639,64 @@ def optimize_weights_iterative(
         print(a, b, c)
         print()
 
+    # TODO: delete 'wealths.csv'
+
 
 def plot_weighted_adaptive_wealths(
     strategies,
     m,
     m_bear,
-    N_repeat_inp = 1,
+    N_repeat = 1,
     short = True,
     randomize = True,
     Xs_index = [0, 1]
 ):
+    plt.style.use('seaborn')
+
     with open('optim_results/weights.json', 'r') as file:
         weights = json.load(file)
 
-    df = get_adaptive_wealths_for_multiple_strategies(
-        strategies = strategies,
-        m = m,
-        m_bear = m_bear,
-        weights = weights,
-        N_repeat_inp = N_repeat_inp,
-        disable = True,
-        verbose = False,
-        short = short,
-        randomize = randomize,
-        Xs_index = Xs_index
-    )
+    weight_values = np.array(list(weights.values()))
 
-    wealths = (df.iloc[-1] / df.iloc[0])  ** (minutes_in_a_year / len(df))
-    print(wealths)
+    # TODO: move theis loop into get_adaptive_wealths_for_multiple_strategies?
+    for i in range(N_repeat):
+        df = get_adaptive_wealths_for_multiple_strategies(
+            strategies = strategies,
+            m = m,
+            m_bear = m_bear,
+            weights = weights,
+            N_repeat_inp = 1,
+            disable = True,
+            verbose = False,
+            short = short,
+            randomize = randomize,
+            Xs_index = Xs_index
+        )
 
-    X = df.values
+        wealths = (df.iloc[-1] / df.iloc[0])  ** (minutes_in_a_year / len(df))
+        print(wealths)
 
-    weights = np.array(list(weights.values()))
-    weighted_wealths = np.matmul(X, weights)
-    wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / len(X))
-    print(wealth)
+        X = df.values
 
-    # TODO: update weights every aggregate_N steps (for each strategy)
-    # X_diff = X[1:, :] / X[:-1, :]
-    #
-    # weighted_diffs = np.matmul(X_diff, weights)
-    # weighted_wealths2 = np.cumprod(weighted_diffs)
-    # wealth = weighted_wealths2[-1] ** (minutes_in_a_year / len(X))
-    # print(wealth)
+        weighted_wealths = np.matmul(X, weight_values)
+        wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / len(X))
+        print(wealth)
 
-    plt.style.use('seaborn')
-    plt.plot(X, 'k', alpha = 0.25)
-    plt.plot(weighted_wealths, 'b')
-    # plt.plot(weighted_wealths2, 'g')
+        # TODO: update weights every aggregate_N steps (for each strategy)
+        #   - or every 1-3 months
+        #   - make a function for it
+
+        # X_diff = X[1:, :] / X[:-1, :]
+        #
+        # weighted_diffs = np.matmul(X_diff, weight_values)
+        # weighted_wealths2 = np.cumprod(weighted_diffs)
+        # wealth = weighted_wealths2[-1] ** (minutes_in_a_year / len(X))
+        # print(wealth)
+
+        plt.plot(X, 'k', alpha = 0.25 / np.sqrt(N_repeat))
+        plt.plot(weighted_wealths, 'b', alpha = 1.0 / np.sqrt(N_repeat))
+        # plt.plot(weighted_wealths2, 'g', alpha = 1.0 / np.sqrt(N_repeat))
+
     plt.yscale('log')
     plt.show()
 

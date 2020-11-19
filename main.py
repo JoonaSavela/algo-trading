@@ -40,21 +40,15 @@ from pypfopt import BlackLittermanModel
 #   would speed up aggregate(...) massively, if take profits were also calculated
 #   from those.
 
-# TODO: take actual spreads into account in the strategies
-#   - visualize this somehow
-#       - use adaptive spread, calculated from historical average orderbook
-#   - how to manage sell side?
+# TODO: visualize weighted adaptive spreads
+
+# TODO: make an adaptive version of plot_displacement
 
 # TODO: only trade with .../USD
 
-# TODO: trade with multiple coins (each with their own params)
-
 # TODO: make a maker strategy instead of taker
 
-# TODO: apply portfolio optimization to determine how to weigh multiple strategies
-#   - need to calculate average performance of strategies (same length)
-#       - need to have exactly same time stamps
-#   - needs to take into account adaptive spread
+# TODO: implement weighted adaptive strategies in trade.py
 
 # TODO: implement different objective functions in find_optimal_aggregated_strategy
 
@@ -347,88 +341,6 @@ def orderbook_experiments(symbol, plots = True):
         plt.plot(percentage_bid, np.cumsum(usd_value_bids))
         plt.show()
 
-def experiment_with_porfolio_optimization():
-    coins = ['ETH', 'BTC', 'BCH', 'XRP']
-
-    d = {}
-
-    for coin in coins:
-        test_files = glob.glob('data/' + coin + '/*.json')
-        test_files.sort(key = get_time)
-
-        X = load_all_data(test_files, 1)
-
-        d[coin] = X[:, 0] / X[0, 0]
-
-    df = pd.DataFrame(d)
-
-    minutes_in_a_year = 525949
-    mu = expected_returns.mean_historical_return(df, frequency=minutes_in_a_year)
-    print(mu)
-    S = risk_models.sample_cov(df, frequency=minutes_in_a_year)
-    print(S)
-    S = risk_models.CovarianceShrinkage(df, frequency=minutes_in_a_year).ledoit_wolf()
-    print(S)
-
-    ef = EfficientFrontier(mu, S)
-    ef.max_sharpe(0.07)
-    weights = ef.clean_weights()
-    print(weights)
-
-    ef.portfolio_performance(verbose=True, risk_free_rate=0.07)
-
-    weights = np.array(list(weights.values()))
-
-    X = df.values
-    wealths = X[-1, :] / X[0, :]
-    wealths = wealths ** (minutes_in_a_year / len(X))
-    print()
-    print(wealths)
-    print(np.dot(wealths, weights))
-
-    X_diff = X[1:, :] / X[:-1, :]
-
-    wealths = np.prod(X_diff, axis = 0) ** (minutes_in_a_year / len(X))
-    print(wealths)
-
-    weighted_diffs = np.matmul(X_diff, weights)
-    wealths = np.prod(weighted_diffs) ** (minutes_in_a_year / len(X))
-    print(wealths)
-
-    views = dict([(coin, 0.2) for coin in coins])
-
-    bl = BlackLittermanModel(S, pi = np.zeros((len(coins), 1)), absolute_views = mu)
-    S_post = bl.bl_cov()
-    mu_post = bl.bl_returns()
-    print()
-    print(mu_post)
-    print(mu_post / mu)
-    print(S_post)
-
-    ef = EfficientFrontier(mu_post, S_post)
-    ef.max_sharpe(0.07)
-    weights = ef.clean_weights()
-    print(weights)
-
-    ef.portfolio_performance(verbose=True, risk_free_rate=0.07)
-
-    weights = np.array(list(weights.values()))
-
-    X = df.values
-    wealths = X[-1, :] / X[0, :]
-    wealths = wealths ** (minutes_in_a_year / len(X))
-    print()
-    print(wealths)
-    print(np.dot(wealths, weights))
-
-    X_diff = X[1:, :] / X[:-1, :]
-
-    wealths = np.prod(X_diff, axis = 0) ** (minutes_in_a_year / len(X))
-    print(wealths)
-
-    weighted_diffs = np.matmul(X_diff, weights)
-    wealths = np.prod(weighted_diffs) ** (minutes_in_a_year / len(X))
-    print(wealths)
 
 
 def calculate_average_spreads():
@@ -648,118 +560,105 @@ def simple_objective(x):
 
 
 def main():
-    # total_balances = np.logspace(np.log10(157 / 10), np.log10(157 * 100), 100)
+
+    save_optimal_parameters(
+        coin = 'ETH',
+        freq = 'low',
+        strategy_type = 'ma',
+        stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
+        aggregate_N_list = range(1, 13),
+        w_list = range(1, 51),
+        m = 3,
+        m_bear = 3,
+        min_spread = 0.0005,
+        max_spread = 0.01,
+        spread_step = 0.0005,
+        N_repeat_inp = 40,
+        step = 0.01,
+        verbose = True,
+        disable = False,
+        short = True,
+        Xs_index = [0, 1],
+        debug = False
+    )
+
+
+    # a = np.arange(3)
+    # b = np.arange(3) + 4
+    #
+    # print(a)
+    # print(b)
+    # c = np.stack([a, b], axis = -1)
+    # print(c)
+    # print(c.flatten())
+
+    # client = FtxClient(ftx_api_key, ftx_secret_key)
+    # total_balance = get_total_balance(client, False) / 4
+    # total_balances = np.logspace(np.log10(total_balance / 10), np.log10(total_balance * 100), 100)
     # spreads = get_average_spread('ETH', 3, total_balances, m_bear = 3)
-    # spread = spreads[np.argmin(np.abs(total_balances - 157))]
+    # spread = spreads[np.argmin(np.abs(total_balances - total_balance))]
     # print(spread)
     # plt.style.use('seaborn')
     # plt.plot(total_balances, spreads)
     # plt.show()
 
-    strategies = {}
-    for filename in glob.glob('optim_results/*.json'):
-        parts = filename.split('/')
-        strategy_key = parts[1].split('.')[0]
-        with open(filename, 'r') as file:
-            strategies[strategy_key] = json.load(file)
-
-    weights = dict(list(zip(
-        [k for k in strategies.keys()],
-        np.ones((len(strategies),)) / len(strategies)
-    )))
-    # print(weights)
-
-    save_wealths(
-        strategies = strategies,
-        m = 3,
-        m_bear = 3,
-        weights = weights,
-        N_repeat_inp = 10,
-        Xs_index = [1]
-    )
-
-    # coin = 'ETH'
-    # freq = 'low'
-    # strategy_type = 'ma'
-    # options = [coin, freq, strategy_type]
+    # strategies = {}
+    # coins = ['ETH', 'BTC']
+    # freqs = ['low', 'high']
+    # strategy_types = ['ma']
     #
-    # params_dict = find_optimal_aggregated_strategy_new(
-    #         coin = coin,
-    #         aggregate_N_list = [10],#range(1, 13),
-    #         w_list = [44],#range(1, 51),
-    #         m = 3,
-    #         m_bear = 3,
-    #         objective_fn = simple_objective,
-    #         spreads = [0.0015],#np.arange(0.0005, 0.01, 0.0005),
-    #         frequency = freq,
-    #         strategy_type = strategy_type,
-    #         N_repeat_inp = 10,
-    #         step = 0.01,
-    #         verbose = True,
-    #         disable = False,
-    #         short = True,
-    #         Xs_index = [0, 1])
+    # for coin, freq, strategy_type in product(coins, freqs, strategy_types):
+    #     strategy_key = '_'.join([coin, freq, strategy_type])
+    #     filename = f'optim_results/{strategy_key}.json'
+    #     with open(filename, 'r') as file:
+    #         strategies[strategy_key] = json.load(file)
+
+    # with open('optim_results/weights.json', 'r') as file:
+    #     weights = json.load(file)
     #
-    # with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
-    #     json.dump(params_dict, file)
-    #
-    # for key, value in params_dict.items():
-    #     print(key)
-    #     print(value)
+    # get_adaptive_wealths_for_multiple_strategies(
+    #     strategies = strategies,
+    #     m = 3,
+    #     m_bear = 3,
+    #     weights = weights,
+    #     N_repeat_inp = 5,
+    #     disable = False,
+    #     verbose = True,
+    #     randomize = True,
+    #     Xs_index = [0, 1]
+    # )
+
+    # plot_weighted_adaptive_wealths(
+    #     strategies,
+    #     m = 3,
+    #     m_bear = 3,
+    #     N_repeat = 5,
+    #     short = True,
+    #     randomize = True,
+    #     Xs_index = [0, 1]
+    # )
+
+    # optimize_weights_iterative(
+    #     coins = ['ETH', 'BTC'],
+    #     freqs = ['low', 'high'],
+    #     strategy_types = ['ma'],
+    #     weights_type = "file",
+    #     n_iter = 2
+    # )
 
     # test_calc_aggreagte_buys_and_sells()
 
     # calculate_average_spreads()
 
-    # experiment_with_porfolio_optimization()
-
-    # symbols = ['ETHBULL', 'ETHBEAR', 'BULL', 'BEAR']
-    # for symbol in symbols:
-    #     orderbook_experiments(symbol, False)
-
-    # 0.0 0.98 optimal
-    # sll, sls = get_stop_loss(
-    #     [
-    #         # (3, 16, 1, 3),
-    #         (3, 16, 3, 3),
-    #     ],
-    #     short = True,
-    #     N_repeat = 100,
-    #     randomize = True,
-    #     step = 0.005,
-    #     verbose = True)
-
-    # get_stop_loss_and_take_profit(
-    #     [
-    #         # (3, 16, 1, 3),
-    #         (3, 16, 3, 3),
-    #     ],
-    #     short = True,
-    #     N_repeat = 200,
-    #     randomize = True,
-    #     step = 0.005,
-    #     verbose = True)
-
     # asdf2()
     # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
 
-    # take_profit_long, take_profit_short = \
-    # get_take_profit([
-    #                     # (4, 12, 1, 3),
-    #                     # (4, 12, 3, 3),
-    #                     # (3, 16, 1, 3),
-    #                     (3, 16, 3, 3), # best
-    #                   ],
-    #                   short = True,
-    #                   N_repeat = 200,
-    #                   randomize = True,
-    #                   step = 0.01,
-    #                   verbose = True)
-
     # plot_performance([
     #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
-    #                     (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
-    #                     (3, 16, 3, 3, 1.79, 2.13, 0, 0),
+    #                     # (3, 16, 3, 3, 1.79, np.Inf, 0, 0.98), # best
+    #                     # (3, 16, 3, 3, 1.79, 2.13, 0, 0),
+    #                     # (10, 44, 3, 3, 4.36, 1.83, 0, 0),
+    #                     (3, 16, 3, 3, 1.80, np.Inf, 0, 0.98),
     #                   ],
     #                   N_repeat = 300,
     #                   short = True,

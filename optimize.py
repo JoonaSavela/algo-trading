@@ -290,6 +290,7 @@ def get_trade_wealths(X, entries, exits, N):
 
     trade_wealths = []
     max_trade_wealths = []
+    min_trade_wealths = []
 
     for entry_i in entries_idx:
         larger_exits_idx = exits_idx[exits_idx > entry_i]
@@ -298,8 +299,9 @@ def get_trade_wealths(X, entries, exits, N):
         if sub_X.shape[0] > 1:
             trade_wealths.append(sub_X[-1, 0] / sub_X[0, 0])
             max_trade_wealths.append(np.max(sub_X[1:, 1]) / sub_X[0, 0]) # use highs
+            min_trade_wealths.append(np.min(sub_X[1:, 2]) / sub_X[0, 0]) # use lows
 
-    return trade_wealths, max_trade_wealths
+    return trade_wealths, min_trade_wealths, max_trade_wealths
 
 
 def append_trade_wealths(wealths, entries, exits, N, trade_wealths, max_trade_wealths):
@@ -316,18 +318,22 @@ def get_sub_trade_wealths(X, entries, exits, N):
     entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
 
     sub_trade_wealths = []
+    max_sub_trade_wealths = []
     min_sub_trade_wealths = []
 
     for entry_i in entries_idx:
         larger_exits_idx = exits_idx[exits_idx > entry_i]
         exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
         sub_X = X[entry_i:exit_i, :]
-        sub_wealths = sub_X[1:, 0] / sub_X[:-1, 0]
-        min_sub_wealths = sub_X[1:, 2] / sub_X[:-1, 0]
-        sub_trade_wealths.append(sub_wealths)
-        min_sub_trade_wealths.append(min_sub_wealths)
+        sub_wealths = sub_X[1:, 0] / sub_X[0, 0]
+        max_sub_wealths = sub_X[1:, 1] / sub_X[0, 0]
+        min_sub_wealths = sub_X[1:, 2] / sub_X[0, 0]
+        if sub_wealths.size > 0:
+            sub_trade_wealths.append(sub_wealths)
+            max_sub_trade_wealths.append(max_sub_wealths)
+            min_sub_trade_wealths.append(min_sub_wealths)
 
-    return sub_trade_wealths, min_sub_trade_wealths
+    return sub_trade_wealths, min_sub_trade_wealths, max_sub_trade_wealths
 
 def append_sub_trade_wealths(X, entries, exits, N, sub_trade_wealths, min_sub_trade_wealths):
     entries_idx, exits_idx = get_entry_and_exit_idx(entries, exits, N)
@@ -352,6 +358,46 @@ def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_p
         return res if return_as_log else np.exp(res)
 
     return np.log(trade_wealths) if return_as_log else trade_wealths
+
+def get_stop_loss_wealths_from_trades(trade_wealths, min_trade_wealths, stop_loss, total_months, commissions, spread, return_total = True, return_as_log = False):
+    trade_wealths = np.array(trade_wealths)
+    min_trade_wealths = np.array(min_trade_wealths)
+    trade_wealths[min_trade_wealths < stop_loss] = stop_loss * (1 - commissions - spread)
+
+    if return_total:
+        res = np.sum(np.log(trade_wealths)) / total_months
+        return res if return_as_log else np.exp(res)
+
+    return np.log(trade_wealths) if return_as_log else trade_wealths
+
+
+def get_trailing_stop_loss_wealths_from_sub_trades(sub_trade_wealths, min_sub_trade_wealths, max_sub_trade_wealths, trailing_stop_loss, total_months, commissions, spread, return_total = True, return_as_log = False):
+    trade_wealths = np.array([
+        sub_trade_wealths[i][-1] for i in range(len(sub_trade_wealths))
+    ])
+
+    for i in range(len(sub_trade_wealths)):
+        # price starts exactly at 1, otherwise would need to multiply with it
+        trailing_diff = 1 - trailing_stop_loss
+
+        # assume the worst case for trailing stop loss
+        accumulative_max = np.concatenate([
+            np.array([1.0]),
+            np.maximum.accumulate(max_sub_trade_wealths[i])
+        ])[:-1]
+        li = min_sub_trade_wealths[i] < accumulative_max - trailing_diff
+
+        if np.any(li):
+            trade_wealths[i] = (accumulative_max[li][0] - trailing_diff) * (1 - commissions - spread)
+
+    if return_total:
+        res = np.sum(np.log(trade_wealths)) / total_months
+        return res if return_as_log else np.exp(res)
+
+    return np.log(trade_wealths) if return_as_log else trade_wealths
+
+
+
 
 def get_stop_loss_wealths_from_sub_trades(sub_trade_wealths, min_sub_trade_wealths, stop_loss, total_months, commissions, spread, return_total = True, return_as_log = False, return_N_transactions = False):
     trade_wealths = []
