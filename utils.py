@@ -326,18 +326,20 @@ def sma(X, window_size):
         X = X.reshape(-1, 1)
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
 
-def stochastic_oscillator(X, window_size = 3 * 14, k = 1, latency = 0):
+# TODO: make this faster with concurrent.futures!
+def stochastic_oscillator(X, window_size = 3 * 14, k = 1):
     if len(X.shape) == 1:
         X = np.repeat(X.reshape((-1, 1)), 4, axis = 1)
     res = []
-    for i in range(X.shape[0] - window_size + 1 - latency):
+    for i in range(X.shape[0] - window_size + 1):
         max_price = np.max(X[i:i + window_size, 1])
         min_price = np.min(X[i:i + window_size, 2])
         min_close = np.min(X[i:i + window_size, 0])
         stoch = (X[i + window_size - 1, 0] - min_close) / (max_price - min_price)
         res.append(stoch)
     res = np.array(res)
-    res = np.convolve(res, np.ones((k,))/k, mode='valid')
+    if k > 1:
+        res = np.convolve(res, np.ones((k,))/k, mode='valid')
     return res
 
 def heikin_ashi(X):
@@ -548,8 +550,10 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 
 
-# TODO: fix bug with use_diff = True and get_take_profits
-# TODO: try candlestick patterns with support and resistance lines?
+
+
+
+# TODO: remove
 def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std = False, use_diff = False, verbose_i = None):
     ma = np.diff(sma(X[:, 0] / X[0, 0], w))
     if verbose_i is not None:
@@ -587,15 +591,79 @@ def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std =
 
     return (buys, sells) + return_tuple
 
-def get_buys_and_sells2(X, w, as_boolean = False, verbose_i = None):
-    # ma = np.diff(sma(X[:, 0] / X[0, 0], w))
+def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, hourly = True):
+    w = aggregate_N * w
+    if hourly:
+        w *= 60
+
     diff = X[w:, 0] - X[:-w, 0]
-    if verbose_i is not None:
-        print(diff[verbose_i])
     N = diff.shape[0]
 
     buys = diff > 0
     sells = diff < 0
+
+    return_tuple = (N,)
+
+    if as_boolean:
+        if N == 1:
+            return (buys[0], sells[0]) + return_tuple
+        else:
+            return (buys, sells) + return_tuple
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
+
+    return (buys, sells) + return_tuple
+
+def get_buys_and_sells_ma_cross(X, aggregate_N, w_max, w_min, as_boolean = False, hourly = True):
+    w_max = aggregate_N * w_max
+    w_min = aggregate_N * w_min
+    if hourly:
+        w_max *= 60
+        w_min *= 60
+
+    assert(w_max >= w_min)
+
+    ma_max = sma(X[1:, 0] / X[0, 0], w_max)
+    ma_min = sma(X[(w_max - w_min + 1):, 0] / X[0, 0], w_min)
+
+    N = ma_max.shape[0]
+    assert(N == len(X) - w_max)
+    assert(N == ma_min.shape[0])
+
+    buys = ma_min > ma_max
+    sells = ma_min < ma_max
+
+    return_tuple = (N,)
+
+    if as_boolean:
+        if N == 1:
+            return (buys[0], sells[0]) + return_tuple
+        else:
+            return (buys, sells) + return_tuple
+
+    buys = buys.astype(float)
+    sells = sells.astype(float)
+
+    return (buys, sells) + return_tuple
+
+
+
+
+def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean = False, hourly = True):
+    w = aggregate_N * w
+    if hourly:
+        w *= 60
+
+    # start from index 1 so that N is the same as in the previous get_buys_and_sells function
+    stoch = stochastic_oscillator(X[1:, :], w)
+    N = stoch.shape[0]
+
+    diff = np.diff(X[:, 0])
+    diff = diff[-N:]
+
+    buys = (stoch <= th) & (diff > 0)
+    sells = (stoch >= 1 - th) & (diff < 0)
 
     return_tuple = (N,)
 
