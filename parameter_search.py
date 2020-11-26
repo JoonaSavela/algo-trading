@@ -163,7 +163,7 @@ def skip_condition(strategy_type, frequency, args):
         aggregate_N, w1, w2 = args
 
         test_value = w1 / w2 - 1
-        if test_value < 0:
+        if test_value <= 0:
             return True, test_value
 
     return False, 0
@@ -189,6 +189,9 @@ def get_objective_function(
         workers = None,
         debug = False
 ):
+    if frequency not in ['low', 'high']:
+        raise ValueError("'frequency' must be etiher 'low' or 'high'")
+
     if strategy_type == 'ma':
         get_buys_and_sells_fn = get_buys_and_sells_ma
     elif strategy_type == 'stoch':
@@ -209,7 +212,7 @@ def get_objective_function(
 
     skip_cond, conflict_value = skip_condition(strategy_type, frequency, args)
     if skip_cond:
-        return {'fail': conflict_value}
+        return {'objective': conflict_value}
 
     if N_repeat_inp is None:
         N_repeat = aggregate_N * 60
@@ -315,7 +318,6 @@ def get_objective_function(
 
     best_stop_loss_take_profit_wealths_dict = {}
 
-
     for side in sides:
 
         best_wealth = -1
@@ -350,7 +352,8 @@ def get_objective_function(
     for i in range(12):
         # TODO: raise warning if spread > max(potential_spreads)
         spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance * stop_loss_take_profit_wealth))]
-        print("Spread:", spread)
+        if debug:
+            print("Spread:", spread)
 
         for side, v in best_stop_loss_take_profit_wealths_dict.items():
             k, param, wealth = v
@@ -389,28 +392,37 @@ def get_objective_function(
 #   - ma crossover
 #   - 2-timeframe ma
 # TODO: save m and m_bear in the output somehow
-# TODO: use concurrent.futures library for speedups
 # TODO: check that short = False is handled correctly
 def find_optimal_aggregated_strategy_new(
+        client,
         coin,
-        aggregate_N_list,
-        w_list,
+        bounds,
         m,
         m_bear,
-        objective_fn,
-        spreads,
         frequency = 'high',
         strategy_type = 'ma',
         stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
+        search_method = 'gradient',
+        resolutions = None,
+        init_args = None,
         N_repeat_inp = None,
         step = 0.01,
         verbose = True,
         disable = False,
         short = True,
-        Xs_index = [0, 1]):
+        Xs_index = [0, 1]
+):
+    if strategy_type == 'ma':
+        parameter_names = ['aggregate_N', 'w']
+    elif strategy_type == 'stoch':
+        parameter_names = ['aggregate_N', 'w', 'th']
+    elif strategy_type == 'ma_cross':
+        parameter_names = ['aggregate_N', 'w1', 'w2']
+    else:
+        raise ValueError('strategy_type')
 
-    if frequency not in ['low', 'high']:
-        raise ValueError("'frequency' must be etiher 'low' or 'high'")
+    if search_method not in ['gradient', 'BayesOpt']:
+        raise ValueError('search_method')
 
     if verbose:
         print(coin, frequency, strategy_type)
@@ -427,41 +439,118 @@ def find_optimal_aggregated_strategy_new(
     if not isinstance(Xs, list):
         Xs = [Xs]
 
+    N_years = max(len(X) for X in Xs) / minutes_in_a_year
+    print("N_years:", N_years)
+
+    total_balance = get_total_balance(client, False)
+    total_balance = max(total_balance, 1)
+
+    potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
+        np.log10(total_balance * 100 * N_years), 2000)
+    potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
+
     X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
     X_origs = Xs
     if m > 1:
         Xs = [get_multiplied_X(X, m) for X in Xs]
 
-    params_dict = {}
-    objective_dict = {}
+    if search_method == 'gradient':
+        prev_args = None
+        if init_args is None:
+            init_args = ()
+            for param_name in parameter_names:
+                search_space = np.arange(
+                    bounds[param_name][0],
+                    bounds[param_name][1] + resolutions[param_name],
+                    resolutions[param_name]
+                )
+                init_args += (np.random.choice(search_space),)
 
-    for spread in spreads:
-        objective_dict[spread] = -np.Inf
+            if verbose:
+                print(init_args)
+                print()
 
-    middle_spread = spreads[len(spreads) // 2]
+        args = np.array(init_args)
 
-    pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
+        resolution_values = np.array([v for v in resolutions.values()]).reshape(1, -1)
+        objective_dict = {}
 
-    for aggregate_N, w in pbar:
-        pass
+        while np.any(args != prev_args):
+            ds = np.array(list(product([-1, 0, 1], repeat = len(bounds))))
+            candidate_args = ds * resolution_values + args.reshape(1, -1)
+
+            for i in range(len(bounds)):
+                candidate_args[:, i] = np.clip(candidate_args[:, i], *bounds[parameter_names[i]])
+
+            candidate_args = np.unique(candidate_args, axis=0)
+
+            best_objective = -np.Inf
+            best_args = None
+
+            t0 = time.time()
+
+            for c_args in candidate_args:
+                c_args = tuple(c_args)
+                if c_args not in objective_dict:
+                    objective_dict[c_args] = get_objective_function(
+                            c_args,
+                            strategy_type,
+                            frequency,
+                            N_repeat_inp,
+                            sides,
+                            X_origs,
+                            Xs,
+                            X_bears,
+                            short,
+                            step,
+                            stop_loss_take_profit_types,
+                            total_balance,
+                            potential_balances,
+                            potential_spreads,
+                            workers = None,
+                            debug = False
+                    )
+
+                if objective_dict[c_args]['objective'] > best_objective:
+                    best_objective = objective_dict[c_args]['objective']
+                    best_args = c_args
+
+            prev_args = np.array(args)
+            args = best_args
+
+            t1 = time.time()
+
+            if verbose:
+                print(args)
+                print(objective_dict[args])
+                print(round_to_n(t1 - t0, 4))
+                print()
+
+            args = np.array(args)
+
+        args = tuple(args)
+
+        return objective_dict[args]
+
+    elif search_method == 'BayesOpt':
+        raise NotImplementedError()
 
 
-    return params_dict
+    return {}
 
-# TODO: implement
+# TODO: save order of arguments as in find_optimal_aggregated_strategy_new
 def save_optimal_parameters(
-    coin = 'ETH',
-    freq = 'low',
-    strategy_type = 'ma',
+    bounds,
+    coin,
+    frequency,
+    strategy_type,
+    search_method,
     stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
-    aggregate_N_list = range(1, 13),
-    w_list = range(1, 51),
+    resolutions = None,
+    init_args = None,
     m = 3,
     m_bear = 3,
-    min_spread = 0.0005,
-    max_spread = 0.01,
-    spread_step = 0.0005,
-    N_repeat_inp = 10,
+    N_repeat_inp = 40,
     step = 0.01,
     verbose = True,
     disable = False,
@@ -470,37 +559,36 @@ def save_optimal_parameters(
     debug = False
 
 ):
-    options = [coin, freq, strategy_type]
-
-    def simple_objective(x):
-        return x
+    client = FtxClient(ftx_api_key, ftx_secret_key)
 
     params_dict = find_optimal_aggregated_strategy_new(
+            client = client,
             coin = coin,
-            aggregate_N_list = aggregate_N_list,
-            w_list = w_list,
+            bounds = bounds,
             m = m,
             m_bear = m_bear,
-            objective_fn = simple_objective,
-            spreads = np.arange(min_spread, max_spread, spread_step),
-            frequency = freq,
+            frequency = frequency,
             strategy_type = strategy_type,
             stop_loss_take_profit_types = stop_loss_take_profit_types,
+            search_method = search_method,
+            resolutions = resolutions,
+            init_args = init_args,
             N_repeat_inp = N_repeat_inp,
             step = step,
             verbose = verbose,
             disable = disable,
             short = short,
-            Xs_index = Xs_index)
+            Xs_index = Xs_index
+    )
+
+    options = [coin, frequency, strategy_type]
 
     if not debug:
         with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
             json.dump(params_dict, file)
 
     if verbose:
-        for key, value in params_dict.items():
-            print(key)
-            print(value)
+        print_dict(params_dict)
 
 
 # TODO: handle short = False
