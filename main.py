@@ -565,9 +565,20 @@ def simple_objective(x):
 
 
 def main():
+    client = FtxClient(ftx_api_key, ftx_secret_key)
     coin = 'ETH'
     m = 3
     m_bear = 3
+
+    # TODO: move this outside of this function
+    total_balance = get_total_balance(client, False)
+    total_balance = max(total_balance, 1)
+    # print(get_average_spread(coin, m, [total_balance], m_bear = m_bear))
+    potential_balances = np.logspace(np.log10(total_balance / 10), np.log10(total_balance * 1000), 2000)
+    # print(potential_balances[1] / potential_balances[0])
+    potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
+    # spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance))]
+
     files = glob.glob(f'data/{coin}/*.json')
     files.sort(key = get_time)
 
@@ -576,15 +587,17 @@ def main():
     if not isinstance(Xs, list):
         Xs = [Xs]
 
+    # print(max(len(X) for X in Xs))
+
     X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
     X_origs = Xs
     if m > 1:
         Xs = [get_multiplied_X(X, m) for X in Xs]
 
     params_dict = get_objective_function(
-            args = (3, 16, 4),
-            frequency = 'high',
-            strategy_type = 'ma_cross',
+            args = (10, 44),
+            strategy_type = 'ma',
+            frequency = 'low',
             N_repeat_inp = 40,
             sides = ['long', 'short'],
             X_origs = X_origs,
@@ -593,8 +606,9 @@ def main():
             short = True,
             step = 0.01,
             stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
-            spreads = np.arange(0.0005, 0.01, 0.0005),
-            objective_fn = simple_objective,
+            total_balance = total_balance,
+            potential_balances = potential_balances,
+            potential_spreads = potential_spreads,
             workers = 4,
             debug = True
     )

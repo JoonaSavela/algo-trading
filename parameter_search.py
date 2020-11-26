@@ -183,8 +183,9 @@ def get_objective_function(
         short,
         step,
         stop_loss_take_profit_types,
-        spreads,
-        objective_fn,
+        total_balance,
+        potential_balances,
+        potential_spreads,
         workers = None,
         debug = False
 ):
@@ -203,10 +204,6 @@ def get_objective_function(
     stop_loss_take_profit_types = sorted(stop_loss_take_profit_types, key = lambda x: int(x != 'trailing'))
 
     params_dict = {}
-    objective_dict = {}
-
-    for spread in spreads:
-        objective_dict[spread] = -np.Inf
 
     aggregate_N, w = args[:2]
 
@@ -246,7 +243,7 @@ def get_objective_function(
         t1 = time.time()
         t_X = t1 - t00
         if debug:
-            print("Loop X:", round_to_n(t_X, 4))
+            print("get_buys_and_sells_fn:", round_to_n(t_X, 4))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers = workers) as executor:
             futures = [executor.submit(
@@ -316,71 +313,70 @@ def get_objective_function(
         print("Loop sltp:", round_to_n(t_sltp, 4))
         print()
 
-    # return {}
-    t0 = time.time()
+    best_stop_loss_take_profit_wealths_dict = {}
 
-    for spread in spreads:
-        best_stop_loss_take_profit_wealths_with_spread_dict = {}
 
-        for side in sides:
+    for side in sides:
+
+        best_wealth = -1
+        best_param = -1
+        best_k = None
+
+        for k in stop_loss_take_profit_wealths_dict[side].keys():
+            wealths = apply_commissions_and_spreads_fast(
+                stop_loss_take_profit_wealths_dict[side][k],
+                0,
+                0.0,
+                0.0,
+                n_months = total_months,
+                from_log = True
+            )
+            i = np.argmax(wealths)
+
+            candidate_params = take_profit_candidates if k == 'take_profit' else stop_loss_candidates
+
+            stop_loss_take_profit_param = candidate_params[i]
+            stop_loss_take_profit_wealth = wealths[i]
+
+            if stop_loss_take_profit_wealth > best_wealth:
+                best_wealth = stop_loss_take_profit_wealth
+                best_param = stop_loss_take_profit_param
+                best_k = k
+
+        best_stop_loss_take_profit_wealths_dict[side] = (best_k, best_param, best_wealth)
+
+    stop_loss_take_profit_wealth = 1
+
+    for i in range(12):
+        # TODO: raise warning if spread > max(potential_spreads)
+        spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance * stop_loss_take_profit_wealth))]
+        print("Spread:", spread)
+
+        for side, v in best_stop_loss_take_profit_wealths_dict.items():
+            k, param, wealth = v
             N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
 
-            best_wealth = -1
-            best_param = -1
-            best_k = None
+            stop_loss_take_profit_wealth *= apply_commissions_and_spreads_fast(
+                np.log(wealth),
+                N_transactions / total_months,
+                commissions,
+                spread,
+                n_months = 1,
+                from_log = True
+            )
 
-            for k in stop_loss_take_profit_wealths_dict[side].keys():
-                wealths_with_spread = np.zeros_like(stop_loss_take_profit_wealths_dict[side][k])
+    stop_loss_take_profit_tuple = ()
 
-                for i in range(len(wealths_with_spread)):
-                    wealths_with_spread[i] = apply_commissions_and_spreads_fast(
-                        stop_loss_take_profit_wealths_dict[side][k][i],
-                        N_transactions,
-                        commissions,
-                        spread,
-                        n_months = total_months,
-                        from_log = True
-                    )
+    for k, param, wealth in best_stop_loss_take_profit_wealths_dict.values():
+        stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
 
-                i = np.argmax(wealths_with_spread)
+    objective = stop_loss_take_profit_wealth ** (1 / 12)
 
-                candidate_params = take_profit_candidates if k == 'take_profit' else stop_loss_candidates
-
-                stop_loss_take_profit_param = candidate_params[i]
-                stop_loss_take_profit_wealth = wealths_with_spread[i]
-
-                if stop_loss_take_profit_wealth > best_wealth:
-                    best_wealth = stop_loss_take_profit_wealth
-                    best_param = stop_loss_take_profit_param
-                    best_k = k
-
-            best_stop_loss_take_profit_wealths_with_spread_dict[side] = (best_k, best_param, best_wealth)
-
-        stop_loss_take_profit_wealth = 1
-        stop_loss_take_profit_tuple = ()
-
-        for k, param, wealth in best_stop_loss_take_profit_wealths_with_spread_dict.values():
-            stop_loss_take_profit_wealth *= wealth
-            stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
-
-        # print(spread)
-        # print(stop_loss_take_profit_wealth, stop_loss_take_profit_wealth ** 12)
-        # print(stop_loss_take_profit_tuple)
-
-        objective = objective_fn(stop_loss_take_profit_wealth)
-        if objective > objective_dict[spread]:
-            objective_dict[spread] = objective
-            d = {
-                "objective": objective,
-                "params": args + stop_loss_take_profit_tuple,
-            }
-            params_dict[spread] = d
-
-    t1 = time.time()
-    t_spreads = t1 - t0
-    if debug:
-        print("Loop spreads:", round_to_n(t_spreads, 4))
-        print()
+    params_dict = {
+        "objective": objective,
+        "yearly profit": stop_loss_take_profit_wealth,
+        "params": args + stop_loss_take_profit_tuple,
+    }
 
     # pbar.set_description(str(round_to_n(objective_dict[middle_spread], 4)))
 
@@ -436,11 +432,6 @@ def find_optimal_aggregated_strategy_new(
     if m > 1:
         Xs = [get_multiplied_X(X, m) for X in Xs]
 
-    # TODO: start of multiprocessing function (inner)
-    #   - input should be a filtered version of pbar (below)
-    #       - can tqdm be applied/used?
-    #   - each returns their own params_dict
-
     params_dict = {}
     objective_dict = {}
 
@@ -448,15 +439,12 @@ def find_optimal_aggregated_strategy_new(
         objective_dict[spread] = -np.Inf
 
     middle_spread = spreads[len(spreads) // 2]
-    # if verbose:
-    #     print("Middle spread:", round_to_n(middle_spread))
 
     pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
 
     for aggregate_N, w in pbar:
         pass
 
-    # TODO: run the parallel processes, combine the results
 
     return params_dict
 
@@ -532,7 +520,6 @@ def get_adaptive_wealths_for_multiple_strategies(
 
     aggregate_Ns = []
     ws = []
-
 
     for strategy_key, strategy in strategies.items():
         aggregate_Ns.extend([v['params'][0] for v in strategy.values()])
