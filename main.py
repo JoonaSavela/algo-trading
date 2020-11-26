@@ -20,6 +20,7 @@ from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt import risk_models, expected_returns, black_litterman, \
     objective_functions
 from pypfopt import BlackLittermanModel
+import multiprocessing
 
 
 # TODO: train a (bayesian) NN on the (aggregated) data
@@ -34,6 +35,10 @@ from pypfopt import BlackLittermanModel
 
 # TODO: write a bunch of tests
 
+# TODO: Automate everything
+
+# TODO: smart print function for printing dicts
+
 
 
 # TODO: what if stop losses were calculated from (minute time frame) closes?
@@ -46,7 +51,7 @@ from pypfopt import BlackLittermanModel
 
 # TODO: only trade with .../USD
 
-# TODO: make a maker strategy instead of taker
+# TODO: make a maker strategy instead of taker?
 
 # TODO: implement weighted adaptive strategies in trade.py
 
@@ -435,7 +440,7 @@ def test_calc_aggreagte_buys_and_sells():
 
         t1 = time.time()
         for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
-            buys_orig, sells_orig, N_orig = get_buys_and_sells2(X_orig, aggregate_N * 60 * w)
+            buys_orig, sells_orig, N_orig = get_buys_and_sells_ma(X_orig, aggregate_N * 60 * w)
 
             for rand_N in range(aggregate_N * 60):
                 if rand_N > 0:
@@ -495,7 +500,7 @@ def test_calc_aggreagte_buys_and_sells():
                 if short:
                     X1_bear_agg = aggregate(X1_bear, aggregate_N)
 
-                buys, sells, N = get_buys_and_sells2(X1_orig_agg, w)
+                buys, sells, N = get_buys_and_sells_ma(X1_orig_agg, w)
 
                 X1_agg = X1_agg[-N:, :]
                 if short:
@@ -560,27 +565,64 @@ def simple_objective(x):
 
 
 def main():
+    coin = 'ETH'
+    m = 3
+    m_bear = 3
+    files = glob.glob(f'data/{coin}/*.json')
+    files.sort(key = get_time)
 
-    save_optimal_parameters(
-        coin = 'ETH',
-        freq = 'low',
-        strategy_type = 'ma',
-        stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
-        aggregate_N_list = range(1, 13),
-        w_list = range(1, 51),
-        m = 3,
-        m_bear = 3,
-        min_spread = 0.0005,
-        max_spread = 0.01,
-        spread_step = 0.0005,
-        N_repeat_inp = 40,
-        step = 0.01,
-        verbose = True,
-        disable = False,
-        short = True,
-        Xs_index = [0, 1],
-        debug = False
+    Xs = load_all_data(files, [0, 1])
+
+    if not isinstance(Xs, list):
+        Xs = [Xs]
+
+    X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+    X_origs = Xs
+    if m > 1:
+        Xs = [get_multiplied_X(X, m) for X in Xs]
+
+    params_dict = get_objective_function(
+            args = (3, 16, 4),
+            frequency = 'high',
+            strategy_type = 'ma_cross',
+            N_repeat_inp = 40,
+            sides = ['long', 'short'],
+            X_origs = X_origs,
+            Xs = Xs,
+            X_bears = X_bears,
+            short = True,
+            step = 0.01,
+            stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
+            spreads = np.arange(0.0005, 0.01, 0.0005),
+            objective_fn = simple_objective,
+            workers = 4,
+            debug = True
     )
+
+    for key, value in params_dict.items():
+        print(key)
+        print(value)
+
+    # save_optimal_parameters(
+    #     coin = 'ETH',
+    #     freq = 'low',
+    #     strategy_type = 'stoch',
+    #     stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
+    #     aggregate_N_list = range(1, 13),
+    #     w_list = range(1, 51),
+    #     m = 3,
+    #     m_bear = 3,
+    #     min_spread = 0.0005,
+    #     max_spread = 0.01,
+    #     spread_step = 0.0005,
+    #     N_repeat_inp = 40,
+    #     step = 0.01,
+    #     verbose = True,
+    #     disable = False,
+    #     short = True,
+    #     Xs_index = [0, 1],
+    #     debug = False
+    # )
 
 
     # a = np.arange(3)

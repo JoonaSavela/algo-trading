@@ -4,6 +4,7 @@ import pandas as pd
 import glob
 from utils import *
 from data import *
+import time
 import os
 from parameters import parameters, minutes_in_a_year
 from tqdm import tqdm
@@ -16,13 +17,383 @@ from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt import risk_models, expected_returns, black_litterman, \
     objective_functions
 from pypfopt import BlackLittermanModel
+import concurrent.futures
 
 
+def get_trade_wealths_dicts(
+        rand_N,
+        X,
+        X_bear,
+        short,
+        aggregate_N,
+        buys_orig,
+        sells_orig,
+        N_orig,
+        sides,
+        wealth_categories):
+
+    trade_wealths_dict = {}
+    sub_trade_wealths_dict = {}
+
+    for side in sides:
+        trade_wealths_dict[side] = {}
+        sub_trade_wealths_dict[side] = {}
+
+        for category in wealth_categories:
+            trade_wealths_dict[side][category] = []
+            sub_trade_wealths_dict[side][category] = []
+
+    if rand_N > 0:
+        X1 = X[:-rand_N, :]
+        if short:
+            X1_bear = X_bear[:-rand_N, :]
+    else:
+        X1 = X
+        if short:
+            X1_bear = X_bear
+    X1_agg = aggregate(X1[:, :3], aggregate_N)
+    if short:
+        X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
+
+    N_skip = (N_orig - rand_N) % (aggregate_N * 60)
+
+    start_i = N_skip + aggregate_N * 60 - 1
+    idx = np.arange(start_i, N_orig, aggregate_N * 60)
+
+    buys = buys_orig[idx]
+    sells = sells_orig[idx]
+    N = buys.shape[0]
+
+    X1_agg = X1_agg[-N:, :]
+    if short:
+        X1_bear_agg = X1_bear_agg[-N:, :]
+
+    n_months = N * aggregate_N / (24 * 30)
+    total_months = n_months
+
+    buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
+    N_transactions_buy = len(buys_idx) * 2
+    N_transactions_sell = len(sells_idx) * 2
+
+    side_tuples = [
+        ('long', X1_agg, buys, sells),
+    ]
+
+    if short:
+        side_tuples.append(('short', X1_bear_agg, sells, buys))
+
+    for side, X1, entries, exits in side_tuples:
+        for category, category_trade_wealths in zip(wealth_categories, get_trade_wealths(X1, entries, exits, N)):
+            trade_wealths_dict[side][category].extend(category_trade_wealths)
+
+        for category, category_sub_trade_wealths in zip(wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)):
+            sub_trade_wealths_dict[side][category].extend(category_sub_trade_wealths)
+
+
+    return trade_wealths_dict, sub_trade_wealths_dict, N_transactions_buy, N_transactions_sell, total_months
+
+
+def get_stop_loss_take_profit_wealth(
+    side,
+    stop_loss_take_profit_type,
+    trade_wealths_dict,
+    sub_trade_wealths_dict,
+    take_profit_candidates,
+    stop_loss_candidates
+):
+    if stop_loss_take_profit_type == 'take_profit':
+        return np.array(list(map(lambda x:
+            get_take_profit_wealths_from_trades(
+                trade_wealths_dict[side]['base'],
+                trade_wealths_dict[side]['max'],
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_total = True,
+                return_as_log = True
+            ),
+            take_profit_candidates
+        )))
+
+    elif stop_loss_take_profit_type == 'stop_loss':
+        return np.array(list(map(lambda x:
+            get_stop_loss_wealths_from_trades(
+                trade_wealths_dict[side]['base'],
+                trade_wealths_dict[side]['min'],
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_total = True,
+                return_as_log = True
+            ),
+            stop_loss_candidates
+        )))
+
+    elif stop_loss_take_profit_type == 'trailing':
+        return np.array(list(map(lambda x:
+            get_trailing_stop_loss_wealths_from_sub_trades(
+                sub_trade_wealths_dict[side]['base'],
+                sub_trade_wealths_dict[side]['min'],
+                sub_trade_wealths_dict[side]['max'],
+                x,
+                total_months = 1,
+                commissions = 0.0,
+                spread = 0.0,
+                return_total = True,
+                return_as_log = True
+            ),
+            stop_loss_candidates
+        )))
+
+    # TODO: raise a warning
+    return np.array([1.0])
+
+
+def skip_condition(strategy_type, frequency, args):
+    aggregate_N, w = args[:2]
+    test_value = aggregate_N * w * 60 / 10000 - 1
+    if frequency == 'high' and test_value >= 0:
+        return True, -test_value
+    elif frequency == 'low' and test_value < 0:
+        return True, test_value
+
+    if strategy_type == 'ma_cross':
+        aggregate_N, w1, w2 = args
+
+        test_value = w1 / w2 - 1
+        if test_value < 0:
+            return True, test_value
+
+    return False, 0
+
+
+
+
+def get_objective_function(
+        args,
+        strategy_type,
+        frequency,
+        N_repeat_inp,
+        sides,
+        X_origs,
+        Xs,
+        X_bears,
+        short,
+        step,
+        stop_loss_take_profit_types,
+        spreads,
+        objective_fn,
+        workers = None,
+        debug = False
+):
+    if strategy_type == 'ma':
+        get_buys_and_sells_fn = get_buys_and_sells_ma
+    elif strategy_type == 'stoch':
+        get_buys_and_sells_fn = get_buys_and_sells_stoch
+    elif strategy_type == 'ma_cross':
+        get_buys_and_sells_fn = get_buys_and_sells_ma_cross
+    else:
+        raise ValueError("strategy_type")
+
+    if not (set(stop_loss_take_profit_types) & {'stop_loss', 'take_profit', 'trailing'}):
+        raise ValueError("'stop_loss_take_profit_types' must contain 'stop_loss', 'take_profit', or 'trailing'")
+
+    stop_loss_take_profit_types = sorted(stop_loss_take_profit_types, key = lambda x: int(x != 'trailing'))
+
+    params_dict = {}
+    objective_dict = {}
+
+    for spread in spreads:
+        objective_dict[spread] = -np.Inf
+
+    aggregate_N, w = args[:2]
+
+    skip_cond, conflict_value = skip_condition(strategy_type, frequency, args)
+    if skip_cond:
+        return {'fail': conflict_value}
+
+    if N_repeat_inp is None:
+        N_repeat = aggregate_N * 60
+    else:
+        N_repeat = N_repeat_inp
+
+    N_repeat = min(N_repeat, aggregate_N * 60)
+    total_months = 0
+
+    N_transactions_buy = 0
+    N_transactions_sell = 0
+
+    trade_wealths_dict = {}
+    sub_trade_wealths_dict = {}
+
+    wealth_categories = ['base', 'min', 'max'] # TODO: better name?
+
+    for side in sides:
+        trade_wealths_dict[side] = {}
+        sub_trade_wealths_dict[side] = {}
+
+        for category in wealth_categories:
+            trade_wealths_dict[side][category] = []
+            sub_trade_wealths_dict[side][category] = []
+
+    t0 = time.time()
+    trade_wealths_dicts = []
+    for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
+        t00 = time.time()
+        buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, hourly = True)
+        t1 = time.time()
+        t_X = t1 - t00
+        if debug:
+            print("Loop X:", round_to_n(t_X, 4))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers = workers) as executor:
+            futures = [executor.submit(
+                get_trade_wealths_dicts,
+                rand_N,
+                X,
+                X_bear,
+                short,
+                aggregate_N,
+                buys_orig,
+                sells_orig,
+                N_orig,
+                sides,
+                wealth_categories
+            ) for rand_N in np.arange(0, aggregate_N * 60, aggregate_N * 60 // N_repeat)]
+
+            for future in concurrent.futures.as_completed(futures):
+                trade_wealths_dicts.append(future.result())
+
+    for tw_dict, sub_tw_dict, N_tr_buy, N_tr_sell, tm in trade_wealths_dicts:
+        N_transactions_buy += N_tr_buy
+        N_transactions_sell += N_tr_sell
+        total_months += tm
+
+        for side in sides:
+            for category in wealth_categories:
+                trade_wealths_dict[side][category].extend(tw_dict[side][category])
+                sub_trade_wealths_dict[side][category].extend(sub_tw_dict[side][category])
+
+    t1 = time.time()
+    t_X = t1 - t0
+    if debug:
+        print("Loop X:", round_to_n(t_X, 4))
+        print()
+
+    max_take_profit = np.max([np.max(v['max']) for v in trade_wealths_dict.values()])
+    take_profit_candidates = np.arange(1.0, max_take_profit + step, step)
+
+    stop_loss_candidates = np.arange(0.0, 1.0, step)
+
+    stop_loss_take_profit_wealths_dict = {}
+    t0 = time.time()
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers = workers) as executor:
+        futures = {executor.submit(
+            get_stop_loss_take_profit_wealth,
+            side,
+            stop_loss_take_profit_type,
+            trade_wealths_dict,
+            sub_trade_wealths_dict,
+            take_profit_candidates,
+            stop_loss_candidates
+        ): (side, stop_loss_take_profit_type) for stop_loss_take_profit_type, side in \
+                product(stop_loss_take_profit_types, sides)}
+
+        for future in concurrent.futures.as_completed(futures):
+            side, stop_loss_take_profit_type = futures[future]
+
+            if side not in stop_loss_take_profit_wealths_dict:
+                stop_loss_take_profit_wealths_dict[side] = {}
+
+            stop_loss_take_profit_wealths_dict[side][stop_loss_take_profit_type] = future.result()
+
+    t1 = time.time()
+    t_sltp = t1 - t0
+    if debug:
+        print("Loop sltp:", round_to_n(t_sltp, 4))
+        print()
+
+    # return {}
+    t0 = time.time()
+
+    for spread in spreads:
+        best_stop_loss_take_profit_wealths_with_spread_dict = {}
+
+        for side in sides:
+            N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
+
+            best_wealth = -1
+            best_param = -1
+            best_k = None
+
+            for k in stop_loss_take_profit_wealths_dict[side].keys():
+                wealths_with_spread = np.zeros_like(stop_loss_take_profit_wealths_dict[side][k])
+
+                for i in range(len(wealths_with_spread)):
+                    wealths_with_spread[i] = apply_commissions_and_spreads_fast(
+                        stop_loss_take_profit_wealths_dict[side][k][i],
+                        N_transactions,
+                        commissions,
+                        spread,
+                        n_months = total_months,
+                        from_log = True
+                    )
+
+                i = np.argmax(wealths_with_spread)
+
+                candidate_params = take_profit_candidates if k == 'take_profit' else stop_loss_candidates
+
+                stop_loss_take_profit_param = candidate_params[i]
+                stop_loss_take_profit_wealth = wealths_with_spread[i]
+
+                if stop_loss_take_profit_wealth > best_wealth:
+                    best_wealth = stop_loss_take_profit_wealth
+                    best_param = stop_loss_take_profit_param
+                    best_k = k
+
+            best_stop_loss_take_profit_wealths_with_spread_dict[side] = (best_k, best_param, best_wealth)
+
+        stop_loss_take_profit_wealth = 1
+        stop_loss_take_profit_tuple = ()
+
+        for k, param, wealth in best_stop_loss_take_profit_wealths_with_spread_dict.values():
+            stop_loss_take_profit_wealth *= wealth
+            stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
+
+        # print(spread)
+        # print(stop_loss_take_profit_wealth, stop_loss_take_profit_wealth ** 12)
+        # print(stop_loss_take_profit_tuple)
+
+        objective = objective_fn(stop_loss_take_profit_wealth)
+        if objective > objective_dict[spread]:
+            objective_dict[spread] = objective
+            d = {
+                "objective": objective,
+                "params": args + stop_loss_take_profit_tuple,
+            }
+            params_dict[spread] = d
+
+    t1 = time.time()
+    t_spreads = t1 - t0
+    if debug:
+        print("Loop spreads:", round_to_n(t_spreads, 4))
+        print()
+
+    # pbar.set_description(str(round_to_n(objective_dict[middle_spread], 4)))
+
+    return params_dict
 
 
 # TODO: possible strategy types:
 #   - stoch
+#   - candlestick
+#   - ma crossover
+#   - 2-timeframe ma
 # TODO: save m and m_bear in the output somehow
+# TODO: use concurrent.futures library for speedups
 # TODO: check that short = False is handled correctly
 def find_optimal_aggregated_strategy_new(
         coin,
@@ -34,7 +405,7 @@ def find_optimal_aggregated_strategy_new(
         spreads,
         frequency = 'high',
         strategy_type = 'ma',
-        stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
+        stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
         N_repeat_inp = None,
         step = 0.01,
         verbose = True,
@@ -42,16 +413,8 @@ def find_optimal_aggregated_strategy_new(
         short = True,
         Xs_index = [0, 1]):
 
-    if strategy_type == 'ma':
-        get_buys_and_sells_fn = get_buys_and_sells2
-    else:
-        raise ValueError("strategy_type")
-
     if frequency not in ['low', 'high']:
         raise ValueError("'frequency' must be etiher 'low' or 'high'")
-
-    if not (set(stop_loss_take_profit_types) & {'stop_loss', 'take_porfit', 'trailing'}):
-        raise ValueError("'stop_loss_take_profit_types' must contain 'stop_loss', 'take_porfit', or 'trailing'")
 
     if verbose:
         print(coin, frequency, strategy_type)
@@ -73,6 +436,11 @@ def find_optimal_aggregated_strategy_new(
     if m > 1:
         Xs = [get_multiplied_X(X, m) for X in Xs]
 
+    # TODO: start of multiprocessing function (inner)
+    #   - input should be a filtered version of pbar (below)
+    #       - can tqdm be applied/used?
+    #   - each returns their own params_dict
+
     params_dict = {}
     objective_dict = {}
 
@@ -80,209 +448,15 @@ def find_optimal_aggregated_strategy_new(
         objective_dict[spread] = -np.Inf
 
     middle_spread = spreads[len(spreads) // 2]
-    if verbose:
-        print("Middle spread:", round_to_n(middle_spread))
+    # if verbose:
+    #     print("Middle spread:", round_to_n(middle_spread))
 
     pbar = tqdm(list(product(aggregate_N_list, w_list)), desc = str(objective_dict[middle_spread]), disable = disable)
 
     for aggregate_N, w in pbar:
-        high_freq_skip_condition = aggregate_N * w * 60 > 10000
-        if (frequency == 'high' and high_freq_skip_condition) or \
-                (frequency == 'low' and not high_freq_skip_condition):
-            continue
+        pass
 
-        if N_repeat_inp is None:
-            N_repeat = aggregate_N * 60
-        else:
-            N_repeat = N_repeat_inp
-
-        N_repeat = min(N_repeat, aggregate_N * 60)
-        total_months = 0
-
-        N_transactions_buy = 0
-        N_transactions_sell = 0
-
-        trade_wealths_dict = {}
-        sub_trade_wealths_dict = {}
-
-        wealth_categories = ['base', 'min', 'max'] # TODO: better name?
-
-        for side in sides:
-            trade_wealths_dict[side] = {}
-            sub_trade_wealths_dict[side] = {}
-
-            for category in wealth_categories:
-                trade_wealths_dict[side][category] = []
-                sub_trade_wealths_dict[side][category] = []
-
-        for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
-            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, aggregate_N * 60 * w)
-
-            for rand_N in np.arange(0, aggregate_N * 60, aggregate_N * 60 // N_repeat):
-                if rand_N > 0:
-                    X1 = X[:-rand_N, :]
-                    if short:
-                        X1_bear = X_bear[:-rand_N, :]
-                else:
-                    X1 = X
-                    if short:
-                        X1_bear = X_bear
-                X1_agg = aggregate(X1[:, :3], aggregate_N)
-                if short:
-                    X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
-
-                N_skip = (N_orig - rand_N) % (aggregate_N * 60)
-
-                start_i = N_skip + aggregate_N * 60 - 1
-                idx = np.arange(start_i, N_orig, aggregate_N * 60)
-
-                buys = buys_orig[idx]
-                sells = sells_orig[idx]
-                N = buys.shape[0]
-
-                X1_agg = X1_agg[-N:, :]
-                if short:
-                    X1_bear_agg = X1_bear_agg[-N:, :]
-
-                n_months = N * aggregate_N / (24 * 30)
-                total_months += n_months
-
-                buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
-                N_transactions_buy += len(buys_idx) * 2
-                N_transactions_sell += len(sells_idx) * 2
-
-                side_tuples = [
-                    ('long', X1_agg, buys, sells),
-                ]
-
-                if short:
-                    side_tuples.append(('short', X1_bear_agg, sells, buys))
-
-                for side, X1, entries, exits in side_tuples:
-                    for category, category_trade_wealths in zip(wealth_categories, get_trade_wealths(X1, entries, exits, N)):
-                        trade_wealths_dict[side][category].extend(category_trade_wealths)
-
-                    for category, category_sub_trade_wealths in zip(wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)):
-                        sub_trade_wealths_dict[side][category].extend(category_sub_trade_wealths)
-
-        max_take_profit = np.max([np.max(v['max']) for v in trade_wealths_dict.values()])
-        take_profit_candidates = np.arange(1.0, max_take_profit + step * 2, step)
-
-        stop_loss_candidates = np.arange(0.0, 1.0, step)
-
-        stop_loss_take_profit_wealths_dict = {}
-
-        for side in sides:
-            stop_loss_take_profit_wealths_dict[side] = {}
-
-            if 'take_porfit' in stop_loss_take_profit_types:
-                take_profit_wealths = np.array(list(map(lambda x:
-                    get_take_profit_wealths_from_trades(
-                        trade_wealths_dict[side]['base'],
-                        trade_wealths_dict[side]['max'],
-                        x,
-                        total_months = 1,
-                        commissions = 0.0,
-                        spread = 0.0,
-                        return_as_log = True
-                    ),
-                    take_profit_candidates
-                )))
-
-                stop_loss_take_profit_wealths_dict[side]['take_profit'] = take_profit_wealths
-
-            if 'stop_loss' in stop_loss_take_profit_types:
-                stop_loss_wealths = np.array(list(map(lambda x:
-                    get_stop_loss_wealths_from_trades(
-                        trade_wealths_dict[side]['base'],
-                        trade_wealths_dict[side]['min'],
-                        x,
-                        total_months = 1,
-                        commissions = 0.0,
-                        spread = 0.0,
-                        return_as_log = True
-                    ),
-                    stop_loss_candidates
-                )))
-
-                stop_loss_take_profit_wealths_dict[side]['stop_loss'] = stop_loss_wealths
-
-            if 'trailing' in stop_loss_take_profit_types:
-                trailing_wealths = np.array(list(map(lambda x:
-                    get_trailing_stop_loss_wealths_from_sub_trades(
-                        sub_trade_wealths_dict[side]['base'],
-                        sub_trade_wealths_dict[side]['min'],
-                        sub_trade_wealths_dict[side]['max'],
-                        x,
-                        total_months = 1,
-                        commissions = 0.0,
-                        spread = 0.0,
-                        return_as_log = True
-                    ),
-                    stop_loss_candidates
-                )))
-
-                stop_loss_take_profit_wealths_dict[side]['trailing'] = trailing_wealths
-
-        for spread in spreads:
-            best_stop_loss_take_profit_wealths_with_spread_dict = {}
-
-            for side in sides:
-                N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
-
-                best_wealth = -1
-                best_param = -1
-                best_k = None
-
-                for k in stop_loss_take_profit_wealths_dict[side].keys():
-                    wealths_with_spread = np.zeros_like(stop_loss_take_profit_wealths_dict[side][k])
-
-                    for i in range(len(wealths_with_spread)):
-                        wealths_with_spread[i] = apply_commissions_and_spreads_fast(
-                            stop_loss_take_profit_wealths_dict[side][k][i],
-                            N_transactions,
-                            commissions,
-                            spread,
-                            n_months = total_months,
-                            from_log = True
-                        )
-
-                    i = np.argmax(wealths_with_spread)
-
-                    candidate_params = take_profit_candidates if k == 'take_profit' else stop_loss_candidates
-
-                    best_stop_loss_take_profit_param = candidate_params[i]
-                    best_stop_loss_take_profit_wealth = wealths_with_spread[i]
-
-                    if best_stop_loss_take_profit_wealth > best_wealth:
-                        best_wealth = best_stop_loss_take_profit_wealth
-                        best_param = best_stop_loss_take_profit_param
-                        best_k = k
-
-                best_stop_loss_take_profit_wealths_with_spread_dict[side] = (best_k, best_param, best_wealth)
-
-            stop_loss_take_profit_wealth = 1
-            stop_loss_take_profit_tuple = ()
-
-            for k, param, wealth in best_stop_loss_take_profit_wealths_with_spread_dict.values():
-                stop_loss_take_profit_wealth *= wealth
-                stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
-
-            # print(spread)
-            # print(stop_loss_take_profit_wealth, stop_loss_take_profit_wealth ** 12)
-            # print(stop_loss_take_profit_tuple)
-
-            objective = objective_fn(stop_loss_take_profit_wealth)
-            if objective > objective_dict[spread]:
-                objective_dict[spread] = objective
-                d = {
-                    "objective": objective,
-                    "params": (aggregate_N, w) + stop_loss_take_profit_tuple,
-                }
-                params_dict[spread] = d
-
-        pbar.set_description(str(round_to_n(objective_dict[middle_spread], 4)))
-
+    # TODO: run the parallel processes, combine the results
 
     return params_dict
 
@@ -291,7 +465,7 @@ def save_optimal_parameters(
     coin = 'ETH',
     freq = 'low',
     strategy_type = 'ma',
-    stop_loss_take_profit_types = ['stop_loss', 'take_porfit', 'trailing'],
+    stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
     aggregate_N_list = range(1, 13),
     w_list = range(1, 51),
     m = 3,
@@ -389,7 +563,7 @@ def get_adaptive_wealths_for_multiple_strategies(
         strategy_type = strategy_key.split('_')[2]
 
         if strategy_type == 'ma':
-            get_buys_and_sells_fn = get_buys_and_sells2
+            get_buys_and_sells_fn = get_buys_and_sells_ma
         else:
             raise ValueError("strategy_type")
 

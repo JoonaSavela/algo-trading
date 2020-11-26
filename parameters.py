@@ -29,5 +29,7 @@ commissions = 0.0007
 spread = 0.0002 / 2
 # spread_bull = 0.0029#54 / 2
 # spread_bear = 0.003#25 / 2
-spread_bull = 0.0025
-spread_bear = 0.0025
+spread_bull = 0.0005
+spread_bear = 0.0005
+
+minutes_in_a_year = 525949
