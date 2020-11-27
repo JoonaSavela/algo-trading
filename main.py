@@ -650,6 +650,7 @@ def main():
         m_bear = 3,
         N_repeat_inp = 40,
         step = 0.01,
+        skip_existing = True,
         verbose = True,
         disable = False,
         short = True,

@@ -781,12 +781,13 @@ def save_optimal_parameters(
 
         if not debug:
             are_same = True
-            for i in range(len(params_dict['params'])):
-                if params_dict_candidate['params'][i] != params_dict['params'][i]:
-                    are_same = False
-                    break
+            if init_args is not None:
+                for i in range(len(params_dict_candidate['params'])):
+                    if params_dict_candidate['params'][i] != params_dict['params'][i]:
+                        are_same = False
+                        break
 
-            if are_same:
+            if are_same and init_args is not None:
                 if verbose:
                     print("Optimal parameters did not change for:", coin, frequency, strategy_type)
             else:
