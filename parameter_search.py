@@ -784,6 +784,7 @@ def save_optimal_parameters(
                 if verbose:
                     print("Optimal parameters did not change for:", coin, frequency, strategy_type)
             else:
+                params_dict = params_dict_candidate
                 with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
                     json.dump(params_dict, file, cls = NpEncoder)
 
