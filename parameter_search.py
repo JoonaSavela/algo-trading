@@ -534,7 +534,8 @@ def find_optimal_aggregated_strategy_new(
 
     elif search_method == 'BayesOpt':
         if verbose:
-            print("Total N_iter:", N_iter + np.sqrt(N_iter).astype(int))
+            print("Total N_iter:", N_iter + np.sqrt(N_iter).astype(int) + \
+                (1 if init_args is not None else 0))
             if init_args is not None:
                 print("Init args:", init_args)
             print()
@@ -705,10 +706,12 @@ def save_optimal_parameters(
         bounds = dict([(k, all_bounds[k]) for k in parameter_names])
         resolutions = dict([(k, all_resolutions[k]) for k in parameter_names])
 
-        if N_iter is None:
-            N_iter = 50
+        N_iter1 = N_iter
+        if N_iter1 is None:
+            N_iter1 = 100
 
-        N_iter *= 2 ** (len(bounds) - 1)
+        if len(bounds) > 2:
+            N_iter1 *= 2 ** (len(bounds) - 2)
 
         fname = 'optim_results/' + '_'.join(options) + '.json'
         if os.path.exists(fname):
@@ -722,7 +725,7 @@ def save_optimal_parameters(
         if verbose:
             print("Bayesian Optimization...")
 
-        params_dict, objective_dict = find_optimal_aggregated_strategy_new(
+        params_dict_candidate, objective_dict = find_optimal_aggregated_strategy_new(
                 client = client,
                 coin = coin,
                 bounds = bounds,
@@ -734,7 +737,7 @@ def save_optimal_parameters(
                 stop_loss_take_profit_types = stop_loss_take_profit_types,
                 search_method = 'BayesOpt',
                 init_args = init_args,
-                N_iter = N_iter,
+                N_iter = N_iter1,
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = None,
                 step = step,
@@ -747,7 +750,7 @@ def save_optimal_parameters(
         if verbose:
             print("Gradient Descent...")
 
-        params_dict, _ = find_optimal_aggregated_strategy_new(
+        params_dict_candidate, _ = find_optimal_aggregated_strategy_new(
                 client = client,
                 coin = coin,
                 bounds = bounds,
@@ -758,7 +761,7 @@ def save_optimal_parameters(
                 strategy_type = strategy_type,
                 stop_loss_take_profit_types = stop_loss_take_profit_types,
                 search_method = 'gradient',
-                init_args = params_dict['params'][:len(bounds)],
+                init_args = params_dict_candidate['params'][:len(bounds)],
                 N_iter = N_iter,
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = objective_dict,
@@ -771,8 +774,18 @@ def save_optimal_parameters(
 
 
         if not debug:
-            with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
-                json.dump(params_dict, file, cls = NpEncoder)
+            are_same = True
+            for i in range(len(params_dict['params'])):
+                if params_dict_candidate['params'][i] != params_dict['params'][i]:
+                    are_same = False
+                    break
+
+            if are_same:
+                if verbose:
+                    print("Optimal parameters did not change for:", coin, frequency, strategy_type)
+            else:
+                with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
+                    json.dump(params_dict, file, cls = NpEncoder)
 
         if verbose:
             print()
