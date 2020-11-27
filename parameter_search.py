@@ -669,6 +669,7 @@ def save_optimal_parameters(
     m_bear = 3,
     N_repeat_inp = 40,
     step = 0.01,
+    skip_existing = False,
     verbose = True,
     disable = False,
     short = True,
@@ -694,6 +695,20 @@ def save_optimal_parameters(
 
         options = [coin, frequency, strategy_type]
 
+        fname = 'optim_results/' + '_'.join(options) + '.json'
+        if os.path.exists(fname):
+            if skip_existing:
+                if verbose:
+                    print('Skipping...')
+                    print()
+                continue
+
+            with open(fname, 'r') as file:
+                params_dict = json.load(file)
+                init_args = params_dict['params'][:len(bounds)]
+        else:
+            init_args = None
+
         if strategy_type == 'ma':
             parameter_names = ['aggregate_N', 'w']
         elif strategy_type == 'stoch':
@@ -712,15 +727,6 @@ def save_optimal_parameters(
 
         if len(bounds) > 2:
             N_iter1 *= 2 ** (len(bounds) - 2)
-
-        fname = 'optim_results/' + '_'.join(options) + '.json'
-        if os.path.exists(fname):
-            with open(fname, 'r') as file:
-                params_dict = json.load(file)
-                init_args = params_dict['params'][:len(bounds)]
-
-        else:
-            init_args = None
 
         if verbose:
             print("Bayesian Optimization...")
