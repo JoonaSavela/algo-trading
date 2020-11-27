@@ -613,19 +613,19 @@ def main():
 
     # parameter_names = ['aggregate_N', 'w']
 
-    bounds = {
+    all_bounds = {
         'aggregate_N': (1, 12),
-        'w1': (1, 50),
+        'w': (1, 50),
         'w2': (1, 20),
     }
 
-    resolutions = {
+    all_resolutions = {
         'aggregate_N': 1,
-        'w1': 1,
+        'w': 1,
         'w2': 1,
     }
 
-    init_args = (12, 50)
+    # init_args = (10, 44)
 
     # args = np.array((3, 16))
     # resolution_values = np.array([v for v in resolutions.values()]).reshape(1, -1)
@@ -639,14 +639,13 @@ def main():
 
 
     save_optimal_parameters(
-        bounds = bounds,
-        coin = 'ETH',
-        frequency = 'low',
-        strategy_type = 'ma_cross',
-        search_method = 'gradient',
+        all_bounds = all_bounds,
+        all_resolutions = all_resolutions,
+        coins = 'ETH',
+        frequencies = 'low',
+        strategy_types = 'ma',
         stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
-        resolutions = resolutions,
-        init_args = None,
+        N_iter = 2,
         m = 3,
         m_bear = 3,
         N_repeat_inp = 40,
@@ -655,7 +654,7 @@ def main():
         disable = False,
         short = True,
         Xs_index = [0, 1],
-        debug = True
+        debug = False
     )
 
 

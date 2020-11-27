@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import json
 from math import log10, floor, ceil
 from scipy.signal import find_peaks
 from scipy import stats
@@ -9,6 +10,24 @@ try:
 except ImportError as e:
     print(e)
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NpEncoder, self).default(obj)
+
+def print_dict(d, pad = ''):
+    for k, v in d.items():
+        print(pad, k)
+        if isinstance(v, dict):
+            print_dict(v, pad + '\t')
+        else:
+            print(pad + ' ', v)
 
 def rolling_max(X, w):
     if len(X.shape) == 1:
@@ -622,7 +641,7 @@ def get_buys_and_sells_ma_cross(X, aggregate_N, w_max, w_min, as_boolean = False
         w_max *= 60
         w_min *= 60
 
-    assert(w_max >= w_min)
+    assert(w_max > w_min)
 
     ma_max = sma(X[1:, 0] / X[0, 0], w_max)
     ma_min = sma(X[(w_max - w_min + 1):, 0] / X[0, 0], w_min)
