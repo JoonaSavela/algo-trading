@@ -10,6 +10,16 @@ try:
 except ImportError as e:
     print(e)
 
+
+def quick_plot(xs, colors, alphas, log = False):
+    plt.style.use('seaborn')
+    for i in range(len(xs)):
+        plt.plot(xs[i], color = colors[i], alpha = alphas[i])
+    if log:
+        plt.yscale('log')
+    plt.show()
+
+
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -634,7 +644,7 @@ def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, hourly = True):
 
     return (buys, sells) + return_tuple
 
-def get_buys_and_sells_ma_cross(X, aggregate_N, w_max, w_min, as_boolean = False, hourly = True):
+def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False, hourly = True):
     w_max = aggregate_N * w_max
     w_min = aggregate_N * w_min
     if hourly:

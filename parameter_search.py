@@ -160,7 +160,7 @@ def skip_condition(strategy_type, frequency, args):
     elif frequency == 'low' and test_value < 0:
         return True, test_value
 
-    if strategy_type == 'ma_cross':
+    if strategy_type == 'macross':
         aggregate_N, w, w2 = args
 
         test_value = w / w2 - 1
@@ -170,7 +170,15 @@ def skip_condition(strategy_type, frequency, args):
     return False, 0
 
 
-
+def choose_get_buys_and_sells_fn(strategy_type):
+    if strategy_type == 'ma':
+        return get_buys_and_sells_ma
+    elif strategy_type == 'stoch':
+        return get_buys_and_sells_stoch
+    elif strategy_type == 'macross':
+        return get_buys_and_sells_macross
+    else:
+        raise ValueError("strategy_type")
 
 def get_objective_function(
         args,
@@ -193,14 +201,7 @@ def get_objective_function(
     if frequency not in ['low', 'high']:
         raise ValueError("'frequency' must be etiher 'low' or 'high'")
 
-    if strategy_type == 'ma':
-        get_buys_and_sells_fn = get_buys_and_sells_ma
-    elif strategy_type == 'stoch':
-        get_buys_and_sells_fn = get_buys_and_sells_stoch
-    elif strategy_type == 'ma_cross':
-        get_buys_and_sells_fn = get_buys_and_sells_ma_cross
-    else:
-        raise ValueError("strategy_type")
+    get_buys_and_sells_fn = choose_get_buys_and_sells_fn(strategy_type)
 
     if not (set(stop_loss_take_profit_types) & {'stop_loss', 'take_profit', 'trailing'}):
         raise ValueError("'stop_loss_take_profit_types' must contain 'stop_loss', 'take_profit', or 'trailing'")
@@ -387,6 +388,16 @@ def get_objective_function(
     return params_dict
 
 
+def get_parameter_names(strategy_type):
+    if strategy_type == 'ma':
+        return ['aggregate_N', 'w']
+    elif strategy_type == 'stoch':
+        return ['aggregate_N', 'w', 'th']
+    elif strategy_type == 'macross':
+        return ['aggregate_N', 'w', 'w2']
+    else:
+        raise ValueError('strategy_type')
+
 # TODO: possible strategy types:
 #   - stoch
 #   - candlestick
@@ -415,15 +426,7 @@ def find_optimal_aggregated_strategy_new(
         short = True,
         Xs_index = [0, 1]
 ):
-    # TODO: move this into a function
-    if strategy_type == 'ma':
-        parameter_names = ['aggregate_N', 'w']
-    elif strategy_type == 'stoch':
-        parameter_names = ['aggregate_N', 'w', 'th']
-    elif strategy_type == 'ma_cross':
-        parameter_names = ['aggregate_N', 'w', 'w2']
-    else:
-        raise ValueError('strategy_type')
+    parameter_names = get_parameter_names(strategy_type)
 
     if search_method not in ['gradient', 'BayesOpt']:
         raise ValueError('search_method')
@@ -441,13 +444,12 @@ def find_optimal_aggregated_strategy_new(
         Xs = [Xs]
 
     N_years = max(len(X) for X in Xs) / minutes_in_a_year
-    # print("N_years:", N_years)
 
     total_balance = get_total_balance(client, False)
     total_balance = max(total_balance, 1)
 
     potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-        np.log10(total_balance * 100 * N_years), 2000)
+        np.log10(total_balance * 100 * N_years), int(3000 * N_years))
     potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
     X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
@@ -607,7 +609,7 @@ def find_optimal_aggregated_strategy_new(
 
                 return objective_dict[args]['objective']
 
-        elif strategy_type == 'ma_cross':
+        elif strategy_type == 'macross':
             def objective_fn(aggregate_N, w, w2):
                 args = (aggregate_N, w, w2)
                 args = get_rounded_args(args, resolutions, parameter_names)
@@ -709,14 +711,7 @@ def save_optimal_parameters(
         else:
             init_args = None
 
-        if strategy_type == 'ma':
-            parameter_names = ['aggregate_N', 'w']
-        elif strategy_type == 'stoch':
-            parameter_names = ['aggregate_N', 'w', 'th']
-        elif strategy_type == 'ma_cross':
-            parameter_names = ['aggregate_N', 'w', 'w2']
-        else:
-            raise ValueError('strategy_type')
+        parameter_names = get_parameter_names(strategy_type)
 
         bounds = dict([(k, all_bounds[k]) for k in parameter_names])
         resolutions = dict([(k, all_resolutions[k]) for k in parameter_names])
@@ -801,33 +796,28 @@ def save_optimal_parameters(
             print()
 
 
-# TODO: handle short = False
 def get_adaptive_wealths_for_multiple_strategies(
         strategies,
         m,
         m_bear,
         weights,
         N_repeat_inp = 60,
+        compress = 60,#1440,
         disable = False,
         verbose = True,
-        short = True,
         randomize = False,
-        Xs_index = [0, 1]
+        Xs_index = [0, 1],
+        debug = False
         ):
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
-    aggregate_Ns = []
-    ws = []
-
-    for strategy_key, strategy in strategies.items():
-        aggregate_Ns.extend([v['params'][0] for v in strategy.values()])
-        ws.extend([v['params'][1] for v in strategy.values()])
-
-    aggregate_Ns = np.unique(aggregate_Ns)
-    min_aggregate_N = np.min(aggregate_Ns)
-    max_aggregate_N = np.max(aggregate_Ns)
+    aggregate_Ns = [v['params'][0] for v in strategies.values()]
+    ws = [v['params'][1] for v in strategies.values()]
 
     max_aggregate_N_times_w = np.max(np.prod(list(zip(aggregate_Ns, ws)), axis = 1))
+
+    min_aggregate_N = np.min(aggregate_Ns)
+    max_aggregate_N = np.max(aggregate_Ns)
 
     if N_repeat_inp is None:
         N_repeat = min_aggregate_N * 60
@@ -846,22 +836,17 @@ def get_adaptive_wealths_for_multiple_strategies(
 
     for strategy_key, strategy in strategies.items():
         strategy_type = strategy_key.split('_')[2]
+        parameter_names = get_parameter_names(strategy_type)
 
-        if strategy_type == 'ma':
-            get_buys_and_sells_fn = get_buys_and_sells_ma
-        else:
-            raise ValueError("strategy_type")
+        args = strategy['params'][:len(parameter_names)]
+        aggregate_N, w = args[:2]
+
+        sltp_args = strategy['params'][len(parameter_names):]
+        short = len(sltp_args) == 4
+
+        get_buys_and_sells_fn = choose_get_buys_and_sells_fn(strategy_type)
 
         coin = strategy_key.split('_')[0]
-
-        # TODO: have some of these as input parameters
-        # TODO: tie these into the length of X
-        total_balance = get_total_balance(client, False) * weights[strategy_key]
-        total_balance = max(total_balance, 1)
-        potential_balances = np.logspace(np.log10(total_balance / 100), np.log10(total_balance * 10000), 2000)
-        potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
-        spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance))]
-
         if coin not in Xs_dict:
             files = glob.glob(f'data/{coin}/*.json')
             files.sort(key = get_time)
@@ -874,6 +859,15 @@ def get_adaptive_wealths_for_multiple_strategies(
 
         Xs = Xs_dict[coin]
 
+        N_years = max(len(X) for X in Xs) / minutes_in_a_year
+
+        total_balance = get_total_balance(client, False) * weights[strategy_key]
+        total_balance = max(total_balance, 1)
+
+        potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
+            np.log10(total_balance * 100 * N_years), int(3000 * N_years))
+        potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
+
         X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
         X_origs = Xs
         if m > 1:
@@ -882,20 +876,12 @@ def get_adaptive_wealths_for_multiple_strategies(
         n_months = 0
 
         if verbose:
-            print(strategy_key)
+            print(strategy_key, strategy['objective'], strategy['params'])
+
         for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
-            buys_orig_dict = {}
-            sells_orig_dict = {}
-            N_orig_dict = {}
             min_N_orig = len(X_orig) - max_aggregate_N_times_w * 60
 
-            for spread, obj in strategy.items():
-                aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = obj['params']
-                buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, aggregate_N * 60 * w)
-
-                buys_orig_dict[spread] = buys_orig
-                sells_orig_dict[spread] = sells_orig
-                N_orig_dict[spread] = N_orig
+            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, hourly = True)
 
             pbar = tqdm(rand_Ns, disable = disable)
             for rand_N in pbar:
@@ -909,39 +895,45 @@ def get_adaptive_wealths_for_multiple_strategies(
                     if short:
                         X1_bear = X_bear
 
-                buys_dict = {}
-                sells_dict = {}
+                N_skip = (N_orig - rand_N) % (aggregate_N * 60)
 
-                for spread, obj in strategy.items():
-                    aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = obj['params']
+                start_i = N_skip + aggregate_N * 60 - 1
+                idx = np.arange(start_i, N_orig, aggregate_N * 60)
+                buys = buys_orig[idx]
+                sells = sells_orig[idx]
 
-                    N_skip = (N_orig_dict[spread] - rand_N) % (aggregate_N * 60)
+                buys_candidate = np.append(np.repeat(buys[:-1], aggregate_N * 60), buys[-1])
+                sells_candidate = np.append(np.repeat(sells[:-1], aggregate_N * 60), sells[-1])
 
-                    start_i = N_skip + aggregate_N * 60 - 1
-                    idx = np.arange(start_i, N_orig_dict[spread], aggregate_N * 60)
-                    buys = buys_orig_dict[spread][idx]
-                    sells = sells_orig_dict[spread][idx]
-
-                    buys_candidate = np.append(np.repeat(buys[:-1], aggregate_N * 60), buys[-1])#[:-(aggregate_N * 60 - 1)]
-                    sells_candidate = np.append(np.repeat(sells[:-1], aggregate_N * 60), sells[-1])#[:-(aggregate_N * 60 - 1)]
-
-                    buys_dict[spread] = buys_candidate[-min_N:]
-                    sells_dict[spread] = sells_candidate[-min_N:]
-
+                buys = buys_candidate[-min_N:]
+                sells = sells_candidate[-min_N:]
 
                 wealths = get_adaptive_wealths(
                     X = X1[-min_N:, :],
-                    buys_dict = buys_dict,
-                    sells_dict = sells_dict,
-                    strategy = strategy,
+                    buys = buys,
+                    sells = sells,
+                    aggregate_N = aggregate_N,
+                    sltp_args = sltp_args,
                     total_balance = total_balance,
                     potential_balances = potential_balances,
                     potential_spreads = potential_spreads,
                     commissions = commissions,
+                    short = short,
                     X_bear = X1_bear[-min_N:, :],
                 )
-                n_months += min_N / (60 * 24 * 30)
 
+                if debug:
+                    print(wealths[-1])
+                    quick_plot(
+                        xs = [X1[-min_N:, 0], wealths],
+                        colors = ['k', 'g'],
+                        alphas = [0.5, 0.8],
+                        log = True
+                    )
+
+                idx = np.arange(0, len(wealths), compress)
+                wealths = wealths[idx]
+                n_months += len(wealths) * compress / (60 * 24 * 30)
 
                 if strategy_key not in wealths_dict:
                     wealths_dict[strategy_key] = [np.log(wealths)]
@@ -955,6 +947,7 @@ def get_adaptive_wealths_for_multiple_strategies(
         if verbose:
             print(np.exp(wealth_log / n_months))
             print()
+
         wealths_dict[strategy_key] = np.exp(wealths_dict[strategy_key])
 
     df = pd.DataFrame(wealths_dict)

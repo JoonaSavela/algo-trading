@@ -37,7 +37,6 @@ import multiprocessing
 
 # TODO: Automate everything
 
-# TODO: smart print function for printing dicts
 
 
 
@@ -565,108 +564,41 @@ def simple_objective(x):
 
 
 def main():
-    # client = FtxClient(ftx_api_key, ftx_secret_key)
-    # coin = 'ETH'
-    # m = 3
-    # m_bear = 3
+    # all_bounds = {
+    #     'aggregate_N': (1, 12),
+    #     'w': (1, 50),
+    #     'w2': (1, 20),
+    # }
     #
-    # total_balance = get_total_balance(client, False)
-    # total_balance = max(total_balance, 1)
-    # potential_balances = np.logspace(np.log10(total_balance / 10), np.log10(total_balance * 1000), 2000)
-    # potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
-    #
-    # files = glob.glob(f'data/{coin}/*.json')
-    # files.sort(key = get_time)
-    #
-    # Xs = load_all_data(files, [0, 1])
-    #
-    # if not isinstance(Xs, list):
-    #     Xs = [Xs]
-    #
-    # X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
-    # X_origs = Xs
-    # if m > 1:
-    #     Xs = [get_multiplied_X(X, m) for X in Xs]
-    #
-    # params_dict = get_objective_function(
-    #         args = (10, 44),
-    #         strategy_type = 'ma',
-    #         frequency = 'low',
-    #         N_repeat_inp = 40,
-    #         sides = ['long', 'short'],
-    #         X_origs = X_origs,
-    #         Xs = Xs,
-    #         X_bears = X_bears,
-    #         short = True,
-    #         step = 0.01,
-    #         stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
-    #         total_balance = total_balance,
-    #         potential_balances = potential_balances,
-    #         potential_spreads = potential_spreads,
-    #         workers = 4,
-    #         debug = True
-    # )
-    #
-    # for key, value in params_dict.items():
-    #     print(key)
-    #     print(value)
-
-    # parameter_names = ['aggregate_N', 'w']
-
-    all_bounds = {
-        'aggregate_N': (1, 12),
-        'w': (1, 50),
-        'w2': (1, 20),
-    }
-
-    all_resolutions = {
-        'aggregate_N': 1,
-        'w': 1,
-        'w2': 1,
-    }
+    # all_resolutions = {
+    #     'aggregate_N': 1,
+    #     'w': 1,
+    #     'w2': 1,
+    # }
 
     # init_args = (10, 44)
 
-    # args = np.array((3, 16))
-    # resolution_values = np.array([v for v in resolutions.values()]).reshape(1, -1)
-    # ds = np.array(list(product([-1, 0, 1], repeat = len(bounds))))
-    # candidate_args = ds * resolution_values + args.reshape(1, -1)
-    # for i in range(len(bounds)):
-    #     candidate_args[:, i] = np.clip(candidate_args[:, i], *bounds[parameter_names[i]])
-    # candidate_args = np.unique(candidate_args, axis=0)
-    #
-    # print(candidate_args)
 
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = ['ETH', 'BTC'],
+    #     frequencies = ['low', 'high'],
+    #     strategy_types = ['ma', 'macross'],
+    #     stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
+    #     N_iter = 50,
+    #     m = 3,
+    #     m_bear = 3,
+    #     N_repeat_inp = 40,
+    #     step = 0.01,
+    #     skip_existing = True,
+    #     verbose = True,
+    #     disable = False,
+    #     short = True,
+    #     Xs_index = [0, 1],
+    #     debug = False
+    # )
 
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = ['ETH', 'BTC'],
-        frequencies = ['low', 'high'],
-        strategy_types = ['ma', 'ma_cross'],
-        stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing'],
-        N_iter = 50,
-        m = 3,
-        m_bear = 3,
-        N_repeat_inp = 40,
-        step = 0.01,
-        skip_existing = True,
-        verbose = True,
-        disable = False,
-        short = True,
-        Xs_index = [0, 1],
-        debug = False
-    )
-
-
-    # a = np.arange(3)
-    # b = np.arange(3) + 4
-    #
-    # print(a)
-    # print(b)
-    # c = np.stack([a, b], axis = -1)
-    # print(c)
-    # print(c.flatten())
 
     # client = FtxClient(ftx_api_key, ftx_secret_key)
     # total_balance = get_total_balance(client, False) / 4
@@ -678,31 +610,39 @@ def main():
     # plt.plot(total_balances, spreads)
     # plt.show()
 
-    # strategies = {}
-    # coins = ['ETH', 'BTC']
-    # freqs = ['low', 'high']
-    # strategy_types = ['ma']
-    #
-    # for coin, freq, strategy_type in product(coins, freqs, strategy_types):
-    #     strategy_key = '_'.join([coin, freq, strategy_type])
-    #     filename = f'optim_results/{strategy_key}.json'
-    #     with open(filename, 'r') as file:
-    #         strategies[strategy_key] = json.load(file)
+    strategies = {}
+    coins = ['ETH', 'BTC']
+    freqs = ['low', 'high']
+    strategy_types = ['ma', 'macross']
+
+    for coin, freq, strategy_type in product(coins, freqs, strategy_types):
+        strategy_key = '_'.join([coin, freq, strategy_type])
+        filename = f'optim_results/{strategy_key}.json'
+        if os.path.exists(filename):
+            with open(filename, 'r') as file:
+                strategies[strategy_key] = json.load(file)
 
     # with open('optim_results/weights.json', 'r') as file:
     #     weights = json.load(file)
-    #
-    # get_adaptive_wealths_for_multiple_strategies(
-    #     strategies = strategies,
-    #     m = 3,
-    #     m_bear = 3,
-    #     weights = weights,
-    #     N_repeat_inp = 5,
-    #     disable = False,
-    #     verbose = True,
-    #     randomize = True,
-    #     Xs_index = [0, 1]
-    # )
+
+    weights = dict(list(zip(
+        [k for k in strategies.keys()],
+        np.ones((len(strategies),)) / len(strategies)
+    )))
+
+    get_adaptive_wealths_for_multiple_strategies(
+        strategies = strategies,
+        m = 3,
+        m_bear = 3,
+        weights = weights,
+        N_repeat_inp = 5,
+        compress = 60,#1440,
+        disable = False,
+        verbose = True,
+        randomize = False,
+        Xs_index = [0, 1],
+        debug = True
+    )
 
     # plot_weighted_adaptive_wealths(
     #     strategies,
@@ -717,17 +657,10 @@ def main():
     # optimize_weights_iterative(
     #     coins = ['ETH', 'BTC'],
     #     freqs = ['low', 'high'],
-    #     strategy_types = ['ma'],
+    #     strategy_types = ['ma', 'macross'],
     #     weights_type = "file",
     #     n_iter = 2
     # )
-
-    # test_calc_aggreagte_buys_and_sells()
-
-    # calculate_average_spreads()
-
-    # asdf2()
-    # wave_visualizer((3, 16, 3, 3, 1.69, 2.13))
 
     # plot_performance([
     #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),

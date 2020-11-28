@@ -102,103 +102,101 @@ def get_wealths_fast(X, buys, sells = None, commissions = 0.0007, spread_bull = 
 
     return wealths
 
-# TODO: add comments
-# TODO: or split this into multiple functions
-def get_adaptive_wealths(X, buys_dict, sells_dict, strategy, total_balance, potential_balances, potential_spreads, commissions = 0.0007, X_bear = None):
-    short = X_bear is not None
-    key_spreads_float = [float(spread) for spread in strategy.keys()]
-
+# TODO: add comments or split this into multiple functions
+# TODO: check that short = False is handled correctly
+def get_adaptive_wealths(X, buys, sells, aggregate_N, sltp_args, total_balance, potential_balances, potential_spreads, commissions = 0.0007, short = False, X_bear = None):
     # TODO: move this into a separate function?
     spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance))]
     commissions_and_spread = (1 - commissions - spread)
-    key_spread = str(key_spreads_float[np.argmin(np.abs(key_spreads_float - spread))])
-    aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = strategy[key_spread]['params']
 
-    buys_idx_dict = {}
-    sells_idx_dict = {}
+    assert(short == (len(sltp_args) == 4))
+    assert(short == (X_bear is not None))
 
-    N = buys_dict[key_spread].shape[0]
-    for key in strategy.keys():
-        buys_idx, sells_idx = get_entry_and_exit_idx(buys_dict[key], sells_dict[key], N)
-        buys_idx_dict[key] = buys_idx
-        sells_idx_dict[key] = sells_idx
+    N = buys.shape[0]
+    buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
 
     wealths = np.ones((N,))
 
-    if buys_idx_dict[key_spread][0] < sells_idx_dict[key_spread][0]:
+    if buys_idx[0] < sells_idx[0]:
         buy_state = True
-        entry_i = buys_idx_dict[key_spread][0]
+        entry_i = buys_idx[0]
     else:
         buy_state = False
-        entry_i = sells_idx_dict[key_spread][0]
+        entry_i = sells_idx[0]
 
-    entry_is_transaction = True
-    take_profit_triggered = False
+    entry_is_transaction = buy_state or short
+
+    trigger_names_and_params = {}
+    trigger_names_and_params[True] = sltp_args[:2]
+    if short:
+        trigger_names_and_params[False] = sltp_args[2:]
+
+    trigger_triggered = False
 
     while entry_i < N - 1:
         exit_is_transaction = True
         if buy_state:
-            larger_exits_idx = sells_idx_dict[key_spread][sells_idx_dict[key_spread] > entry_i]
+            larger_exits_idx = sells_idx[sells_idx > entry_i]
         else:
-            larger_exits_idx = buys_idx_dict[key_spread][buys_idx_dict[key_spread] > entry_i]
+            larger_exits_idx = buys_idx[buys_idx > entry_i]
         exit_i = larger_exits_idx[0] + 1 if larger_exits_idx.size > 0 else N
-        if exit_i - 1 - entry_i > aggregate_N * 60:
+        if (exit_i - 1 - entry_i > aggregate_N * 60) and (buy_state or short):
             exit_i = entry_i + aggregate_N * 60 + 1
             exit_is_transaction = False
 
         if buy_state:
             price = X[entry_i, 0]
             sub_X = X[entry_i:exit_i, :] / X[entry_i, 0]
-        else:
+        elif short:
             price = X_bear[entry_i, 0]
             sub_X = X_bear[entry_i:exit_i, :] / X_bear[entry_i, 0]
 
         old_wealth = wealths[entry_i]
 
-        if entry_is_transaction:
-            old_wealth *= commissions_and_spread
-
-            buy_price = price
-            buy_i = entry_i
-            take_profit = take_profit_long if buy_state else take_profit_short
-            take_profit_price = buy_price * take_profit
-            take_profit_triggered = False
-
-        li_take_profit = sub_X[1:, 1] * price > take_profit_price
-
-        stop_loss_triggered = False
-        stop_loss = stop_loss_long if buy_state else stop_loss_short
-        li_stop_loss = sub_X[1:, 2] < stop_loss
-
-        # check if take_profit or stop_loss is triggered
-        if np.any(li_take_profit) and not take_profit_triggered:
-            idx = np.arange(len(sub_X) - 1) + 1
-
-            idx_take_profit = idx[li_take_profit]
-            min_i_take_profit = idx_take_profit[0]
-
-            take_profit_triggered = True
-            spread = potential_spreads[np.argmin(np.abs(potential_balances - take_profit_price / price * old_wealth * total_balance))]
-            commissions_and_spread = (1 - commissions - spread)
-
-            wealths[entry_i:entry_i + min_i_take_profit] = sub_X[:min_i_take_profit, 0] * old_wealth
-            wealths[entry_i + min_i_take_profit:exit_i] = take_profit_price / price * old_wealth * commissions_and_spread
-
-        elif np.any(li_stop_loss):
-            idx = np.arange(len(sub_X) - 1) + 1
-
-            idx_stop_loss = idx[li_stop_loss]
-            min_i_stop_loss = idx_stop_loss[0]
-
-            stop_loss_triggered = True
-            spread = potential_spreads[np.argmin(np.abs(potential_balances - stop_loss * old_wealth * total_balance))]
-            commissions_and_spread = (1 - commissions - spread)
-
-            wealths[entry_i:entry_i + min_i_stop_loss] = sub_X[:min_i_stop_loss, 0] * old_wealth
-            wealths[entry_i + min_i_stop_loss:exit_i] = stop_loss * old_wealth * commissions_and_spread
-
+        if not (buy_state or short):
+            wealths[entry_i:exit_i] = old_wealth
         else:
-            if take_profit_triggered:
+            if entry_is_transaction:
+                old_wealth *= commissions_and_spread
+
+                buy_price = price
+
+                trigger_name, trigger_param = trigger_names_and_params[buy_state]
+                trigger_price = buy_price * trigger_param
+                trigger_triggered = False
+                max_price = price
+
+            if trigger_name != 'trailing':
+                trigger_prices = np.repeat(trigger_price, exit_i - entry_i - 1)
+            else:
+                accumulative_max = np.maximum.accumulate(np.concatenate([
+                    np.array([max_price]),
+                    sub_X[1:, 1] * price
+                ]))[:-1]
+                max_price = accumulative_max[-1]
+                trigger_prices = accumulative_max - (1 - trigger_param) * buy_price
+
+            if trigger_name == 'take_profit':
+                li = sub_X[1:, 1] * price > trigger_prices
+            else:
+                li = sub_X[1:, 2] * price < trigger_prices
+
+            # check if trigger is triggered
+            if not trigger_triggered and np.any(li):
+                idx = np.arange(len(sub_X) - 1) + 1
+
+                idx = idx[li]
+                min_i = idx[0]
+                trigger_price = trigger_prices[li][0]
+
+                trigger_triggered = True
+                spread = potential_spreads[np.argmin(np.abs(potential_balances - trigger_price / price * old_wealth * total_balance))]
+                commissions_and_spread = (1 - commissions - spread)
+
+                wealths[entry_i:entry_i + min_i] = sub_X[:min_i, 0] * old_wealth
+                wealths[entry_i + min_i:exit_i] = trigger_price / price * old_wealth * commissions_and_spread
+
+            elif trigger_triggered:
                 wealths[entry_i:exit_i] = old_wealth
             else:
                 wealths[entry_i:exit_i] = sub_X[:, 0] * old_wealth
@@ -206,25 +204,7 @@ def get_adaptive_wealths(X, buys_dict, sells_dict, strategy, total_balance, pote
         spread = potential_spreads[np.argmin(np.abs(potential_balances - wealths[exit_i - 1] * total_balance))]
         commissions_and_spread = (1 - commissions - spread)
 
-        prev_key_spread = key_spread
-        key_spread = str(key_spreads_float[np.argmin(np.abs(key_spreads_float - spread))])
-
-        if prev_key_spread != key_spread:
-            aggregate_N, w, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = strategy[key_spread]['params']
-
-            if buy_state:
-                if buys_dict[prev_key_spread][exit_i - 1] != buys_dict[key_spread][exit_i - 1]:
-                    exit_is_transaction = True
-            else:
-                if sells_dict[prev_key_spread][exit_i - 1] != sells_dict[key_spread][exit_i - 1]:
-                    exit_is_transaction = True
-
-            # update take_profit price
-            if not exit_is_transaction:
-                take_profit = take_profit_long if buy_state else take_profit_short
-                take_profit_price = min(take_profit_price, buy_price * take_profit)
-
-        if exit_is_transaction and not (take_profit_triggered or stop_loss_triggered):
+        if exit_is_transaction and not trigger_triggered and (buy_state or short):
             wealths[exit_i - 1] *= commissions_and_spread
 
         entry_i = exit_i - 1
@@ -234,8 +214,6 @@ def get_adaptive_wealths(X, buys_dict, sells_dict, strategy, total_balance, pote
         else:
             entry_is_transaction = False
 
-        if stop_loss_triggered:
-            entry_is_transaction = True
 
     return wealths
 
