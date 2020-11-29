@@ -959,12 +959,13 @@ def save_wealths(
     m,
     m_bear,
     weights,
-    N_repeat_inp = 5,
-    disable = True,
-    verbose = False,
-    short = True,
+    N_repeat_inp = 60,
+    compress = 60,#1440,
+    disable = False,
+    verbose = True,
     randomize = False,
-    Xs_index = [0, 1]
+    Xs_index = [0, 1],
+    debug = False
 ):
     df = get_adaptive_wealths_for_multiple_strategies(
         strategies = strategies,
@@ -972,20 +973,23 @@ def save_wealths(
         m_bear = m_bear,
         weights = weights,
         N_repeat_inp = N_repeat_inp,
+        compress = compress,
         disable = disable,
         verbose = verbose,
-        short = short,
-        Xs_index = Xs_index
+        randomize = randomize,
+        Xs_index = Xs_index,
+        debug = False
     )
 
     # TODO: have this as a input parameter
-    df.to_csv('optim_results/wealths.csv')
+    df.to_csv(f'optim_results/wealths_{compress}.csv')
 
-def optimize_weights(save = True, verbose = False):
-    df = pd.read_csv('optim_results/wealths.csv', index_col=0)
+def optimize_weights(compress, save = True, verbose = False):
+    df = pd.read_csv(f'optim_results/wealths_{compress}.csv', index_col=0)
 
-    mu = expected_returns.mean_historical_return(df, frequency=minutes_in_a_year)
-    S = risk_models.CovarianceShrinkage(df, frequency=minutes_in_a_year).ledoit_wolf()
+    freq = minutes_in_a_year / compress
+    mu = expected_returns.mean_historical_return(df, frequency=freq)
+    S = risk_models.CovarianceShrinkage(df, frequency=freq).ledoit_wolf()
     # if verbose:
     #     print(mu)
     #     print(S)
@@ -1014,18 +1018,18 @@ def optimize_weights(save = True, verbose = False):
 
         X = df.values
         wealths = X[-1, :] / X[0, :]
-        wealths = wealths ** (minutes_in_a_year / len(X))
+        wealths = wealths ** (freq / len(X))
         print()
         print(wealths)
         print(np.dot(wealths, weights))
 
         X_diff = X[1:, :] / X[:-1, :]
 
-        wealths = np.prod(X_diff, axis = 0) ** (minutes_in_a_year / len(X))
+        wealths = np.prod(X_diff, axis = 0) ** (freq / len(X))
         # print(wealths)
 
         weighted_diffs = np.matmul(X_diff, weights)
-        wealth = np.prod(weighted_diffs) ** (minutes_in_a_year / len(X))
+        wealth = np.prod(weighted_diffs) ** (freq / len(X))
         print(wealth)
 
     if save:
@@ -1037,30 +1041,35 @@ def optimize_weights(save = True, verbose = False):
 def optimize_weights_iterative(
         coins = ['ETH', 'BTC'],
         freqs = ['low', 'high'],
-        strategy_types = ['ma'],
+        strategy_types = ['ma', 'macross'],
         weights_type = "file",
-        n_iter = 20
+        n_iter = 20,
+        compress = 60
     ):
     strategies = {}
 
     for coin, freq, strategy_type in product(coins, freqs, strategy_types):
         strategy_key = '_'.join([coin, freq, strategy_type])
         filename = f'optim_results/{strategy_key}.json'
-        with open(filename, 'r') as file:
-            strategies[strategy_key] = json.load(file)
+        if os.path.exists(filename):
+            with open(filename, 'r') as file:
+                strategies[strategy_key] = json.load(file)
 
     if weights_type == "file":
-        with open('optim_results/weights.json', 'r') as file:
+        filename = 'optim_results/weights.json'
+        with open(filename, 'r') as file:
             weights = json.load(file)
     elif weights_type == "equal":
         weights = dict(list(zip(
             [k for k in strategies.keys()],
             np.ones((len(strategies),)) / len(strategies)
         )))
+    else:
+        raise ValueError('weights_type')
 
     weight_values = np.zeros((len(weights),))
 
-    for n in range(20):
+    for n in range(n_iter):
 
         weight_values *= n
         weight_values += np.array(list(weights.values()))
@@ -1073,20 +1082,23 @@ def optimize_weights_iterative(
         )))
 
         save_wealths(
-            strategies = strategies,
+            strategies,
             m = 3,
             m_bear = 3,
             weights = weights,
             N_repeat_inp = 5,
+            compress = compress,
             disable = True,
             verbose = False,
-            Xs_index = [0, 1]
+            randomize = False,
+            Xs_index = [0, 1],
+            debug = False
         )
 
-        weights, a, b, c = optimize_weights(save = True, verbose = False)
+        weights, a, b, c = optimize_weights(compress, save = True, verbose = False)
 
         print("Weights:")
-        print(weights)
+        print_dict(weights)
         print("Performance:")
         print(a, b, c)
         print()
@@ -1094,60 +1106,101 @@ def optimize_weights_iterative(
     # TODO: delete 'wealths.csv'
 
 
+def get_filtered_strategies_and_weights(
+    coins = ['ETH', 'BTC'],
+    freqs = ['low', 'high'],
+    strategy_types = ['ma', 'macross']
+):
+    strategies = {}
+
+    for coin, freq, strategy_type in product(coins, freqs, strategy_types):
+        strategy_key = '_'.join([coin, freq, strategy_type])
+        filename = f'optim_results/{strategy_key}.json'
+        if os.path.exists(filename):
+            with open(filename, 'r') as file:
+                strategies[strategy_key] = json.load(file)
+
+    if os.path.exists('optim_results/weights.json'):
+        with open('optim_results/weights.json', 'r') as file:
+            weights = json.load(file)
+
+        filtered_strategies = {}
+        filtered_weights = {}
+
+        for k in strategies.keys():
+            if k in weights and weights[k] > 0:
+                filtered_strategies[k] = strategies[k]
+                filtered_weights[k] = weights[k]
+
+        strategies = filtered_strategies
+        weights = filtered_weights
+    else:
+        weights = {}
+
+    if len(weights) > 0:
+        assert(np.allclose(np.sum([v for v in weights.values()]), 1.0))
+
+    return strategies, weights
+
+
+
 def plot_weighted_adaptive_wealths(
-    strategies,
-    m,
-    m_bear,
+    coins = ['ETH', 'BTC'],
+    freqs = ['low', 'high'],
+    strategy_types = ['ma', 'macross'],
+    m = 3,
+    m_bear = 3,
     N_repeat = 1,
+    compress = 60,
     short = True,
     randomize = True,
     Xs_index = [0, 1]
 ):
     plt.style.use('seaborn')
 
-    with open('optim_results/weights.json', 'r') as file:
-        weights = json.load(file)
+    strategies, weights = get_filtered_strategies_and_weights(
+        coins,
+        freqs,
+        strategy_types
+    )
+    print_dict(strategies)
 
     weight_values = np.array(list(weights.values()))
 
     # TODO: move theis loop into get_adaptive_wealths_for_multiple_strategies?
     for i in range(N_repeat):
         df = get_adaptive_wealths_for_multiple_strategies(
-            strategies = strategies,
-            m = m,
-            m_bear = m_bear,
-            weights = weights,
+            strategies,
+            m,
+            m_bear,
+            weights,
             N_repeat_inp = 1,
+            compress = compress,
             disable = True,
             verbose = False,
-            short = short,
             randomize = randomize,
             Xs_index = Xs_index
         )
 
-        wealths = (df.iloc[-1] / df.iloc[0])  ** (minutes_in_a_year / len(df))
+        wealths = (df.iloc[-1] / df.iloc[0])  ** (minutes_in_a_year / (len(df) * compress))
         print(wealths)
 
         X = df.values
 
         weighted_wealths = np.matmul(X, weight_values)
-        wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / len(X))
+        wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / (len(df) * compress))
         print(wealth)
 
-        # TODO: update weights every aggregate_N steps (for each strategy)
-        #   - or every 1-3 months
-        #   - make a function for it
+        X_diff = X[1:, :] / X[:-1, :]
 
-        # X_diff = X[1:, :] / X[:-1, :]
-        #
-        # weighted_diffs = np.matmul(X_diff, weight_values)
-        # weighted_wealths2 = np.cumprod(weighted_diffs)
-        # wealth = weighted_wealths2[-1] ** (minutes_in_a_year / len(X))
-        # print(wealth)
+        weighted_diffs = np.matmul(X_diff, weight_values)
+        weighted_wealths2 = np.cumprod(weighted_diffs)
+        wealth = weighted_wealths2[-1] ** (minutes_in_a_year / (len(df) * compress))
+        print(wealth)
 
         plt.plot(X, 'k', alpha = 0.25 / np.sqrt(N_repeat))
         plt.plot(weighted_wealths, 'b', alpha = 1.0 / np.sqrt(N_repeat))
-        # plt.plot(weighted_wealths2, 'g', alpha = 1.0 / np.sqrt(N_repeat))
+        plt.plot(weighted_wealths2, 'g', alpha = 1.0 / np.sqrt(N_repeat))
 
     plt.yscale('log')
     plt.show()

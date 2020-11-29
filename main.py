@@ -610,56 +610,62 @@ def main():
     # plt.plot(total_balances, spreads)
     # plt.show()
 
-    strategies = {}
-    coins = ['ETH', 'BTC']
-    freqs = ['low', 'high']
-    strategy_types = ['ma', 'macross']
-
-    for coin, freq, strategy_type in product(coins, freqs, strategy_types):
-        strategy_key = '_'.join([coin, freq, strategy_type])
-        filename = f'optim_results/{strategy_key}.json'
-        if os.path.exists(filename):
-            with open(filename, 'r') as file:
-                strategies[strategy_key] = json.load(file)
+    # strategies = {}
+    # coins = ['ETH', 'BTC']
+    # freqs = ['low', 'high']
+    # strategy_types = ['ma', 'macross']
+    #
+    # for coin, freq, strategy_type in product(coins, freqs, strategy_types):
+    #     strategy_key = '_'.join([coin, freq, strategy_type])
+    #     filename = f'optim_results/{strategy_key}.json'
+    #     if os.path.exists(filename):
+    #         with open(filename, 'r') as file:
+    #             strategies[strategy_key] = json.load(file)
 
     # with open('optim_results/weights.json', 'r') as file:
     #     weights = json.load(file)
 
-    weights = dict(list(zip(
-        [k for k in strategies.keys()],
-        np.ones((len(strategies),)) / len(strategies)
-    )))
-
-    get_adaptive_wealths_for_multiple_strategies(
-        strategies = strategies,
-        m = 3,
-        m_bear = 3,
-        weights = weights,
-        N_repeat_inp = 5,
-        compress = 60,#1440,
-        disable = False,
-        verbose = True,
-        randomize = False,
-        Xs_index = [0, 1],
-        debug = True
-    )
-
-    # plot_weighted_adaptive_wealths(
-    #     strategies,
+    # weights = dict(list(zip(
+    #     [k for k in strategies.keys()],
+    #     np.ones((len(strategies),)) / len(strategies)
+    # )))
+    #
+    # get_adaptive_wealths_for_multiple_strategies(
+    #     strategies = strategies,
     #     m = 3,
     #     m_bear = 3,
-    #     N_repeat = 5,
-    #     short = True,
-    #     randomize = True,
-    #     Xs_index = [0, 1]
+    #     weights = weights,
+    #     N_repeat_inp = 5,
+    #     compress = 60,#1440,
+    #     disable = False,
+    #     verbose = True,
+    #     randomize = False,
+    #     Xs_index = [0, 1],
+    #     debug = True
     # )
+
+    plot_weighted_adaptive_wealths(
+        coins = ['ETH', 'BTC'],
+        freqs = ['low', 'high'],
+        strategy_types = ['ma', 'macross'],
+        m = 3,
+        m_bear = 3,
+        N_repeat = 5,
+        compress = 1440,
+        short = True,
+        randomize = True,
+        Xs_index = [0, 1]
+    )
+
+    # optimize_weights(compress = 60, save = True, verbose = True)
 
     # optimize_weights_iterative(
     #     coins = ['ETH', 'BTC'],
     #     freqs = ['low', 'high'],
     #     strategy_types = ['ma', 'macross'],
-    #     weights_type = "file",
-    #     n_iter = 2
+    #     weights_type = "equal",
+    #     n_iter = 10,
+    #     compress = 60
     # )
 
     # plot_performance([
