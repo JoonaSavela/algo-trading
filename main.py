@@ -644,18 +644,18 @@ def main():
     #     debug = True
     # )
 
-    plot_weighted_adaptive_wealths(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        m = 3,
-        m_bear = 3,
-        N_repeat = 5,
-        compress = 1440,
-        short = True,
-        randomize = True,
-        Xs_index = [0, 1]
-    )
+    # plot_weighted_adaptive_wealths(
+    #     coins = ['ETH', 'BTC'],
+    #     freqs = ['low', 'high'],
+    #     strategy_types = ['ma', 'macross'],
+    #     m = 3,
+    #     m_bear = 3,
+    #     N_repeat = 5,
+    #     compress = 1440,
+    #     short = True,
+    #     randomize = True,
+    #     Xs_index = [0, 1]
+    # )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
 
@@ -667,6 +667,20 @@ def main():
     #     n_iter = 10,
     #     compress = 60
     # )
+
+    displacements = get_displacements(
+        coins = ['ETH', 'BTC'],
+        strategy_types = ['ma', 'macross'],
+        m = 3,
+        m_bear = 3,
+        sep = 2,
+        Xs_index = [0, 1],
+        plot = True,
+        verbose = True,
+        disable = False
+    )
+
+
 
     # plot_performance([
     #                     # (3, 16, 1, 3, 1.2, np.Inf, 0, 0.98),
