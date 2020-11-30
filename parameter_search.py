@@ -100,8 +100,8 @@ def get_stop_loss_take_profit_wealth(
     trade_wealths_dict,
     sub_trade_wealths_dict,
     take_profit_candidates,
-    stop_loss_candidates
-):
+    stop_loss_candidates):
+
     if stop_loss_take_profit_type == 'take_profit':
         return np.array(list(map(lambda x:
             get_take_profit_wealths_from_trades(
@@ -109,8 +109,6 @@ def get_stop_loss_take_profit_wealth(
                 trade_wealths_dict[side]['max'],
                 x,
                 total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
                 return_total = True,
                 return_as_log = True
             ),
@@ -124,8 +122,6 @@ def get_stop_loss_take_profit_wealth(
                 trade_wealths_dict[side]['min'],
                 x,
                 total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
                 return_total = True,
                 return_as_log = True
             ),
@@ -140,8 +136,6 @@ def get_stop_loss_take_profit_wealth(
                 sub_trade_wealths_dict[side]['max'],
                 x,
                 total_months = 1,
-                commissions = 0.0,
-                spread = 0.0,
                 return_total = True,
                 return_as_log = True
             ),
@@ -189,9 +183,8 @@ def get_semi_adaptive_wealths(
     N_transactions_buy,
     N_transactions_sell,
     total_months,
-    debug = False
+    debug = False):
 
-):
     stop_loss_take_profit_wealth = 1
 
     for i in range(12):
@@ -231,8 +224,8 @@ def get_objective_function(
         potential_balances,
         potential_spreads,
         workers = None,
-        debug = False
-):
+        debug = False):
+
     if frequency not in ['low', 'high']:
         raise ValueError("'frequency' must be etiher 'low' or 'high'")
 
@@ -449,8 +442,8 @@ def find_optimal_aggregated_strategy(
         verbose = True,
         disable = False,
         short = True,
-        Xs_index = [0, 1]
-):
+        Xs_index = [0, 1]):
+
     parameter_names = get_parameter_names(strategy_type)
 
     if search_method not in ['gradient', 'BayesOpt']:
@@ -683,7 +676,7 @@ def find_optimal_aggregated_strategy(
 
     return objective_dict[args], objective_dict
 
-# TODO: save order of arguments as in find_optimal_aggregated_strategy
+# TODO: same order of arguments as in find_optimal_aggregated_strategy
 def save_optimal_parameters(
     all_bounds,
     all_resolutions,
@@ -701,9 +694,8 @@ def save_optimal_parameters(
     disable = False,
     short = True,
     Xs_index = [0, 1],
-    debug = False
+    debug = False):
 
-):
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
     if not isinstance(coins, list):
@@ -721,8 +713,11 @@ def save_optimal_parameters(
             print(coin, frequency, strategy_type)
 
         options = [coin, frequency, strategy_type]
+        parameter_names = get_parameter_names(strategy_type)
 
         fname = 'optim_results/' + '_'.join(options) + '.json'
+        N_iter_default = 50
+
         if os.path.exists(fname):
             if skip_existing:
                 if verbose:
@@ -732,21 +727,26 @@ def save_optimal_parameters(
 
             with open(fname, 'r') as file:
                 params_dict = json.load(file)
-                init_args = params_dict['params'][:len(bounds)]
+                init_args = params_dict['params'][:len(parameter_names)]
+
+            modification_time = os.path.getmtime(fname)
+
+            N_iter1 = (time.time() - modification_time) // (60 * 60 * 24)
+            N_iter1 = min(N_iter1, N_iter_default)
         else:
             init_args = None
-
-        parameter_names = get_parameter_names(strategy_type)
+            N_iter1 = N_iter_default
 
         bounds = dict([(k, all_bounds[k]) for k in parameter_names])
         resolutions = dict([(k, all_resolutions[k]) for k in parameter_names])
 
-        N_iter1 = N_iter
-        if N_iter1 is None:
-            N_iter1 = 100
+        if N_iter is not None:
+            N_iter1 = N_iter
 
         if len(bounds) > 2:
             N_iter1 *= 2 ** (len(bounds) - 2)
+
+        N_iter1 = max(N_iter1, 1)
 
         if verbose:
             print("Bayesian Optimization...")
@@ -832,8 +832,8 @@ def get_adaptive_wealths_for_multiple_strategies(
         verbose = True,
         randomize = False,
         Xs_index = [0, 1],
-        debug = False
-        ):
+        debug = False):
+
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
     aggregate_Ns = [v['params'][0] for v in strategies.values()]
@@ -990,8 +990,8 @@ def save_wealths(
     verbose = True,
     randomize = False,
     Xs_index = [0, 1],
-    debug = False
-):
+    debug = False):
+
     df = get_adaptive_wealths_for_multiple_strategies(
         strategies = strategies,
         m = m,
@@ -1064,13 +1064,13 @@ def optimize_weights(compress, save = True, verbose = False):
     return weights_dict, a, b, c
 
 def optimize_weights_iterative(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        weights_type = "file",
-        n_iter = 20,
-        compress = 60
-    ):
+    coins = ['ETH', 'BTC'],
+    freqs = ['low', 'high'],
+    strategy_types = ['ma', 'macross'],
+    weights_type = "file",
+    n_iter = 20,
+    compress = 60):
+
     strategies = {}
 
     for coin, freq, strategy_type in product(coins, freqs, strategy_types):
@@ -1135,8 +1135,8 @@ def get_filtered_strategies_and_weights(
     coins = ['ETH', 'BTC'],
     freqs = ['low', 'high'],
     strategy_types = ['ma', 'macross'],
-    normalize = True
-):
+    normalize = True):
+
     strategies = {}
 
     for coin, freq, strategy_type in product(coins, freqs, strategy_types):
@@ -1163,12 +1163,18 @@ def get_filtered_strategies_and_weights(
     else:
         weights = {}
 
-    if len(weights) > 0 and normalize:
-        weight_values = np.array(list(weights.values()))
-        weight_values /= np.sum(weight_values)
+    if len(weights) > 0:
+        if normalize:
+            weight_values = np.array(list(weights.values()))
+            weight_values /= np.sum(weight_values)
+            weights = dict(list(zip(
+                weights.keys(),
+                weight_values
+            )))
+    else:
         weights = dict(list(zip(
-            weights.keys(),
-            weight_values
+            strategies.keys(),
+            np.ones((len(strategies),)) / len(strategies)
         )))
 
     return strategies, weights
@@ -1185,8 +1191,8 @@ def plot_weighted_adaptive_wealths(
     compress = 60,
     short = True,
     randomize = True,
-    Xs_index = [0, 1]
-):
+    Xs_index = [0, 1]):
+
     plt.style.use('seaborn')
 
     strategies, weights = get_filtered_strategies_and_weights(
@@ -1236,7 +1242,7 @@ def plot_weighted_adaptive_wealths(
     plt.yscale('log')
     plt.show()
 
-# TODO: update
+# TODO: update or remove
 def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, stop_loss = True, randomize = True, Xs_index = [0, 1], N_ts_plots = 10, last_N_to_plot = None):
     plt.style.use('seaborn')
 
@@ -1399,8 +1405,8 @@ def get_displacements(
     Xs_index = [0, 1],
     plot = True,
     verbose = True,
-    disable = False
-):
+    disable = False):
+
     plt.style.use('seaborn')
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
@@ -1599,6 +1605,97 @@ def get_displacements(
 
     return displacements
 
+# TODO: implement
+def save_displacements():
+    pass
+
 
 if __name__ == '__main__':
-    pass
+    all_bounds = {
+        'aggregate_N': (1, 12),
+        'w': (1, 50),
+        'w2': (1, 20),
+    }
+    all_resolutions = {
+        'aggregate_N': 1,
+        'w': 1,
+        'w2': 1,
+    }
+    coins = ['ETH', 'BTC']
+    frequencies = ['low', 'high']
+    strategy_types = ['ma', 'macross']
+    stop_loss_take_profit_types = ['stop_loss', 'take_profit', 'trailing']
+    N_iter = None
+    m = 3
+    m_bear = 3
+    N_repeat_inp = 40
+    step = 0.01
+    skip_existing = False
+    verbose = True
+    disable = False
+    short = True
+    Xs_index = [0, 1]
+    debug = False
+
+    save_optimal_parameters(
+        all_bounds = all_bounds,
+        all_resolutions = all_resolutions,
+        coins = coins,
+        frequencies = frequencies,
+        strategy_types = strategy_types,
+        stop_loss_take_profit_types = stop_loss_take_profit_types,
+        N_iter = N_iter,
+        m = m,
+        m_bear = m_bear,
+        N_repeat_inp = N_repeat_inp,
+        step = step,
+        skip_existing = skip_existing,
+        verbose = verbose,
+        disable = disable,
+        short = short,
+        Xs_index = Xs_index,
+        debug = debug
+    )
+
+    n_iter = 10
+    compress = 1440
+
+    optimize_weights_iterative(
+        coins = coins,
+        freqs = frequencies,
+        strategy_types = strategy_types,
+        weights_type = "equal",
+        n_iter = n_iter,
+        compress = compress
+    )
+
+    sep = 2
+    plot = True
+
+    displacements = get_displacements(
+        coins = coins,
+        strategy_types = strategy_types,
+        m = m,
+        m_bear = m_bear,
+        sep = sep,
+        Xs_index = Xs_index,
+        plot = plot,
+        verbose = verbose,
+        disable = disable
+    )
+
+    N_repeat = 5
+    randomize = True
+
+    plot_weighted_adaptive_wealths(
+        coins = coins,
+        freqs = frequencies,
+        strategy_types = strategy_types,
+        m = m,
+        m_bear = m_bear,
+        N_repeat = N_repeat,
+        compress = compress,
+        short = short,
+        randomize = randomize,
+        Xs_index = Xs_index
+    )
