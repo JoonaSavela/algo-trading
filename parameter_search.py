@@ -423,7 +423,6 @@ def get_parameter_names(strategy_type):
 #   - candlestick
 #   - ma crossover
 #   - 2-timeframe ma
-# TODO: check that short = False is handled correctly
 def find_optimal_aggregated_strategy(
         client,
         coin,
@@ -716,9 +715,9 @@ def save_optimal_parameters(
 
     for coin, frequency, strategy_type in product(coins, frequencies, strategy_types):
         if verbose:
-            print(coin, frequency, strategy_type)
+            print(coin, frequency, strategy_type, m, m_bear)
 
-        options = [coin, frequency, strategy_type, m, m_bear]
+        options = [coin, frequency, strategy_type, str(m), str(m_bear)]
         parameter_names = get_parameter_names(strategy_type)
 
         fname = 'optim_results/' + '_'.join(options) + '.json'
@@ -815,7 +814,7 @@ def save_optimal_parameters(
 
             if are_same and init_args is not None:
                 if verbose:
-                    print("Optimal parameters did not change for:", coin, frequency, strategy_type)
+                    print("Optimal parameters did not change for:", coin, frequency, strategy_type, m, m_bear)
             else:
                 params_dict = params_dict_candidate
                 with open('optim_results/' + '_'.join(options) + '.json', 'w') as file:
@@ -868,7 +867,6 @@ def get_adaptive_wealths_for_multiple_strategies(
         parameter_names = get_parameter_names(strategy_type)
 
         m, m_bear = tuple([int(x) for x in strategy_key.split('_')[3:]])
-        print("m, m_bear:", m, m_bear, type(m), type(m_bear))
 
         args = strategy['params'][:len(parameter_names)]
         aggregate_N, w = args[:2]
@@ -1076,18 +1074,19 @@ def get_filtered_strategies_and_weights(
     strategy_types = ['ma', 'macross'],
     ms = [1, 3],
     m_bears = [0, 3],
-    normalize = True):
+    normalize = True,
+    filter = True):
 
     strategies = {}
 
     for coin, freq, strategy_type, m, m_bear in product(coins, freqs, strategy_types, ms, m_bears):
-        strategy_key = '_'.join([coin, freq, strategy_type, m, m_bear])
+        strategy_key = '_'.join([coin, freq, strategy_type, str(m), str(m_bear)])
         filename = f'optim_results/{strategy_key}.json'
         if os.path.exists(filename):
             with open(filename, 'r') as file:
                 strategies[strategy_key] = json.load(file)
 
-    if os.path.exists('optim_results/weights.json'):
+    if os.path.exists('optim_results/weights.json') and filter:
         with open('optim_results/weights.json', 'r') as file:
             weights = json.load(file)
 
@@ -1137,10 +1136,11 @@ def optimize_weights_iterative(
         freqs = freqs,
         strategy_types = strategy_types,
         ms = ms,
-        m_bears = m_bears
+        m_bears = m_bears,
+        filter = False
     )
 
-    weight_values = np.zeros((len(weights),))
+    weight_values = np.zeros((len(strategies),))
 
     for n in range(n_iter):
 
@@ -1269,7 +1269,6 @@ def plot_weighted_adaptive_wealths(
             for j, key in enumerate(keys):
                 coin = key.split('_')[0]
                 m, m_bear = tuple([int(x) for x in key.split('_')[3:]])
-                print("m, m_bear:", m, m_bear, type(m), type(m_bear))
 
                 if coin not in spread_dict:
                     spread_dict[coin] = potential_spreads[(coin, m, m_bear)][np.argmin(np.abs(potential_balances - total_balance))]
@@ -1336,7 +1335,6 @@ def get_displacements(
 
         strategy_type = strategy_key.split('_')[2]
         m, m_bear = tuple([int(x) for x in strategy_key.split('_')[3:]])
-        print("m, m_bear:", m, m_bear, type(m), type(m_bear))
 
         parameter_names = get_parameter_names(strategy_type)
 
@@ -1569,7 +1567,7 @@ if __name__ == '__main__':
     m_bear = 3
     N_repeat_inp = 40
     step = 0.01
-    skip_existing = False
+    skip_existing = True
     verbose = True
     disable = False
     short = True
