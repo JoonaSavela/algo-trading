@@ -19,7 +19,7 @@ from pypfopt import risk_models, expected_returns, black_litterman, \
 from pypfopt import BlackLittermanModel
 import concurrent.futures
 from bayes_opt import BayesianOptimization
-
+import warnings
 
 def get_trade_wealths_dicts(
         rand_N,
@@ -31,7 +31,7 @@ def get_trade_wealths_dicts(
         sells_orig,
         N_orig,
         sides,
-        wealth_categories):
+        trade_wealth_categories):
 
     trade_wealths_dict = {}
     sub_trade_wealths_dict = {}
@@ -40,7 +40,7 @@ def get_trade_wealths_dicts(
         trade_wealths_dict[side] = {}
         sub_trade_wealths_dict[side] = {}
 
-        for category in wealth_categories:
+        for category in trade_wealth_categories:
             trade_wealths_dict[side][category] = []
             sub_trade_wealths_dict[side][category] = []
 
@@ -84,10 +84,10 @@ def get_trade_wealths_dicts(
         side_tuples.append(('short', X1_bear_agg, sells, buys))
 
     for side, X1, entries, exits in side_tuples:
-        for category, category_trade_wealths in zip(wealth_categories, get_trade_wealths(X1, entries, exits, N)):
+        for category, category_trade_wealths in zip(trade_wealth_categories, get_trade_wealths(X1, entries, exits, N)):
             trade_wealths_dict[side][category].extend(category_trade_wealths)
 
-        for category, category_sub_trade_wealths in zip(wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)):
+        for category, category_sub_trade_wealths in zip(trade_wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)):
             sub_trade_wealths_dict[side][category].extend(category_sub_trade_wealths)
 
 
@@ -142,7 +142,7 @@ def get_stop_loss_take_profit_wealth(
             stop_loss_candidates
         )))
 
-    # TODO: raise a warning
+    raise ValueError('stop_loss_take_profit_type')
     return np.array([1.0])
 
 
@@ -188,7 +188,9 @@ def get_semi_adaptive_wealths(
     stop_loss_take_profit_wealth = 1
 
     for i in range(12):
-        # TODO: raise warning if spread > max(potential_spreads)
+        if total_balance * stop_loss_take_profit_wealth > np.max(potential_balances):
+            warnings.warn("total balance times wealth is greater than the max of potential balances.")
+            # print(i, stop_loss_take_profit_wealth, np.max(potential_balances))
         spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance * stop_loss_take_profit_wealth))]
         if debug:
             print("Spread:", spread)
@@ -258,13 +260,13 @@ def get_objective_function(
     trade_wealths_dict = {}
     sub_trade_wealths_dict = {}
 
-    wealth_categories = ['base', 'min', 'max'] # TODO: better name?
+    trade_wealth_categories = ['base', 'min', 'max']
 
     for side in sides:
         trade_wealths_dict[side] = {}
         sub_trade_wealths_dict[side] = {}
 
-        for category in wealth_categories:
+        for category in trade_wealth_categories:
             trade_wealths_dict[side][category] = []
             sub_trade_wealths_dict[side][category] = []
 
@@ -290,7 +292,7 @@ def get_objective_function(
                 sells_orig,
                 N_orig,
                 sides,
-                wealth_categories
+                trade_wealth_categories
             ) for rand_N in np.arange(0, aggregate_N * 60, aggregate_N * 60 // N_repeat)]
 
             for future in concurrent.futures.as_completed(futures):
@@ -302,7 +304,7 @@ def get_objective_function(
         total_months += tm
 
         for side in sides:
-            for category in wealth_categories:
+            for category in trade_wealth_categories:
                 trade_wealths_dict[side][category].extend(tw_dict[side][category])
                 sub_trade_wealths_dict[side][category].extend(sub_tw_dict[side][category])
 
@@ -421,7 +423,6 @@ def get_parameter_names(strategy_type):
 #   - candlestick
 #   - ma crossover
 #   - 2-timeframe ma
-# TODO: save m and m_bear in the output somehow
 # TODO: check that short = False is handled correctly
 def find_optimal_aggregated_strategy(
         client,
@@ -451,6 +452,7 @@ def find_optimal_aggregated_strategy(
 
     sides = ['long']
     if short:
+        assert(m_bear > 0)
         sides.append('short')
 
     files = glob.glob(f'data/{coin}/*.json')
@@ -466,11 +468,15 @@ def find_optimal_aggregated_strategy(
     total_balance = get_total_balance(client, False)
     total_balance = max(total_balance, 1)
 
+    # TODO: move this into a function
     potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-        np.log10(total_balance * 100 * N_years), int(3000 * N_years))
+        np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
     potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
-    X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+    if short:
+        X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+    else:
+        X_bears = [None] * len(Xs)
     X_origs = Xs
     if m > 1:
         Xs = [get_multiplied_X(X, m) for X in Xs]
@@ -712,7 +718,7 @@ def save_optimal_parameters(
         if verbose:
             print(coin, frequency, strategy_type)
 
-        options = [coin, frequency, strategy_type]
+        options = [coin, frequency, strategy_type, m, m_bear]
         parameter_names = get_parameter_names(strategy_type)
 
         fname = 'optim_results/' + '_'.join(options) + '.json'
@@ -823,8 +829,6 @@ def save_optimal_parameters(
 
 def get_adaptive_wealths_for_multiple_strategies(
         strategies,
-        m,
-        m_bear,
         weights,
         N_repeat_inp = 60,
         compress = 60,#1440,
@@ -863,6 +867,9 @@ def get_adaptive_wealths_for_multiple_strategies(
         strategy_type = strategy_key.split('_')[2]
         parameter_names = get_parameter_names(strategy_type)
 
+        m, m_bear = tuple([int(x) for x in strategy_key.split('_')[3:]])
+        print("m, m_bear:", m, m_bear, type(m), type(m_bear))
+
         args = strategy['params'][:len(parameter_names)]
         aggregate_N, w = args[:2]
 
@@ -890,10 +897,13 @@ def get_adaptive_wealths_for_multiple_strategies(
         total_balance = max(total_balance, 1)
 
         potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-            np.log10(total_balance * 100 * N_years), int(3000 * N_years))
+            np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
         potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
-        X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+        if short:
+            X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+        else:
+            X_bears = [None] * len(Xs)
         X_origs = Xs
         if m > 1:
             Xs = [get_multiplied_X(X, m) for X in Xs]
@@ -944,7 +954,7 @@ def get_adaptive_wealths_for_multiple_strategies(
                     potential_spreads = potential_spreads,
                     commissions = commissions,
                     short = short,
-                    X_bear = X1_bear[-min_N:, :],
+                    X_bear = X1_bear[-min_N:, :] if short else None,
                 )
 
                 if debug:
@@ -981,8 +991,6 @@ def get_adaptive_wealths_for_multiple_strategies(
 
 def save_wealths(
     strategies,
-    m,
-    m_bear,
     weights,
     N_repeat_inp = 60,
     compress = 60,#1440,
@@ -994,8 +1002,6 @@ def save_wealths(
 
     df = get_adaptive_wealths_for_multiple_strategies(
         strategies = strategies,
-        m = m,
-        m_bear = m_bear,
         weights = weights,
         N_repeat_inp = N_repeat_inp,
         compress = compress,
@@ -1063,84 +1069,19 @@ def optimize_weights(compress, save = True, verbose = False):
 
     return weights_dict, a, b, c
 
-def optimize_weights_iterative(
-    coins = ['ETH', 'BTC'],
-    freqs = ['low', 'high'],
-    strategy_types = ['ma', 'macross'],
-    weights_type = "file",
-    n_iter = 20,
-    compress = 60):
-
-    strategies = {}
-
-    for coin, freq, strategy_type in product(coins, freqs, strategy_types):
-        strategy_key = '_'.join([coin, freq, strategy_type])
-        filename = f'optim_results/{strategy_key}.json'
-        if os.path.exists(filename):
-            with open(filename, 'r') as file:
-                strategies[strategy_key] = json.load(file)
-
-    if weights_type == "file":
-        filename = 'optim_results/weights.json'
-        with open(filename, 'r') as file:
-            weights = json.load(file)
-    elif weights_type == "equal":
-        weights = dict(list(zip(
-            [k for k in strategies.keys()],
-            np.ones((len(strategies),)) / len(strategies)
-        )))
-    else:
-        raise ValueError('weights_type')
-
-    weight_values = np.zeros((len(weights),))
-
-    for n in range(n_iter):
-
-        weight_values *= n
-        weight_values += np.array(list(weights.values()))
-        weight_values /= (n + 1)
-        print(weight_values)
-        print()
-        weights = dict(list(zip(
-            weights.keys(),
-            weight_values
-        )))
-
-        save_wealths(
-            strategies,
-            m = 3,
-            m_bear = 3,
-            weights = weights,
-            N_repeat_inp = 5,
-            compress = compress,
-            disable = True,
-            verbose = False,
-            randomize = False,
-            Xs_index = [0, 1],
-            debug = False
-        )
-
-        weights, a, b, c = optimize_weights(compress, save = True, verbose = False)
-
-        print("Weights:")
-        print_dict(weights)
-        print("Performance:")
-        print(a, b, c)
-        print()
-
-    # TODO: delete 'wealths.csv'
-
 
 def get_filtered_strategies_and_weights(
     coins = ['ETH', 'BTC'],
     freqs = ['low', 'high'],
     strategy_types = ['ma', 'macross'],
+    ms = [1, 3],
+    m_bears = [0, 3],
     normalize = True):
 
     strategies = {}
 
-    for coin, freq, strategy_type in product(coins, freqs, strategy_types):
-        strategy_key = '_'.join([coin, freq, strategy_type])
+    for coin, freq, strategy_type, m, m_bear in product(coins, freqs, strategy_types, ms, m_bears):
+        strategy_key = '_'.join([coin, freq, strategy_type, m, m_bear])
         filename = f'optim_results/{strategy_key}.json'
         if os.path.exists(filename):
             with open(filename, 'r') as file:
@@ -1181,15 +1122,70 @@ def get_filtered_strategies_and_weights(
 
 
 
+
+def optimize_weights_iterative(
+    coins = ['ETH', 'BTC'],
+    freqs = ['low', 'high'],
+    strategy_types = ['ma', 'macross'],
+    ms = [1, 3],
+    m_bears = [0, 3],
+    n_iter = 20,
+    compress = 60):
+
+    strategies, weights = get_filtered_strategies_and_weights(
+        coins = coins,
+        freqs = freqs,
+        strategy_types = strategy_types,
+        ms = ms,
+        m_bears = m_bears
+    )
+
+    weight_values = np.zeros((len(weights),))
+
+    for n in range(n_iter):
+
+        weight_values *= n
+        weight_values += np.array(list(weights.values()))
+        weight_values /= (n + 1)
+        print(weight_values)
+        print()
+        weights = dict(list(zip(
+            weights.keys(),
+            weight_values
+        )))
+
+        save_wealths(
+            strategies,
+            weights = weights,
+            N_repeat_inp = 5,
+            compress = compress,
+            disable = True,
+            verbose = False,
+            randomize = False,
+            Xs_index = [0, 1],
+            debug = False
+        )
+
+        weights, a, b, c = optimize_weights(compress, save = True, verbose = False)
+
+        print("Weights:")
+        print_dict(weights)
+        print("Performance:")
+        print(a, b, c)
+        print()
+
+    # TODO: delete 'wealths.csv'
+
+
+
 def plot_weighted_adaptive_wealths(
     coins = ['ETH', 'BTC'],
     freqs = ['low', 'high'],
     strategy_types = ['ma', 'macross'],
-    m = 3,
-    m_bear = 3,
+    ms = [1, 3],
+    m_bears = [0, 3],
     N_repeat = 1,
-    compress = 60,
-    short = True,
+    compress = None,
     randomize = True,
     Xs_index = [0, 1]):
 
@@ -1198,18 +1194,46 @@ def plot_weighted_adaptive_wealths(
     strategies, weights = get_filtered_strategies_and_weights(
         coins,
         freqs,
-        strategy_types
+        strategy_types,
+        ms,
+        m_bears
     )
     print_dict(strategies)
 
+    if compress is None:
+        aggregate_Ns = np.array([v['params'][0] * 60 for v in strategies.values()])
+        max_trading_frequencies_per_min = 1 / aggregate_Ns
+        total_max_trading_frequencies_per_min = np.sum(max_trading_frequencies_per_min)
+
+        compress = int(1 / total_max_trading_frequencies_per_min)
+
+        # print("Sum of max trading frequencies (per min):", total_max_trading_frequencies_per_min)
+        print("Compress:", compress)
+
+    keys = list(weights.keys())
     weight_values = np.array(list(weights.values()))
+
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+
+    total_balance = get_total_balance(client, False) * np.max(weight_values)
+    total_balance = max(total_balance, 1)
+
+    fnames = glob.glob(f'data/{coins[0]}/*.json')
+    N_years = len(fnames) * 2000 / minutes_in_a_year
+    print("N_years:", round_to_n(N_years, 4))
+    print()
+
+    potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
+        np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
+    potential_spreads = {}
+
+    for coin, m, m_bear in product(coins, ms, m_bears):
+        potential_spreads[(coin, m, m_bear)] = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
     # TODO: move theis loop into get_adaptive_wealths_for_multiple_strategies?
     for i in range(N_repeat):
         df = get_adaptive_wealths_for_multiple_strategies(
             strategies,
-            m,
-            m_bear,
             weights,
             N_repeat_inp = 1,
             compress = compress,
@@ -1220,187 +1244,65 @@ def plot_weighted_adaptive_wealths(
         )
 
         wealths = (df.iloc[-1] / df.iloc[0])  ** (minutes_in_a_year / (len(df) * compress))
-        print(wealths)
 
         X = df.values
 
         weighted_wealths = np.matmul(X, weight_values)
         wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / (len(df) * compress))
-        print(wealth)
+        print("Non-balanced wealth (yearly):", round_to_n(wealth, 4))
 
         X_diff = X[1:, :] / X[:-1, :]
 
-        weighted_diffs = np.matmul(X_diff, weight_values)
-        weighted_wealths2 = np.cumprod(weighted_diffs)
-        wealth = weighted_wealths2[-1] ** (minutes_in_a_year / (len(df) * compress))
-        print(wealth)
+        new_weights = X_diff * weight_values.reshape(1, -1)
+        balanced_wealths = np.zeros((len(X),))
+
+        for i in range(new_weights.shape[0]):
+            new_weights_relative = new_weights[i] / np.sum(new_weights[i])
+
+            li_neg = X_diff[i, :] < 0
+            li_pos = ~li_neg
+
+            total_commisions_and_spread = []
+
+            spread_dict = {}
+
+            for j, key in enumerate(keys):
+                coin = key.split('_')[0]
+                m, m_bear = tuple([int(x) for x in key.split('_')[3:]])
+                print("m, m_bear:", m, m_bear, type(m), type(m_bear))
+
+                if coin not in spread_dict:
+                    spread_dict[coin] = potential_spreads[(coin, m, m_bear)][np.argmin(np.abs(potential_balances - total_balance))]
+
+                spread = spread_dict[coin]
+
+                total_commisions_and_spread.append(np.abs(weight_values[j] - new_weights_relative[j]) * (commissions + spread))
+
+            total_commisions_and_spread = np.array(total_commisions_and_spread)
+            total_commisions_and_spread = np.log(1 - np.sum(total_commisions_and_spread[li_neg])) + \
+                np.log(1 - np.sum(total_commisions_and_spread[li_pos]))
+            balanced_wealths[i + 1] = balanced_wealths[i] + np.log(np.sum(new_weights[i])) + total_commisions_and_spread
+
+        balanced_wealths = np.exp(balanced_wealths)
+
+        balanced_wealth = balanced_wealths[-1] ** (minutes_in_a_year / (len(df) * compress))
+        print("Balanced wealth (yearly):", round_to_n(balanced_wealth, 4))
+        print("Improvement:", round_to_n(balanced_wealth / wealth, 4))
+        print()
 
         plt.plot(X, 'k', alpha = 0.25 / np.sqrt(N_repeat))
         plt.plot(weighted_wealths, 'b', alpha = 1.0 / np.sqrt(N_repeat))
-        plt.plot(weighted_wealths2, 'g', alpha = 1.0 / np.sqrt(N_repeat))
+        plt.plot(balanced_wealths, 'g', alpha = 1.0 / np.sqrt(N_repeat))
 
     plt.yscale('log')
-    plt.show()
-
-# TODO: update or remove
-def plot_performance(params_list, N_repeat = 1, short = False, take_profit = True, stop_loss = True, randomize = True, Xs_index = [0, 1], N_ts_plots = 10, last_N_to_plot = None):
-    plt.style.use('seaborn')
-
-    test_files = glob.glob('data/ETH/*.json')
-    test_files.sort(key = get_time)
-
-    c_list = ['g', 'c', 'm', 'r']
-
-    Xs = load_all_data(test_files, Xs_index)
-
-    if not isinstance(Xs, list):
-        Xs = [Xs]
-
-    if last_N_to_plot is not None:
-        Xs = [X[-last_N_to_plot:, :] for X in Xs]
-
-    for i, params in enumerate(params_list):
-        aggregate_N, w, m, m_bear, take_profit_long, take_profit_short, stop_loss_long, stop_loss_short = params
-        print(params)
-
-        total_log_wealths = []
-        total_wealths_list = []
-        t_list = []
-        total_log_dropdowns = []
-        total_months = []
-
-        for n in tqdm(range(N_repeat), disable = N_repeat <= N_ts_plots):
-            prev_price = 1.0
-            count = 0
-            total_log_wealth = 0
-            total_log_dropdown = 0
-            total_months1 = 0
-
-            for X in Xs:
-                X_orig = X
-                if short:
-                    X_bear = get_multiplied_X(X, -m_bear)
-                if m > 1:
-                    X = get_multiplied_X(X, m)
-
-                rand_N = np.random.randint(aggregate_N * 60) if randomize else 0
-                # rand_N = 20 + 60*2
-                if rand_N > 0:
-                    X = X[:-rand_N, :]
-                    X_orig = X_orig[:-rand_N, :]
-                    if short:
-                        X_bear = X_bear[:-rand_N, :]
-                else:
-                    X = X
-                    X_orig = X_orig
-                    if short:
-                        X_bear = X_bear
-                X_agg = aggregate(X[:, :3], aggregate_N)
-                X_orig_agg = aggregate(X_orig[:, :3], aggregate_N)
-                if short:
-                    X_bear_agg = aggregate(X_bear[:, :3], aggregate_N)
-
-                buys, sells, N = get_buys_and_sells(X_orig_agg, w)
-
-                X_agg = X_agg[-N:, :]
-                X_orig_agg = X_orig_agg[-N:, :]
-                if short:
-                    X_bear_agg = X_bear_agg[-N:, :]
-                X = X[-aggregate_N * 60 * N:, :]
-                if short:
-                    X_bear = X_bear[-aggregate_N * 60 * N:, :]
-
-                # wealths = get_wealths(
-                #     X_agg,
-                #     buys,
-                #     sells,
-                #     commissions = commissions,
-                #     spread_bull = spread if m <= 1.0 else spread_bull,
-                #     X_bear = X_bear_agg,
-                #     spread_bear = spread_bear
-                # )
-
-                wealths_fast = get_wealths_fast(
-                    X_agg,
-                    buys,
-                    sells,
-                    commissions = commissions,
-                    spread_bull = spread if m <= 1.0 else spread_bull,
-                    X_bear = X_bear_agg,
-                    spread_bear = spread_bear
-                )
-
-                # print(wealths[-1], wealths_fast[-1])
-                wealths = wealths_fast
-
-                if take_profit or stop_loss:
-                    transform_wealths(wealths, X_agg, buys, sells, N, take_profit_long, stop_loss_long, commissions, spread if m <= 1.0 else spread_bull)
-                    transform_wealths(wealths, X_bear_agg, sells, buys, N, take_profit_short, stop_loss_short, commissions, spread_bear)
-
-                n_months = buys.shape[0] * aggregate_N / (24 * 30)
-
-                wealth = wealths[-1] ** (1 / n_months)
-
-                # TODO: transform these into more sensible units
-                t = np.arange(N) + count
-                t *= aggregate_N * 60
-                count += N
-
-                if N_repeat <= N_ts_plots:
-                    if i == 0 and n == 0:
-                        buys_diff = np.diff(np.concatenate([np.array([0]), buys]))
-                        buys_li = buys_diff == 1.0
-                        sells_li = buys_diff == -1.0
-                        idx = np.arange(N)
-                        plt.plot(t, X_orig_agg[:, 0] / X_orig_agg[0, 0] * prev_price, c='k', alpha=0.5)
-                        # plt.plot(t[idx[buys_li]], X_agg[idx[buys_li], 0] / X_agg[0, 0] * prev_price, 'g.', alpha=0.85, markersize=20)
-                        # plt.plot(t[idx[sells_li]], X_agg[idx[sells_li], 0] / X_agg[0, 0] * prev_price, 'r.', alpha=0.85, markersize=20)
-
-                    total_wealths = wealths * np.exp(total_log_wealth)
-                    total_wealths_list.append(total_wealths)
-                    t_list.append(t)
-                    plt.plot(t, total_wealths, c=c_list[i % len(c_list)], alpha=0.9 / np.sqrt(N_repeat))
-                    # plt.plot(t[[I, J]], total_wealths[[I, J]], 'r.', alpha=0.85, markersize=15)
-                    plt.yscale('log')
-
-                total_log_wealth += np.log(wealths[-1])
-                prev_price *= X_orig_agg[-1, 0] / X_orig_agg[0, 0]
-                total_months1 += n_months
-
-            total_log_wealths.append(total_log_wealth)
-            total_months.append(total_months1)
-
-        total_months_array = np.array(total_months)
-        total_months = np.sum(total_months)
-        total_wealth = np.exp(np.sum(total_log_wealths) / total_months)
-        print()
-        print(total_wealth, total_wealth ** 12)
-        # if N_repeat <= N_ts_plots and len(params_list) == 1:
-        #     total_wealths = np.concatenate(total_wealths_list)
-        #     t = np.concatenate(t_list)
-        #     monthly_returns = total_wealths ** (1 / ((np.arange(total_wealths.shape[0]) + 1) * aggregate_N / (24 * 30)))
-        #     plt.plot(t, monthly_returns ** 12, c = 'b', alpha=0.9 / np.sqrt(N_repeat))
-        #     plt.axhline(y = 1, color = 'k', alpha = 0.25)
-        #     print(round_to_n(total_months / 12, n = 3))
-        print()
-
-        if N_repeat > N_ts_plots:
-            plt.hist(
-                np.array(total_log_wealths) * 12 / total_months_array,
-                np.sqrt(N_repeat).astype(int),
-                color=c_list[i % len(c_list)],
-                alpha=0.9 / np.sqrt(len(params_list)),
-                density = True
-            )
-
     plt.show()
 
 
 def get_displacements(
     coins = ['ETH', 'BTC'],
     strategy_types = ['ma', 'macross'],
-    m = 3,
-    m_bear = 3,
+    ms = [1, 3],
+    m_bears = [0, 3],
     sep = 2,
     Xs_index = [0, 1],
     plot = True,
@@ -1410,9 +1312,16 @@ def get_displacements(
     plt.style.use('seaborn')
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
-    strategies, weights = get_filtered_strategies_and_weights(coins, ['high'], strategy_types, False)
+    strategies, weights = get_filtered_strategies_and_weights(
+        coins,
+        ['high'],
+        strategy_types,
+        ms,
+        m_bears,
+        False
+    )
 
-    wealth_categories = ['base', 'min', 'max'] # TODO: better name?
+    trade_wealth_categories = ['base', 'min', 'max']
 
     flag = True
 
@@ -1426,6 +1335,9 @@ def get_displacements(
             print(strategy_key, strategy['objective'], strategy['params'])
 
         strategy_type = strategy_key.split('_')[2]
+        m, m_bear = tuple([int(x) for x in strategy_key.split('_')[3:]])
+        print("m, m_bear:", m, m_bear, type(m), type(m_bear))
+
         parameter_names = get_parameter_names(strategy_type)
 
         args = strategy['params'][:len(parameter_names)]
@@ -1449,6 +1361,7 @@ def get_displacements(
 
             if not isinstance(Xs, list):
                 Xs = [Xs]
+                saved_times = [saved_times]
 
             Xs_dict[coin] = Xs
             saved_times_dict[coin] = saved_times
@@ -1459,15 +1372,20 @@ def get_displacements(
         online_time = online_times_dict[coin]
 
         N_years = max(len(X) for X in Xs) / minutes_in_a_year
+        print("N_years:", N_years)
 
         total_balance = get_total_balance(client, False) * weights[strategy_key]
         total_balance = max(total_balance, 1)
 
         potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-            np.log10(total_balance * 100 * N_years), int(3000 * N_years))
+            np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
         potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
-        X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+        # TODO: move this into a function
+        if short:
+            X_bears = [get_multiplied_X(X, -m_bear) for X in Xs]
+        else:
+            X_bears = [None] * len(Xs)
         X_origs = Xs
         if m > 1:
             Xs = [get_multiplied_X(X, m) for X in Xs]
@@ -1499,7 +1417,7 @@ def get_displacements(
                     sells_orig,
                     N_orig,
                     sides,
-                    wealth_categories
+                    trade_wealth_categories
                 )
 
                 stop_loss_take_profit_wealths_dict = {}
@@ -1593,7 +1511,6 @@ def get_displacements(
     if verbose:
         print_dict(displacements)
 
-    # TODO: plot optim results
     if plot:
         for key in strategies.keys():
             plt.plot(wealths_dict[key])
@@ -1605,9 +1522,31 @@ def get_displacements(
 
     return displacements
 
-# TODO: implement
-def save_displacements():
-    pass
+def save_displacements(
+    coins = ['ETH', 'BTC'],
+    strategy_types = ['ma', 'macross'],
+    ms = [1, 3],
+    m_bears = [0, 3],
+    sep = 2,
+    Xs_index = [0, 1],
+    plot = True,
+    verbose = True,
+    disable = False):
+
+    displacements = get_displacements(
+        coins = coins,
+        strategy_types = strategy_types,
+        ms = ms,
+        m_bears = m_bears,
+        sep = sep,
+        Xs_index = Xs_index,
+        plot = plot,
+        verbose = verbose,
+        disable = disable
+    )
+
+    with open('optim_results/displacements.json', 'w') as file:
+        json.dump(displacements, file, cls = NpEncoder)
 
 
 if __name__ == '__main__':
@@ -1657,14 +1596,37 @@ if __name__ == '__main__':
         debug = debug
     )
 
+    save_optimal_parameters(
+        all_bounds = all_bounds,
+        all_resolutions = all_resolutions,
+        coins = coins,
+        frequencies = ['low'],
+        strategy_types = strategy_types,
+        stop_loss_take_profit_types = stop_loss_take_profit_types,
+        N_iter = N_iter,
+        m = 1,
+        m_bear = 0,
+        N_repeat_inp = N_repeat_inp,
+        step = step,
+        skip_existing = skip_existing,
+        verbose = verbose,
+        disable = disable,
+        short = False,
+        Xs_index = Xs_index,
+        debug = debug
+    )
+
     n_iter = 10
     compress = 1440
+    ms = [1, 3]
+    m_bears = [0, 3]
 
     optimize_weights_iterative(
         coins = coins,
         freqs = frequencies,
         strategy_types = strategy_types,
-        weights_type = "equal",
+        ms = ms,
+        m_bears = m_bears,
         n_iter = n_iter,
         compress = compress
     )
@@ -1672,11 +1634,11 @@ if __name__ == '__main__':
     sep = 2
     plot = True
 
-    displacements = get_displacements(
+    save_displacements(
         coins = coins,
         strategy_types = strategy_types,
-        m = m,
-        m_bear = m_bear,
+        ms = ms,
+        m_bears = m_bears,
         sep = sep,
         Xs_index = Xs_index,
         plot = plot,
@@ -1691,11 +1653,10 @@ if __name__ == '__main__':
         coins = coins,
         freqs = frequencies,
         strategy_types = strategy_types,
-        m = m,
-        m_bear = m_bear,
+        ms = ms,
+        m_bears = m_bears,
         N_repeat = N_repeat,
         compress = compress,
-        short = short,
         randomize = randomize,
         Xs_index = Xs_index
     )

@@ -219,15 +219,14 @@ def save_orderbook_data():
 
 # TODO: is max (the output) the best?
 def get_average_spread(coin, m, total_balances, m_bear = None, step = 0.0001):
+    bull_folder = coin
     if m > 1:
         if coin == 'BTC':
             bull_folder = ''
-        else:
-            bull_folder = coin
         bull_folder += 'BULL'
     foldernames_bull = [f'data/orderbooks/{coin}/{bull_folder}/']
 
-    if m_bear is not None:
+    if (m_bear is not None) and (m_bear != 0):
         if coin == 'BTC':
             bear_folder = ''
         else:

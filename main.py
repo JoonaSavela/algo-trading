@@ -25,12 +25,6 @@ import multiprocessing
 
 # TODO: train a (bayesian) NN on the (aggregated) data
 
-# TODO: train a network for predicitng the optimal take profit parameter(s)
-
-# TODO: make a generator for calculating wealths
-
-# TODO: make a "daily" script that saves new optimal values periodically
-
 # TODO: add comments; improve readability
 
 # TODO: write a bunch of tests
@@ -40,7 +34,6 @@ import multiprocessing
 
 
 
-# TODO: check how often can the weights be refreshed (with commissions_and_spread!)
 
 # TODO: only trade with .../USD
 
@@ -48,7 +41,7 @@ import multiprocessing
 
 # TODO: implement weighted adaptive strategies in trade.py
 
-# TODO: implement different objective functions in find_optimal_aggregated_strategy
+# TODO: implement different objective functions in find_optimal_aggregated_strategy?
 
 
 
@@ -125,38 +118,79 @@ def main():
     # visualize_spreads()
 
 
-    coins = ['ETH', 'BTC']
-    freqs = ['low', 'high']
-    strategy_types = ['ma', 'macross']
-
-    strategies, weights = get_filtered_strategies_and_weights(coins, freqs, strategy_types)
-
-    get_adaptive_wealths_for_multiple_strategies(
-        strategies = strategies,
-        m = 3,
-        m_bear = 3,
-        weights = weights,
-        N_repeat_inp = 3,
-        compress = 60,#1440,
-        disable = False,
-        verbose = True,
-        randomize = False,
-        Xs_index = [0, 1],
-        debug = True
-    )
-
-    # plot_weighted_adaptive_wealths(
-    #     coins = ['ETH', 'BTC'],
-    #     freqs = ['low', 'high'],
-    #     strategy_types = ['ma', 'macross'],
+    # coins = ['ETH', 'BTC']
+    # freqs = ['low', 'high']
+    # strategy_types = ['ma', 'macross']
+    #
+    # strategies, weights = get_filtered_strategies_and_weights(coins, freqs, strategy_types)
+    #
+    # get_adaptive_wealths_for_multiple_strategies(
+    #     strategies = strategies,
     #     m = 3,
     #     m_bear = 3,
-    #     N_repeat = 5,
-    #     compress = 1440,
-    #     short = True,
-    #     randomize = True,
-    #     Xs_index = [0, 1]
+    #     weights = weights,
+    #     N_repeat_inp = 3,
+    #     compress = 60,#1440,
+    #     disable = False,
+    #     verbose = True,
+    #     randomize = False,
+    #     Xs_index = [0, 1],
+    #     debug = True
     # )
+
+    # strategies, weights = get_filtered_strategies_and_weights(
+    #     coins = ['ETH', 'BTC'],
+    #     freqs = ['low', 'high'],
+    #     strategy_types = ['ma', 'macross']
+    # )
+    #
+    # weight_values = np.array(list(weights.values()))
+    # print(weight_values)
+    #
+    # combinations = np.array(list(product([0, 1], repeat=len(weights))))
+    #
+    # X_diff = np.random.rand(5, len(weights)) * 0.2 + 0.9
+    #
+    # print(X_diff)
+    # # print(np.matmul(X_diff, weight_values))
+    # new_weights = X_diff * weight_values.reshape(1, -1)
+    # print(new_weights)
+    # print()
+    #
+    # for i in range(new_weights.shape[0]):
+    #     new_weights_relative = new_weights[i] / np.sum(new_weights[i])
+    #     print(weight_values)
+    #     print(new_weights_relative)
+    #     print(weight_values - new_weights_relative)
+    #     print(np.allclose(np.sum(weight_values - new_weights_relative), 0))
+    #
+    #     # combination_i = np.random.choice(combinations.shape[0], size=1)
+    #     # combination = combinations[combination_i].reshape(-1)
+    #     # print(combination)
+    #     # new_weights1 = np.dot(new_weights[i], combination)
+    #     # weights1 = np.dot(weight_values, combination)
+    #     # new_weights0 = np.dot(new_weights[i], 1 - combination)
+    #     # weights0 = np.dot(weight_values, 1 - combination)
+    #     #
+    #     # weights_arr = np.array([weights1, weights0])
+    #     # new_weights_arr = np.array([new_weights1, new_weights0])
+    #     # weights_arr_relative = weights_arr / np.sum(weights_arr)
+    #     # new_weights_arr_relative = new_weights_arr / np.sum(new_weights_arr)
+    #     # print(weights_arr_relative)
+    #     # print(new_weights_arr_relative)
+    #     # print(weights_arr_relative - new_weights_arr_relative)
+
+    plot_weighted_adaptive_wealths(
+        coins = ['ETH', 'BTC'],
+        freqs = ['low', 'high'],
+        strategy_types = ['ma', 'macross'],
+        ms = [3],
+        m_bears = [3],
+        N_repeat = 3,
+        compress = None,
+        randomize = True,
+        Xs_index = [0, 1]
+    )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
 
