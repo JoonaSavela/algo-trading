@@ -1,4 +1,3 @@
-from strategy import *
 import numpy as np
 import pandas as pd
 import glob
@@ -6,11 +5,10 @@ from utils import *
 from data import *
 import time
 import os
-from parameters import parameters, minutes_in_a_year
 from tqdm import tqdm
 from optimize import *
 from itertools import product
-from parameters import commissions, spread, spread_bear, spread_bull
+from parameters import commissions, minutes_in_a_year
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
 from pypfopt.efficient_frontier import EfficientFrontier
@@ -20,6 +18,9 @@ from pypfopt import BlackLittermanModel
 import concurrent.futures
 from bayes_opt import BayesianOptimization
 import warnings
+from utils import choose_get_buys_and_sells_fn, get_filtered_strategies_and_weights, \
+    get_parameter_names
+
 
 def get_trade_wealths_dicts(
         rand_N,
@@ -148,7 +149,7 @@ def get_stop_loss_take_profit_wealth(
 
 def skip_condition(strategy_type, frequency, args):
     aggregate_N, w = args[:2]
-    test_value = aggregate_N * w * 60 / 10000 - 1
+    test_value = (w + 1) * 60 * aggregate_N / 10000 - 1
     if frequency == 'high' and test_value >= 0:
         return True, -test_value
     elif frequency == 'low' and test_value < 0:
@@ -162,17 +163,6 @@ def skip_condition(strategy_type, frequency, args):
             return True, test_value
 
     return False, 0
-
-
-def choose_get_buys_and_sells_fn(strategy_type):
-    if strategy_type == 'ma':
-        return get_buys_and_sells_ma
-    elif strategy_type == 'stoch':
-        return get_buys_and_sells_stoch
-    elif strategy_type == 'macross':
-        return get_buys_and_sells_macross
-    else:
-        raise ValueError("strategy_type")
 
 
 def get_semi_adaptive_wealths(
@@ -274,7 +264,7 @@ def get_objective_function(
     trade_wealths_dicts = []
     for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
         t00 = time.time()
-        buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, hourly = True)
+        buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, from_minute = True)
         t1 = time.time()
         t_X = t1 - t00
         if debug:
@@ -408,15 +398,6 @@ def get_objective_function(
     return params_dict
 
 
-def get_parameter_names(strategy_type):
-    if strategy_type == 'ma':
-        return ['aggregate_N', 'w']
-    elif strategy_type == 'stoch':
-        return ['aggregate_N', 'w', 'th']
-    elif strategy_type == 'macross':
-        return ['aggregate_N', 'w', 'w2']
-    else:
-        raise ValueError('strategy_type')
 
 # TODO: possible strategy types:
 #   - stoch
@@ -914,7 +895,7 @@ def get_adaptive_wealths_for_multiple_strategies(
         for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
             min_N_orig = len(X_orig) - max_aggregate_N_times_w * 60
 
-            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, hourly = True)
+            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, from_minute = True)
 
             pbar = tqdm(rand_Ns, disable = disable)
             for rand_N in pbar:
@@ -1066,59 +1047,6 @@ def optimize_weights(compress, save = True, verbose = False):
             json.dump(weights_dict, file)
 
     return weights_dict, a, b, c
-
-
-def get_filtered_strategies_and_weights(
-    coins = ['ETH', 'BTC'],
-    freqs = ['low', 'high'],
-    strategy_types = ['ma', 'macross'],
-    ms = [1, 3],
-    m_bears = [0, 3],
-    normalize = True,
-    filter = True):
-
-    strategies = {}
-
-    for coin, freq, strategy_type, m, m_bear in product(coins, freqs, strategy_types, ms, m_bears):
-        strategy_key = '_'.join([coin, freq, strategy_type, str(m), str(m_bear)])
-        filename = f'optim_results/{strategy_key}.json'
-        if os.path.exists(filename):
-            with open(filename, 'r') as file:
-                strategies[strategy_key] = json.load(file)
-
-    if os.path.exists('optim_results/weights.json') and filter:
-        with open('optim_results/weights.json', 'r') as file:
-            weights = json.load(file)
-
-        filtered_strategies = {}
-        filtered_weights = {}
-
-        for k in strategies.keys():
-            if k in weights and weights[k] > 0:
-                filtered_strategies[k] = strategies[k]
-                filtered_weights[k] = weights[k]
-
-        strategies = filtered_strategies
-        weights = filtered_weights
-    else:
-        weights = {}
-
-    if len(weights) > 0:
-        if normalize:
-            weight_values = np.array(list(weights.values()))
-            weight_values /= np.sum(weight_values)
-            weights = dict(list(zip(
-                weights.keys(),
-                weight_values
-            )))
-    else:
-        weights = dict(list(zip(
-            strategies.keys(),
-            np.ones((len(strategies),)) / len(strategies)
-        )))
-
-    return strategies, weights
-
 
 
 
@@ -1317,7 +1245,7 @@ def get_displacements(
         strategy_types,
         ms,
         m_bears,
-        False
+        normalize = False
     )
 
     trade_wealth_categories = ['base', 'min', 'max']
@@ -1399,7 +1327,7 @@ def get_displacements(
 
         for i in range(len(Xs)):
             X_orig, X, X_bear = X_origs[i], Xs[i], X_bears[i]
-            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, hourly = True)
+            buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, from_minute = True)
 
             wealth_list = []
             time_diff = ((online_time - saved_times[i]) // 60) % (aggregate_N * 60)
@@ -1498,6 +1426,9 @@ def get_displacements(
     displacements = {}
 
     for i in range(len(strategies)):
+        if not np.any(li):
+            raise ValueError(f"No valid displacements available (step {i+1}/{len(strategies)}), 'sep' must be decreased.")
+
         max_i = np.argmax([_helper(key, li)[1] for key in keys[not_processed]])
         max_i = keys_idx[not_processed][max_i]
         not_processed[max_i] = False
@@ -1567,7 +1498,7 @@ if __name__ == '__main__':
     m_bear = 3
     N_repeat_inp = 40
     step = 0.01
-    skip_existing = True
+    skip_existing = False
     verbose = True
     disable = False
     short = True
@@ -1644,7 +1575,7 @@ if __name__ == '__main__':
         disable = disable
     )
 
-    N_repeat = 5
+    N_repeat = 3
     randomize = True
 
     plot_weighted_adaptive_wealths(
@@ -1654,7 +1585,7 @@ if __name__ == '__main__':
         ms = ms,
         m_bears = m_bears,
         N_repeat = N_repeat,
-        compress = compress,
+        compress = None,
         randomize = randomize,
         Xs_index = Xs_index
     )

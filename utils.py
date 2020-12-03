@@ -4,12 +4,103 @@ import json
 from math import log10, floor, ceil
 from scipy.signal import find_peaks
 from scipy import stats
+from itertools import product
+import os
 try:
     import matplotlib.pyplot as plt
     import torch
 except ImportError as e:
     print(e)
 
+# TODO: split this file into multiple files (based on function category)
+
+
+
+def get_parameter_names(strategy_type):
+    if strategy_type == 'ma':
+        return ['aggregate_N', 'w']
+    elif strategy_type == 'stoch':
+        return ['aggregate_N', 'w', 'th']
+    elif strategy_type == 'macross':
+        return ['aggregate_N', 'w', 'w2']
+    else:
+        raise ValueError('strategy_type')
+
+
+def choose_get_buys_and_sells_fn(strategy_type):
+    if strategy_type == 'ma':
+        return get_buys_and_sells_ma
+    elif strategy_type == 'stoch':
+        return get_buys_and_sells_stoch
+    elif strategy_type == 'macross':
+        return get_buys_and_sells_macross
+    else:
+        raise ValueError("strategy_type")
+
+
+def get_filtered_strategies_and_weights(
+    coins = ['ETH', 'BTC'],
+    freqs = ['low', 'high'],
+    strategy_types = ['ma', 'macross'],
+    ms = [1, 3],
+    m_bears = [0, 3],
+    normalize = True,
+    filter = True):
+
+    strategies = {}
+
+    for coin, freq, strategy_type, m, m_bear in product(coins, freqs, strategy_types, ms, m_bears):
+        strategy_key = '_'.join([coin, freq, strategy_type, str(m), str(m_bear)])
+        filename = f'optim_results/{strategy_key}.json'
+        if os.path.exists(filename):
+            with open(filename, 'r') as file:
+                strategies[strategy_key] = json.load(file)
+
+    if os.path.exists('optim_results/weights.json') and filter:
+        with open('optim_results/weights.json', 'r') as file:
+            weights = json.load(file)
+
+        filtered_strategies = {}
+        filtered_weights = {}
+
+        for k in strategies.keys():
+            if k in weights and weights[k] > 0:
+                filtered_strategies[k] = strategies[k]
+                filtered_weights[k] = weights[k]
+
+        strategies = filtered_strategies
+        weights = filtered_weights
+    else:
+        weights = {}
+
+    if len(weights) > 0:
+        if normalize:
+            weight_values = np.array(list(weights.values()))
+            weight_values /= np.sum(weight_values)
+            weights = dict(list(zip(
+                weights.keys(),
+                weight_values
+            )))
+    else:
+        weights = dict(list(zip(
+            strategies.keys(),
+            np.ones((len(strategies),)) / len(strategies)
+        )))
+
+    return strategies, weights
+
+
+
+
+# This function computes GCD (Greatest Common Divisor)
+def get_gcd(x, y):
+   while(y):
+       x, y = y, x % y
+   return x
+
+# This function computes LCM (Least Common Multiple)
+def get_lcm(x, y):
+   return x * y // get_gcd(x, y)
 
 def quick_plot(xs, colors, alphas, log = False):
     plt.style.use('seaborn')
@@ -273,10 +364,10 @@ def diff_loss(out, batch_size, use_tanh, e, n_epochs):
 
     return torch.cat(diffs).mean() * (1 - 0.99 ** (e / n_epochs))
 
-def aggregate(X, n = 5, type = 'h'):
+def aggregate(X, n = 5, from_minute = True):
     if X.ndim == 1:
         X = X.reshape(-1, 1)
-    if type == 'h':
+    if from_minute:
         n *= 60
 
     aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))
@@ -580,49 +671,9 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 
 
-
-
-# TODO: remove
-def get_buys_and_sells(X, w, as_boolean = False, return_ma = False, return_std = False, use_diff = False, verbose_i = None):
-    ma = np.diff(sma(X[:, 0] / X[0, 0], w))
-    if verbose_i is not None:
-        print(ma[verbose_i])
-    N = ma.shape[0]
-    if use_diff:
-        diff = np.diff(X[:, 0] / X[0, 0])
-        diff = diff[-N:]
-
-    buys = ma > 0
-    sells = ma < 0
-
-    if use_diff:
-        buys = buys & (diff > 0)
-        sells = sells & (diff < 0)
-
-    return_tuple = (N,)
-    if return_ma:
-        return_tuple = return_tuple + (ma,)
-    if return_std:
-        return_tuple = return_tuple + (std(X, w + 1),)
-
-    if as_boolean:
-        if N == 1:
-            return (buys[0], sells[0]) + return_tuple
-        else:
-            return (buys, sells) + return_tuple
-
-    buys = buys.astype(float)
-    sells = sells.astype(float)
-
-    # print(N)
-    # print(buys.mean())
-    # print(sells.mean())
-
-    return (buys, sells) + return_tuple
-
-def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, hourly = True):
+def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, from_minute = True):
     w = aggregate_N * w
-    if hourly:
+    if from_minute:
         w *= 60
 
     diff = X[w:, 0] - X[:-w, 0]
@@ -644,10 +695,10 @@ def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, hourly = True):
 
     return (buys, sells) + return_tuple
 
-def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False, hourly = True):
+def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False, from_minute = True):
     w_max = aggregate_N * w_max
     w_min = aggregate_N * w_min
-    if hourly:
+    if from_minute:
         w_max *= 60
         w_min *= 60
 
@@ -679,9 +730,9 @@ def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False,
 
 
 
-def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean = False, hourly = True):
+def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean = False, from_minute = True):
     w = aggregate_N * w
-    if hourly:
+    if from_minute:
         w *= 60
 
     # start from index 1 so that N is the same as in the previous get_buys_and_sells function
