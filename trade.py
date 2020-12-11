@@ -111,7 +111,7 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
                 side = 'sell',
                 size = quantity,
                 order_type = 'stop',
-                trigger_price = buy_price * trigger_param
+                triggerPrice = buy_price * trigger_param
             )
         elif trigger_name == 'take_profit':
             res = client.place_conditional_order(
@@ -119,7 +119,7 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
                 side = 'sell',
                 size = quantity,
                 order_type = 'takeProfit',
-                trigger_price = buy_price * trigger_param
+                triggerPrice = buy_price * trigger_param
             )
         elif trigger_name == 'trailing':
             res = client.place_conditional_order(
@@ -127,11 +127,41 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
                 side = 'sell',
                 size = quantity,
                 order_type = 'trailingStop',
-                trail_value = -(1 - trigger_param) * buy_price
+                trailValue = -(1 - trigger_param) * buy_price
             )
         else:
             raise ValueError('trigger_name')
 
+        time.sleep(0.1)
+    else:
+        res = {
+            'id': None
+        }
+
+    return res['id'], quantity
+
+def modify_trigger_order_size(
+    client,
+    order_id,
+    trigger_name,
+    amount,
+    round_n = 4,
+    debug = False):
+
+    quantity = floor_to_n(amount, round_n)
+
+    trigger_name_to_order_type = {
+        'stop_loss': 'stop',
+        'take_profit': 'takeProfit',
+        'trailing': 'trailingStop'
+    }
+
+    if not debug:
+        res = client.modify_conditional_order(
+            order_id = order_id,
+            order_type = trigger_name_to_order_type[trigger_name],
+            size = quantity,
+        )
         time.sleep(0.1)
     else:
         res = {
@@ -155,9 +185,15 @@ def wait(time_delta, initial_time, verbose = False):
             print('waiting', round_to_n(waiting_time / (60 * 60), 4), 'hours')
     time.sleep(waiting_time)
 
-def cancel_orders(client):
-    client.cancel_orders()
-    time.sleep(0.05)
+def cancel_orders(client, debug = False):
+    if not debug:
+        client.cancel_orders()
+        time.sleep(0.05)
+
+def cancel_order(client, order_id, debug = False):
+    if not debug:
+        client.cancel_order(order_id)
+        time.sleep(0.05)
 
 
 # TODO: implement
@@ -217,10 +253,6 @@ def balance_portfolio(client, buy_info, debug = False):
                 buy_info[strategy_key]['trigger_order_id'] not in open_trigger_orders or \
                 open_trigger_orders[buy_info[strategy_key]['trigger_order_id']]['status'] != 'open'
 
-    # cancel orders
-    if not debug:
-        cancel_orders(client)
-
     symbols = {}
     weights = {
         source_symbol: 0
@@ -260,6 +292,46 @@ def balance_portfolio(client, buy_info, debug = False):
     actual_weights = balances['usdValue'] / total_balance
     weight_diffs = target_weights - actual_weights
 
+    processed_trigger_order_ids = []
+
+    # cancel orders if trigger_name is not 'trailing'
+    # else modify order s.t. its weight is correct
+    for strategy_key, symbol in symbols.items():
+        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None:
+            if buy_info[strategy_key]['trigger_name'] != 'trailing':
+                cancel_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
+                if debug:
+                    print(f'cancel order {symbol}, {buy_info[strategy_key]['trigger_order_id']}')
+            else:
+                amount = min(
+                    1.0,
+                    buy_info[strategy_key]['weight'] / actual_weights[symbol]
+                )
+                amount *= balances['total'][symbol]
+
+                id, quantity = modify_trigger_order_size(
+                    client,
+                    buy_info[strategy_key]['trigger_order_id'],
+                    buy_info[strategy_key]['trigger_name'],
+                    amount,
+                    round_n = 5,
+                    debug = debug
+                )
+
+                buy_info[strategy_key]['trigger_order_id'] = str(id) if id is not None else id
+
+                if debug:
+                    print(f'Modified order, quantity = {quantity}')
+
+            processed_trigger_order_ids.append(buy_info[strategy_key]['trigger_order_id'])
+
+    for cond_order_id in open_trigger_orders.keys():
+        if cond_order_id not in processed_trigger_order_ids:
+            cancel_order(client, cond_order_id, debug = debug)
+            if debug:
+                print(f'cancel order {cond_order_id}')
+
+
     # sell negatives
     li_neg = weight_diffs < 0
 
@@ -287,23 +359,35 @@ def balance_portfolio(client, buy_info, debug = False):
 
     quantities = {}
 
-    # (re)apply trigger orders
+    # (re)apply trigger orders if trigger_name is not 'trailing' or if trigger_order_id is None
+    # else modify order s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
         if symbol != source_symbol:
             amount = buy_info[strategy_key]['weight'] / target_weights[symbol] * balances['total'][symbol]
 
-            id, quantity = place_trigger_order(
-                client,
-                symbol,
-                buy_info[strategy_key]['buy_price'],
-                amount,
-                buy_info[strategy_key]['trigger_name'],
-                buy_info[strategy_key]['trigger_param'],
-                round_n = 5,
-                debug = debug
-            )
+            if buy_info[strategy_key]['trigger_name'] != 'trailing' or \
+                    buy_info[strategy_key]['trigger_order_id'] is None:
+                id, quantity = place_trigger_order(
+                    client,
+                    symbol,
+                    buy_info[strategy_key]['buy_price'],
+                    amount,
+                    buy_info[strategy_key]['trigger_name'],
+                    buy_info[strategy_key]['trigger_param'],
+                    round_n = 5,
+                    debug = debug
+                )
+            else:
+                id, quantity = modify_trigger_order_size(
+                    client,
+                    buy_info[strategy_key]['trigger_order_id'],
+                    buy_info[strategy_key]['trigger_name'],
+                    amount,
+                    round_n = 5,
+                    debug = debug
+                )
 
-            buy_info[strategy_key]['trigger_order_id'] = id
+            buy_info[strategy_key]['trigger_order_id'] = str(id) if id is not None else id
             quantities[strategy_key] = quantity
         else:
             quantities[strategy_key] = None
@@ -511,6 +595,7 @@ def trading_pipeline(
                     print(buy_info)
                     print()
 
+                # TODO: balance every time, even when not changed?
                 if changed:
                     buy_info = balance_portfolio(client, buy_info, debug = debug)
 
