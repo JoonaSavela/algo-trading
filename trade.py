@@ -513,8 +513,9 @@ def trading_pipeline(
             index=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
             columns=strategy_keys
         )
-        for key in strategy_keys:
-            buy_info[key]['weight'] = weights[key]
+        
+    for key in strategy_keys:
+        buy_info[key]['weight'] = weights[key]
 
     if debug:
         print(buy_info)
