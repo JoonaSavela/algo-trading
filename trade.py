@@ -301,7 +301,8 @@ def balance_portfolio(client, buy_info, debug = False):
             if buy_info[strategy_key]['trigger_name'] != 'trailing':
                 cancel_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
                 if debug:
-                    print(f'cancel order {symbol}, {buy_info[strategy_key]['trigger_order_id']}')
+                    id = buy_info[strategy_key]['trigger_order_id']
+                    print(f'cancel order {symbol}, {id}')
             else:
                 amount = min(
                     1.0,
@@ -423,14 +424,28 @@ def trading_pipeline(
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
     debug = False
+    buy_info_from_file = True
+    buy_info_file = 'optim_results/buy_info.csv'
 
     if ask_for_input:
-        debug = input('Is this a debug run? ')
-        if 'y' in debug:
+        debug_inp = input('Is this a debug run? ')
+        if 'y' in debug_inp:
             debug = True
 
         if debug:
             print('Debug flag set')
+
+        buy_info_from_file_inp = input("Load 'buy_info' from file ([y]/n)? ")
+        if 'n' in buy_info_from_file_inp:
+            buy_info_from_file = False
+
+    if not buy_info_from_file:
+        print("Won't load 'buy_info' from file")
+    else:
+        buy_info_from_file = os.path.exists(buy_info_file)
+
+        if not buy_info_from_file:
+            print(f"{buy_info_file} doesn't exist")
 
     strategies, weights = get_filtered_strategies_and_weights(
         coins,
@@ -468,20 +483,38 @@ def trading_pipeline(
     gcd = reduce(lambda x, y: get_gcd(x, y), aggregate_Ns_all)
     counter = 0
 
-    if buy_info is None:
-        # DataFrame of relevant information
-        #   - buy_state: dtypes = [None, bool]
-        #   - buy_price: dtypes = [None, float]
-        #   - trigger_name: dtypes = [None, str]
-        #   - trigger_param: dtypes = [None, float]
-        #   - weight: dtypes = [None, float]
-        #   - trigger_order_id: dtypes = [None, int]
+    # DataFrame of relevant information
+    #   - buy_state: dtypes = [None, bool]
+    #   - buy_price: dtypes = [None, float]
+    #   - trigger_name: dtypes = [None, str]
+    #   - trigger_param: dtypes = [None, float]
+    #   - weight: dtypes = [None, float]
+    #   - trigger_order_id: dtypes = [None, int]
+    if buy_info_from_file:
+        buy_info = pd.read_csv(buy_info_file, index_col = 0)
+
+        for strategy_key in strategy_keys:
+            if strategy_key not in buy_info.columns:
+                buy_info_from_file = False
+                break
+
+        for col in buy_info.columns:
+            if col not in strategy_keys:
+                buy_info_from_file = False
+                break
+
+        if not buy_info_from_file:
+            print("'buy_info' columns and strategy_keys did not match exactly")
+
+    if not buy_info_from_file:
         buy_info = pd.DataFrame(
             index=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
             columns=strategy_keys
         )
         for key in strategy_keys:
             buy_info[key]['weight'] = weights[key]
+
+    print(buy_info)
 
     error_flag = True
 
@@ -613,6 +646,8 @@ def trading_pipeline(
 
         if error_flag:
             send_error_email(email_address, email_password)
+
+        buy_info.to_csv(buy_info_file)
 
         # return error_flag, False, buy_info
 
