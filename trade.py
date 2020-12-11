@@ -506,6 +506,8 @@ def trading_pipeline(
         if not buy_info_from_file:
             print("'buy_info' columns and strategy_keys did not match exactly")
 
+    transaction_count = {key: (1 if buy_info_from_file else 0) for key in strategy_keys}
+
     if not buy_info_from_file:
         buy_info = pd.DataFrame(
             index=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
@@ -514,7 +516,11 @@ def trading_pipeline(
         for key in strategy_keys:
             buy_info[key]['weight'] = weights[key]
 
-    print(buy_info)
+    if debug:
+        print(buy_info)
+        print()
+
+    prev_buy_state = {key: None for key in strategy_keys}
 
     error_flag = True
 
@@ -598,39 +604,51 @@ def trading_pipeline(
                     assert(N == 1)
 
                     if buy:
-                        if buy != buy_info[key]['buy_state']:
-                            buy_info[key]['buy_state'] = True
-                            buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m, bear = False))
-                            buy_info[key]['trigger_name'] = sltp_args[0]
-                            buy_info[key]['trigger_param'] = sltp_args[1]
-                            buy_info[key]['trigger_order_id'] = None
-                            changed = True
+                        if buy != prev_buy_state[key]:
+                            prev_buy_state[key] = True
+                            transaction_count[key] += 1
+
+                            if transaction_count[key] > 1:
+                                buy_info[key]['buy_state'] = True
+                                buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m, bear = False))
+                                buy_info[key]['trigger_name'] = sltp_args[0]
+                                buy_info[key]['trigger_param'] = sltp_args[1]
+                                buy_info[key]['trigger_order_id'] = None
+                                changed = True
 
                     elif sell and len(sltp_args) == 4:
-                        if (not sell) != buy_info[key]['buy_state']:
-                            buy_info[key]['buy_state'] = False
-                            buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m_bear, bear = True))
-                            buy_info[key]['trigger_name'] = sltp_args[2]
-                            buy_info[key]['trigger_param'] = sltp_args[3]
-                            buy_info[key]['trigger_order_id'] = None
-                            changed = True
+                        if (not sell) != prev_buy_state[key]:
+                            prev_buy_state[key] = False
+                            transaction_count[key] += 1
+
+                            if transaction_count[key] > 1:
+                                buy_info[key]['buy_state'] = False
+                                buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m_bear, bear = True))
+                                buy_info[key]['trigger_name'] = sltp_args[2]
+                                buy_info[key]['trigger_param'] = sltp_args[3]
+                                buy_info[key]['trigger_order_id'] = None
+                                changed = True
 
                     elif sell and len(sltp_args) == 2:
-                        if buy_info[key]['buy_state'] == True:
-                            buy_info[key]['buy_state'] = None
-                            buy_info[key]['buy_price'] = None
-                            buy_info[key]['trigger_name'] = None
-                            buy_info[key]['trigger_param'] = None
-                            buy_info[key]['trigger_order_id'] = None
-                            changed = True
+                        if (not sell) != prev_buy_state[key]:
+                            prev_buy_state[key] = False
+                            transaction_count[key] += 1
+
+                            if transaction_count[key] > 1:
+                                buy_info[key]['buy_state'] = None
+                                buy_info[key]['buy_price'] = None
+                                buy_info[key]['trigger_name'] = None
+                                buy_info[key]['trigger_param'] = None
+                                buy_info[key]['trigger_order_id'] = None
+                                changed = True
 
                 if debug:
                     print(buy_info)
                     print()
 
-                # TODO: balance every time, even when not changed?
-                if changed:
-                    buy_info = balance_portfolio(client, buy_info, debug = debug)
+                # if changed:
+                # TODO: if this works well, remove variable 'changed'
+                buy_info = balance_portfolio(client, buy_info, debug = debug)
 
             counter = (counter + gcd) % lcm
 
@@ -644,7 +662,7 @@ def trading_pipeline(
         print('Exiting trading pipeline...')
         print()
 
-        if error_flag:
+        if error_flag and not debug:
             send_error_email(email_address, email_password)
 
         buy_info.to_csv(buy_info_file)
