@@ -297,7 +297,8 @@ def balance_portfolio(client, buy_info, debug = False):
     # cancel orders if trigger_name is not 'trailing'
     # else modify order s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
-        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None:
+        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None and \
+                not isnan(buy_info[strategy_key]['trigger_order_id']):
             if buy_info[strategy_key]['trigger_name'] != 'trailing':
                 cancel_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
                 if debug:
@@ -367,7 +368,8 @@ def balance_portfolio(client, buy_info, debug = False):
             amount = buy_info[strategy_key]['weight'] / target_weights[symbol] * balances['total'][symbol]
 
             if buy_info[strategy_key]['trigger_name'] != 'trailing' or \
-                    buy_info[strategy_key]['trigger_order_id'] is None:
+                    buy_info[strategy_key]['trigger_order_id'] is None or \
+                    isnan(buy_info[strategy_key]['trigger_order_id']):
                 id, quantity = place_trigger_order(
                     client,
                     symbol,
@@ -513,7 +515,7 @@ def trading_pipeline(
             index=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
             columns=strategy_keys
         )
-        
+
     for key in strategy_keys:
         buy_info[key]['weight'] = weights[key]
 
