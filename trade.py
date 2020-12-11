@@ -190,10 +190,17 @@ def cancel_orders(client, debug = False):
         client.cancel_orders()
         time.sleep(0.05)
 
+def cancel_conditional_order(client, order_id, debug = False):
+    if not debug:
+        client.cancel_conditional_order(order_id)
+        time.sleep(0.05)
+
+
 def cancel_order(client, order_id, debug = False):
     if not debug:
         client.cancel_order(order_id)
         time.sleep(0.05)
+
 
 
 # TODO: implement
@@ -300,7 +307,7 @@ def balance_portfolio(client, buy_info, debug = False):
         if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None and \
                 not isnan(buy_info[strategy_key]['trigger_order_id']):
             if buy_info[strategy_key]['trigger_name'] != 'trailing':
-                cancel_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
+                cancel_conditional_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
                 if debug:
                     id = buy_info[strategy_key]['trigger_order_id']
                     print(f'cancel order {symbol}, {id}')
@@ -329,7 +336,7 @@ def balance_portfolio(client, buy_info, debug = False):
 
     for cond_order_id in open_trigger_orders.keys():
         if cond_order_id not in processed_trigger_order_ids:
-            cancel_order(client, cond_order_id, debug = debug)
+            cancel_conditional_order(client, cond_order_id, debug = debug)
             if debug:
                 print(f'cancel order {cond_order_id}')
 
