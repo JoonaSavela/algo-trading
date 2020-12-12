@@ -138,6 +138,9 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
             'id': None
         }
 
+    if res['id'] is not None:
+        res['id'] = str(res['id'])
+
     return res['id'], quantity
 
 def modify_trigger_order_size(
@@ -167,6 +170,9 @@ def modify_trigger_order_size(
         res = {
             'id': None
         }
+
+    if res['id'] is not None:
+        res['id'] = str(res['id'])
 
     return res['id'], quantity
 
@@ -213,7 +219,7 @@ def cancel_orders_and_sell_all(client):
 def get_conditional_orders(client):
     res = {}
     for cond_order in client.get_conditional_orders():
-        res[cond_order['id']] = cond_order
+        res[str(cond_order['id'])] = cond_order
     time.sleep(0.05)
     return res
 
@@ -325,7 +331,7 @@ def balance_portfolio(client, buy_info, debug = False):
                     debug = debug
                 )
 
-                buy_info[strategy_key]['trigger_order_id'] = str(id) if id is not None else id
+                buy_info[strategy_key]['trigger_order_id'] = id
 
                 if debug:
                     print(f'Modified order, quantity = {quantity}')
@@ -394,7 +400,7 @@ def balance_portfolio(client, buy_info, debug = False):
                     debug = debug
                 )
 
-            buy_info[strategy_key]['trigger_order_id'] = str(id) if id is not None else id
+            buy_info[strategy_key]['trigger_order_id'] = id
             quantities[strategy_key] = quantity
         else:
             quantities[strategy_key] = None
@@ -512,7 +518,6 @@ def trading_pipeline(
         if not buy_info_from_file:
             print("'buy_info' columns and strategy_keys did not match exactly")
 
-    transaction_count = {key: (1 if buy_info_from_file else 0) for key in strategy_keys}
 
     if not buy_info_from_file:
         buy_info = pd.DataFrame(
@@ -521,9 +526,15 @@ def trading_pipeline(
         )
 
     for key in strategy_keys:
+        # TODO: change this and all similar to use .loc
         buy_info[key]['weight'] = weights[key]
 
     buy_info = buy_info.where(pd.notnull(buy_info), None)
+
+    transaction_count = {}
+    for key in strategy_keys:
+        # TODO: process case m, m_bear = 1, 0 better
+        transaction_count[key] = 1 if buy_info[key]['buy_state'] is not None else 0
 
     if debug:
         print(buy_info)
