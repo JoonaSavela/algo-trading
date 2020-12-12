@@ -14,7 +14,7 @@ import json
 import smtplib
 from functools import reduce
 import os
-from math import isnan
+# from math import isnan
 
 source_symbol = 'USD'
 min_amount = 0.001
@@ -252,8 +252,7 @@ def balance_portfolio(client, buy_info, debug = False):
 
     # detect triggered trigger orders
     for strategy_key in buy_info.columns:
-        if buy_info[strategy_key]['trigger_order_id'] is None or \
-                isnan(buy_info[strategy_key]['trigger_order_id']):
+        if buy_info[strategy_key]['trigger_order_id'] is None:
             triggered[strategy_key] = False
         else:
             triggered[strategy_key] = \
@@ -304,8 +303,7 @@ def balance_portfolio(client, buy_info, debug = False):
     # cancel orders if trigger_name is not 'trailing'
     # else modify order s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
-        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None and \
-                not isnan(buy_info[strategy_key]['trigger_order_id']):
+        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None:
             if buy_info[strategy_key]['trigger_name'] != 'trailing':
                 cancel_conditional_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
                 if debug:
@@ -375,8 +373,7 @@ def balance_portfolio(client, buy_info, debug = False):
             amount = buy_info[strategy_key]['weight'] / target_weights[symbol] * balances['total'][symbol]
 
             if buy_info[strategy_key]['trigger_name'] != 'trailing' or \
-                    buy_info[strategy_key]['trigger_order_id'] is None or \
-                    isnan(buy_info[strategy_key]['trigger_order_id']):
+                    buy_info[strategy_key]['trigger_order_id'] is None:
                 id, quantity = place_trigger_order(
                     client,
                     symbol,
@@ -526,9 +523,12 @@ def trading_pipeline(
     for key in strategy_keys:
         buy_info[key]['weight'] = weights[key]
 
+    buy_info = buy_info.where(pd.notnull(buy_info), None)
+
     if debug:
         print(buy_info)
         print()
+        # assert(False)
 
     prev_buy_state = {key: None for key in strategy_keys}
 
