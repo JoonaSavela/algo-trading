@@ -304,18 +304,10 @@ def balance_portfolio(client, buy_info, debug = False):
     actual_weights = balances['usdValue'] / total_balance
     weight_diffs = target_weights - actual_weights
 
-    processed_trigger_order_ids = []
-
-    # cancel orders if trigger_name is not 'trailing'
-    # else modify order s.t. its weight is correct
+    # modify trailing orders s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
         if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None:
-            if buy_info[strategy_key]['trigger_name'] != 'trailing':
-                cancel_conditional_order(client, buy_info[strategy_key]['trigger_order_id'], debug = debug)
-                if debug:
-                    id = buy_info[strategy_key]['trigger_order_id']
-                    print(f'cancel order {symbol}, {id}')
-            else:
+            if buy_info[strategy_key]['trigger_name'] == 'trailing':
                 amount = min(
                     1.0,
                     buy_info[strategy_key]['weight'] / actual_weights[symbol]
@@ -336,10 +328,9 @@ def balance_portfolio(client, buy_info, debug = False):
                 if debug:
                     print(f'Modified order, quantity = {quantity}')
 
-            processed_trigger_order_ids.append(buy_info[strategy_key]['trigger_order_id'])
-
-    for cond_order_id in open_trigger_orders.keys():
-        if cond_order_id not in processed_trigger_order_ids:
+    # cancel orders if if their type is not 'trailing'
+    for cond_order_id, cond_order in open_trigger_orders.items():
+        if cond_order['type'] != 'trailing_stop':
             cancel_conditional_order(client, cond_order_id, debug = debug)
             if debug:
                 print(f'cancel order {cond_order_id}')
@@ -409,8 +400,9 @@ def balance_portfolio(client, buy_info, debug = False):
     print_df = pd.DataFrame({
         'buy_state': buy_info.loc['buy_state'],
         'buy_price': buy_info.loc['buy_price'],
-        'triggered': triggered,
         'symbol': symbols,
+        'triggered': triggered,
+        'trigger_name': buy_info.loc['trigger_name'],
         'trigger_quantity': quantities,
         'trigger_order_id': buy_info.loc['trigger_order_id'],
     }).transpose()
