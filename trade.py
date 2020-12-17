@@ -138,9 +138,6 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
             'id': None
         }
 
-    if res['id'] is not None:
-        res['id'] = str(res['id'])
-
     return res['id'], quantity
 
 def modify_trigger_order_size(
@@ -170,9 +167,6 @@ def modify_trigger_order_size(
         res = {
             'id': None
         }
-
-    if res['id'] is not None:
-        res['id'] = str(res['id'])
 
     return res['id'], quantity
 
@@ -251,19 +245,33 @@ def send_error_email(address, password):
 #   - trigger_param: dtypes = [None, float]
 #   - weight: dtypes = [None, float]
 #   - trigger_order_id: dtypes = [None, int]
-def balance_portfolio(client, buy_info, debug = False):
+def balance_portfolio(client, buy_info, debug = False, verbose = False):
     open_trigger_orders = get_conditional_orders(client)
 
     triggered = {}
+    trigger_order_ids = {}
 
     # detect triggered trigger orders
-    for strategy_key in buy_info.columns:
-        if buy_info[strategy_key]['trigger_order_id'] is None:
+    for strategy_key in buy_info.index:
+        if pd.isna(buy_info.loc[strategy_key, 'trigger_order_id']):
+            trigger_order_id = None
+        else:
+            trigger_order_id = str(int(buy_info.loc[strategy_key, 'trigger_order_id']))
+
+        trigger_order_ids[strategy_key] = trigger_order_id
+
+        if trigger_order_id is None:
             triggered[strategy_key] = False
         else:
             triggered[strategy_key] = \
-                buy_info[strategy_key]['trigger_order_id'] not in open_trigger_orders or \
-                open_trigger_orders[buy_info[strategy_key]['trigger_order_id']]['status'] != 'open'
+                trigger_order_id not in open_trigger_orders or \
+                open_trigger_orders[trigger_order_id]['status'] != 'open'
+
+        if triggered[strategy_key]:
+            trigger_order_ids[strategy_key] = None
+
+    if verbose:
+        print(trigger_order_ids)
 
     symbols = {}
     weights = {
@@ -271,7 +279,7 @@ def balance_portfolio(client, buy_info, debug = False):
     }
 
     # Get all possible symbols
-    for strategy_key in buy_info.columns:
+    for strategy_key in buy_info.index:
         symbol = get_symbol_from_key(strategy_key, bear = False)
         if symbol not in weights:
             weights[symbol] = 0
@@ -281,20 +289,23 @@ def balance_portfolio(client, buy_info, debug = False):
             weights[symbol] = 0
 
     # Get the target weights for those symbols
-    for strategy_key in buy_info.columns:
+    for strategy_key in buy_info.index:
         # if trigger order triggered, symbol = source_symbol
         if triggered[strategy_key]:
             symbol = source_symbol
-        elif buy_info[strategy_key]['buy_state'] == True:
+        elif buy_info.loc[strategy_key, 'buy_state'] == True:
             symbol = get_symbol_from_key(strategy_key, bear = False)
-        elif buy_info[strategy_key]['buy_state'] == False:
+        elif buy_info.loc[strategy_key, 'buy_state'] == False:
             symbol = get_symbol_from_key(strategy_key, bear = True)
         else:
             symbol = source_symbol
 
         symbols[strategy_key] = symbol
 
-        weights[symbol] += buy_info[strategy_key]['weight']
+        weights[symbol] += buy_info.loc[strategy_key, 'weight']
+
+    if verbose:
+        print(weights)
 
     symbols = pd.Series(symbols)
     target_weights = pd.Series(weights)
@@ -304,37 +315,51 @@ def balance_portfolio(client, buy_info, debug = False):
     actual_weights = balances['usdValue'] / total_balance
     weight_diffs = target_weights - actual_weights
 
+    if verbose:
+        print(weight_diffs)
+
     # modify trailing orders s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
-        if symbol != source_symbol and buy_info[strategy_key]['trigger_order_id'] is not None:
-            if buy_info[strategy_key]['trigger_name'] == 'trailing':
+        if symbol != source_symbol and trigger_order_ids[strategy_key] is not None:
+            if buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
                 amount = min(
                     1.0,
-                    buy_info[strategy_key]['weight'] / actual_weights[symbol]
-                )
-                amount *= balances['total'][symbol]
-
-                id, quantity = modify_trigger_order_size(
-                    client,
-                    buy_info[strategy_key]['trigger_order_id'],
-                    buy_info[strategy_key]['trigger_name'],
-                    amount,
-                    round_n = 5,
-                    debug = debug
+                    buy_info.loc[strategy_key, 'weight'] / actual_weights[symbol]
                 )
 
-                buy_info[strategy_key]['trigger_order_id'] = id
+                if amount * balances['usdValue'][symbol] / total_balance > min_amount:
+                    amount *= balances['total'][symbol]
 
-                if debug:
-                    print(f'Modified order, quantity = {quantity}')
+                    id, quantity = modify_trigger_order_size(
+                        client,
+                        trigger_order_ids[strategy_key],
+                        buy_info.loc[strategy_key, 'trigger_name'],
+                        amount,
+                        round_n = 5,
+                        debug = debug
+                    )
+
+                    id = str(int(id)) if id is not None else id
+                    buy_info.loc[strategy_key, 'trigger_order_id'] = id
+                    trigger_order_ids[strategy_key] = id
+
+                    if verbose:
+                        print(strategy_key, id, type(id))
+                        print(f'Modified order, quantity = {quantity}')
 
     # cancel orders if if their type is not 'trailing'
     for cond_order_id, cond_order in open_trigger_orders.items():
         if cond_order['type'] != 'trailing_stop':
             cancel_conditional_order(client, cond_order_id, debug = debug)
-            if debug:
+            for strategy_key, trigger_order_id in trigger_order_ids.items():
+                if trigger_order_id == cond_order_id:
+                    buy_info.loc[strategy_key, 'trigger_order_id'] = np.nan
+                    trigger_order_ids[strategy_key] = None
+            if verbose:
                 print(f'cancel order {cond_order_id}')
 
+    if verbose:
+        print(buy_info)
 
     # sell negatives
     li_neg = weight_diffs < 0
@@ -366,45 +391,53 @@ def balance_portfolio(client, buy_info, debug = False):
     # (re)apply trigger orders if trigger_name is not 'trailing' or if trigger_order_id is None
     # else modify order s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
-        if symbol != source_symbol:
-            amount = buy_info[strategy_key]['weight'] / target_weights[symbol] * balances['total'][symbol]
+        if symbol != source_symbol and not triggered[strategy_key]:
+            amount = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol] * balances['total'][symbol]
 
-            if buy_info[strategy_key]['trigger_name'] != 'trailing' or \
-                    buy_info[strategy_key]['trigger_order_id'] is None:
+            if buy_info.loc[strategy_key, 'trigger_name'] != 'trailing' or \
+                    trigger_order_ids[strategy_key] is None:
                 id, quantity = place_trigger_order(
                     client,
                     symbol,
-                    buy_info[strategy_key]['buy_price'],
+                    buy_info.loc[strategy_key, 'buy_price'],
                     amount,
-                    buy_info[strategy_key]['trigger_name'],
-                    buy_info[strategy_key]['trigger_param'],
+                    buy_info.loc[strategy_key, 'trigger_name'],
+                    buy_info.loc[strategy_key, 'trigger_param'],
                     round_n = 5,
                     debug = debug
                 )
             else:
                 id, quantity = modify_trigger_order_size(
                     client,
-                    buy_info[strategy_key]['trigger_order_id'],
-                    buy_info[strategy_key]['trigger_name'],
+                    trigger_order_ids[strategy_key],
+                    buy_info.loc[strategy_key, 'trigger_name'],
                     amount,
                     round_n = 5,
                     debug = debug
                 )
 
-            buy_info[strategy_key]['trigger_order_id'] = id
+            id = str(int(id)) if id is not None else id
+            buy_info.loc[strategy_key, 'trigger_order_id'] = id
+            trigger_order_ids[strategy_key] = id
+
             quantities[strategy_key] = quantity
+
+            if verbose:
+                print(id, type(id))
+                print(f'Modified or placed order, quantity = {quantity}')
+
         else:
             quantities[strategy_key] = None
 
     # print all that was done
     print_df = pd.DataFrame({
-        'buy_state': buy_info.loc['buy_state'],
-        'buy_price': buy_info.loc['buy_price'],
+        'buy_state': buy_info['buy_state'],
+        'buy_price': buy_info['buy_price'],
         'symbol': symbols,
         'triggered': triggered,
-        'trigger_name': buy_info.loc['trigger_name'],
+        'trigger_name': buy_info['trigger_name'],
         'trigger_quantity': quantities,
-        'trigger_order_id': buy_info.loc['trigger_order_id'],
+        'trigger_order_id': buy_info['trigger_order_id'],
     }).transpose()
     print(print_df)
     print()
@@ -498,42 +531,39 @@ def trading_pipeline(
         buy_info = pd.read_csv(buy_info_file, index_col = 0)
 
         for strategy_key in strategy_keys:
-            if strategy_key not in buy_info.columns:
+            if strategy_key not in buy_info.index:
                 buy_info_from_file = False
                 break
 
-        for col in buy_info.columns:
+        for col in buy_info.index:
             if col not in strategy_keys:
                 buy_info_from_file = False
                 break
 
         if not buy_info_from_file:
-            print("'buy_info' columns and strategy_keys did not match exactly")
+            print("'buy_info' index and strategy_keys did not match exactly")
 
 
     if not buy_info_from_file:
         buy_info = pd.DataFrame(
-            index=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
-            columns=strategy_keys
+            columns=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
+            index=strategy_keys
         )
 
     for key in strategy_keys:
-        # TODO: change this and all similar to use .loc
-        buy_info[key]['weight'] = weights[key]
-
-    buy_info = buy_info.where(pd.notnull(buy_info), None)
+        buy_info.loc[key, 'weight'] = weights[key]
 
     transaction_count = {}
     for key in strategy_keys:
         # TODO: process case m, m_bear = 1, 0 better
-        transaction_count[key] = 1 if buy_info[key]['buy_state'] is not None else 0
+        transaction_count[key] = 1 if not pd.isna(buy_info.loc[key, 'buy_state']) else 0
 
     if debug:
         print(buy_info)
         print()
         # assert(False)
 
-    prev_buy_state = {key: None for key in strategy_keys}
+    prev_buy_state = {key: buy_info.loc[key, 'buy_state'] for key in strategy_keys}
 
     error_flag = True
 
@@ -622,11 +652,11 @@ def trading_pipeline(
                             transaction_count[key] += 1
 
                             if transaction_count[key] > 1:
-                                buy_info[key]['buy_state'] = True
-                                buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m, bear = False))
-                                buy_info[key]['trigger_name'] = sltp_args[0]
-                                buy_info[key]['trigger_param'] = sltp_args[1]
-                                buy_info[key]['trigger_order_id'] = None
+                                buy_info.loc[key, 'buy_state'] = True
+                                buy_info.loc[key, 'buy_price'] = ftx_price(client, get_symbol(coin, m, bear = False))
+                                buy_info.loc[key, 'trigger_name'] = sltp_args[0]
+                                buy_info.loc[key, 'trigger_param'] = sltp_args[1]
+                                buy_info.loc[key, 'trigger_order_id'] = np.nan
                                 changed = True
 
                     elif sell and len(sltp_args) == 4:
@@ -635,11 +665,11 @@ def trading_pipeline(
                             transaction_count[key] += 1
 
                             if transaction_count[key] > 1:
-                                buy_info[key]['buy_state'] = False
-                                buy_info[key]['buy_price'] = ftx_price(client, get_symbol(coin, m_bear, bear = True))
-                                buy_info[key]['trigger_name'] = sltp_args[2]
-                                buy_info[key]['trigger_param'] = sltp_args[3]
-                                buy_info[key]['trigger_order_id'] = None
+                                buy_info.loc[key, 'buy_state'] = False
+                                buy_info.loc[key, 'buy_price'] = ftx_price(client, get_symbol(coin, m_bear, bear = True))
+                                buy_info.loc[key, 'trigger_name'] = sltp_args[2]
+                                buy_info.loc[key, 'trigger_param'] = sltp_args[3]
+                                buy_info.loc[key, 'trigger_order_id'] = np.nan
                                 changed = True
 
                     elif sell and len(sltp_args) == 2:
@@ -648,11 +678,11 @@ def trading_pipeline(
                             transaction_count[key] += 1
 
                             if transaction_count[key] > 1:
-                                buy_info[key]['buy_state'] = None
-                                buy_info[key]['buy_price'] = None
-                                buy_info[key]['trigger_name'] = None
-                                buy_info[key]['trigger_param'] = None
-                                buy_info[key]['trigger_order_id'] = None
+                                buy_info.loc[key, 'buy_state'] = np.nan
+                                buy_info.loc[key, 'buy_price'] = np.nan
+                                buy_info.loc[key, 'trigger_name'] = np.nan
+                                buy_info.loc[key, 'trigger_param'] = np.nan
+                                buy_info.loc[key, 'trigger_order_id'] = np.nan
                                 changed = True
 
                 if debug:
@@ -661,7 +691,7 @@ def trading_pipeline(
 
                 # if changed:
                 # TODO: if this works well, remove variable 'changed'
-                buy_info = balance_portfolio(client, buy_info, debug = debug)
+                buy_info = balance_portfolio(client, buy_info, debug = debug, verbose = debug)
 
             counter = (counter + gcd) % lcm
 
@@ -678,7 +708,8 @@ def trading_pipeline(
         if error_flag and not debug:
             send_error_email(email_address, email_password)
 
-        buy_info.to_csv(buy_info_file)
+        if not debug:
+            buy_info.to_csv(buy_info_file)
 
         # return error_flag, False, buy_info
 
