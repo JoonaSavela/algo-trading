@@ -10,12 +10,12 @@ from model import *
 from optimize import *
 from tqdm import tqdm
 from parameter_search import *
-from parameters import commissions, spread, spread_bear, spread_bull
+from parameters import commissions
 from itertools import product
 import matplotlib.animation as animation
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
-from trade import ftx_price, get_total_balance
+from trade import ftx_price, get_total_balance, get_conditional_orders, balance_portfolio
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt import risk_models, expected_returns, black_litterman, \
     objective_functions
@@ -33,13 +33,10 @@ import multiprocessing
 
 
 
+# TODO: check that get_recent_data works correctly
 
-
-# TODO: only trade with .../USD
 
 # TODO: make a maker strategy instead of taker?
-
-# TODO: implement weighted adaptive strategies in trade.py
 
 # TODO: implement different objective functions in find_optimal_aggregated_strategy?
 
@@ -82,7 +79,14 @@ def visualize_spreads(coin = 'ETH', m = 3, m_bear = 3):
     plt.show()
 
 
+def test(buy_info):
+    buy_info.loc['ETH_low_macross_3_3', 'trigger_order_id'] = '123'
+
 def main():
+    # client = FtxClient(ftx_api_key, ftx_secret_key)
+    # open_trigger_orders = get_conditional_orders(client)
+    # print_dict(open_trigger_orders)
+
     # all_bounds = {
     #     'aggregate_N': (1, 12),
     #     'w': (1, 50),
@@ -164,8 +168,8 @@ def main():
     # displacements = get_displacements(
     #     coins = ['ETH', 'BTC'],
     #     strategy_types = ['ma', 'macross'],
-    #     m = 3,
-    #     m_bear = 3,
+    #     ms = [1, 3],
+    #     m_bears = [0, 3],
     #     sep = 2,
     #     Xs_index = [0, 1],
     #     plot = True,
