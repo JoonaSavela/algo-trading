@@ -101,7 +101,9 @@ def get_stop_loss_take_profit_wealth(
     trade_wealths_dict,
     sub_trade_wealths_dict,
     take_profit_candidates,
-    stop_loss_candidates):
+    stop_loss_candidates,
+    trail_value_recalc_period = None
+    ):
 
     if stop_loss_take_profit_type == 'take_profit':
         return np.array(list(map(lambda x:
@@ -137,6 +139,7 @@ def get_stop_loss_take_profit_wealth(
                 sub_trade_wealths_dict[side]['max'],
                 x,
                 total_months = 1,
+                trail_value_recalc_period = trail_value_recalc_period,
                 return_total = True,
                 return_as_log = True
             ),
@@ -215,6 +218,7 @@ def get_objective_function(
         total_balance,
         potential_balances,
         potential_spreads,
+        trail_value_recalc_period = None,
         workers = None,
         debug = False):
 
@@ -320,7 +324,8 @@ def get_objective_function(
             trade_wealths_dict,
             sub_trade_wealths_dict,
             take_profit_candidates,
-            stop_loss_candidates
+            stop_loss_candidates,
+            trail_value_recalc_period = trail_value_recalc_period
         ): (side, stop_loss_take_profit_type) for stop_loss_take_profit_type, side in \
                 product(stop_loss_take_profit_types, sides)}
 
@@ -420,6 +425,7 @@ def find_optimal_aggregated_strategy(
         N_repeat_inp = None,
         objective_dict = None,
         step = 0.01,
+        trail_value_recalc_period = None,
         verbose = True,
         disable = False,
         short = True,
@@ -515,6 +521,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
                     )
@@ -581,6 +588,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
                     )
@@ -607,6 +615,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
                     )
@@ -634,6 +643,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
                     )
@@ -675,6 +685,7 @@ def save_optimal_parameters(
     m_bear = 3,
     N_repeat_inp = 40,
     step = 0.01,
+    trail_value_recalc_period = None,
     skip_existing = False,
     verbose = True,
     disable = False,
@@ -753,6 +764,7 @@ def save_optimal_parameters(
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = None,
                 step = step,
+                trail_value_recalc_period = trail_value_recalc_period,
                 verbose = verbose,
                 disable = disable,
                 short = short,
@@ -778,6 +790,7 @@ def save_optimal_parameters(
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = objective_dict,
                 step = step,
+                trail_value_recalc_period = trail_value_recalc_period,
                 verbose = verbose,
                 disable = disable,
                 short = short,
@@ -812,11 +825,15 @@ def get_adaptive_wealths_for_multiple_strategies(
         weights,
         N_repeat_inp = 60,
         compress = 60,#1440,
+        trail_value_recalc_period = None,
         disable = False,
         verbose = True,
         randomize = False,
         Xs_index = [0, 1],
         debug = False):
+
+    if trail_value_recalc_period is None:
+        trail_value_recalc_period = get_average_trading_period(strategies)
 
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
@@ -931,6 +948,7 @@ def get_adaptive_wealths_for_multiple_strategies(
                     total_balance = total_balance,
                     potential_balances = potential_balances,
                     potential_spreads = potential_spreads,
+                    trail_value_recalc_period = trail_value_recalc_period,
                     commissions = commissions,
                     short = short,
                     X_bear = X1_bear[-min_N:, :] if short else None,
@@ -973,6 +991,7 @@ def save_wealths(
     weights,
     N_repeat_inp = 60,
     compress = 60,#1440,
+    trail_value_recalc_period = None,
     disable = False,
     verbose = True,
     randomize = False,
@@ -984,6 +1003,7 @@ def save_wealths(
         weights = weights,
         N_repeat_inp = N_repeat_inp,
         compress = compress,
+        trail_value_recalc_period = trail_value_recalc_period,
         disable = disable,
         verbose = verbose,
         randomize = randomize,
@@ -1057,7 +1077,8 @@ def optimize_weights_iterative(
     ms = [1, 3],
     m_bears = [0, 3],
     n_iter = 20,
-    compress = 60):
+    compress = None,
+    trail_value_recalc_period = None):
 
     strategies, weights = get_filtered_strategies_and_weights(
         coins = coins,
@@ -1067,6 +1088,14 @@ def optimize_weights_iterative(
         m_bears = m_bears,
         filter = False
     )
+
+    if compress is None:
+        compress = get_average_trading_period(strategies)
+
+    print(f"Compress: {compress}")
+
+    if trail_value_recalc_period is None:
+        trail_value_recalc_period = get_average_trading_period(strategies)
 
     weight_values = np.zeros((len(strategies),))
 
@@ -1087,6 +1116,7 @@ def optimize_weights_iterative(
             weights = weights,
             N_repeat_inp = 5,
             compress = compress,
+            trail_value_recalc_period = trail_value_recalc_period,
             disable = True,
             verbose = False,
             randomize = False,
@@ -1114,6 +1144,7 @@ def plot_weighted_adaptive_wealths(
     m_bears = [0, 3],
     N_repeat = 1,
     compress = None,
+    trail_value_recalc_period = None,
     randomize = True,
     Xs_index = [0, 1]):
 
@@ -1129,14 +1160,11 @@ def plot_weighted_adaptive_wealths(
     print_dict(strategies)
 
     if compress is None:
-        aggregate_Ns = np.array([v['params'][0] * 60 for v in strategies.values()])
-        max_trading_frequencies_per_min = 1 / aggregate_Ns
-        total_max_trading_frequencies_per_min = np.sum(max_trading_frequencies_per_min)
-
-        compress = int(1 / total_max_trading_frequencies_per_min)
-
-        # print("Sum of max trading frequencies (per min):", total_max_trading_frequencies_per_min)
+        compress = get_average_trading_period(strategies)
         print("Compress:", compress)
+
+    if trail_value_recalc_period is None:
+        trail_value_recalc_period = get_average_trading_period(strategies)
 
     keys = list(weights.keys())
     weight_values = np.array(list(weights.values()))
@@ -1165,6 +1193,7 @@ def plot_weighted_adaptive_wealths(
             weights,
             N_repeat_inp = 1,
             compress = compress,
+            trail_value_recalc_period = trail_value_recalc_period,
             disable = True,
             verbose = False,
             randomize = randomize,
@@ -1231,6 +1260,7 @@ def get_displacements(
     ms = [1, 3],
     m_bears = [0, 3],
     sep = 2,
+    trail_value_recalc_period = None,
     Xs_index = [0, 1],
     plot = True,
     verbose = True,
@@ -1247,6 +1277,9 @@ def get_displacements(
         m_bears,
         normalize = False
     )
+
+    if trail_value_recalc_period is None:
+        trail_value_recalc_period = get_average_trading_period(strategies)
 
     trade_wealth_categories = ['base', 'min', 'max']
 
@@ -1358,7 +1391,8 @@ def get_displacements(
                         trade_wealths_dict,
                         sub_trade_wealths_dict,
                         [sltp_param],
-                        [sltp_param]
+                        [sltp_param],
+                        trail_value_recalc_period = trail_value_recalc_period
                     )
                     wealth_log = wealth_log[0]
 
@@ -1457,6 +1491,7 @@ def save_displacements(
     ms = [1, 3],
     m_bears = [0, 3],
     sep = 2,
+    trail_value_recalc_period = None,
     Xs_index = [0, 1],
     plot = True,
     verbose = True,
@@ -1468,6 +1503,7 @@ def save_displacements(
         ms = ms,
         m_bears = m_bears,
         sep = sep,
+        trail_value_recalc_period = trail_value_recalc_period,
         Xs_index = Xs_index,
         plot = plot,
         verbose = verbose,
@@ -1498,6 +1534,7 @@ if __name__ == '__main__':
     m_bear = 3
     N_repeat_inp = 40
     step = 0.01
+    trail_value_recalc_period = 180
     skip_existing = False
     verbose = True
     disable = False
@@ -1517,6 +1554,7 @@ if __name__ == '__main__':
         m_bear = m_bear,
         N_repeat_inp = N_repeat_inp,
         step = step,
+        trail_value_recalc_period = trail_value_recalc_period,
         skip_existing = skip_existing,
         verbose = verbose,
         disable = disable,
@@ -1537,6 +1575,7 @@ if __name__ == '__main__':
         m_bear = 0,
         N_repeat_inp = N_repeat_inp,
         step = step,
+        trail_value_recalc_period = trail_value_recalc_period,
         skip_existing = skip_existing,
         verbose = verbose,
         disable = disable,
@@ -1557,7 +1596,8 @@ if __name__ == '__main__':
         ms = ms,
         m_bears = m_bears,
         n_iter = n_iter,
-        compress = compress
+        compress = None,
+        trail_value_recalc_period = None
     )
 
     sep = 2
@@ -1569,6 +1609,7 @@ if __name__ == '__main__':
         ms = ms,
         m_bears = m_bears,
         sep = sep,
+        trail_value_recalc_period = None,
         Xs_index = Xs_index,
         plot = plot,
         verbose = verbose,
@@ -1586,6 +1627,7 @@ if __name__ == '__main__':
         m_bears = m_bears,
         N_repeat = N_repeat,
         compress = None,
+        trail_value_recalc_period = None,
         randomize = randomize,
         Xs_index = Xs_index
     )

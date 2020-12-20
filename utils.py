@@ -16,6 +16,15 @@ except ImportError as e:
 
 
 
+def get_average_trading_period(strategies):
+    aggregate_Ns = np.array([v['params'][0] * 60 for v in strategies.values()])
+    max_trading_frequencies_per_min = 1 / aggregate_Ns
+    total_max_trading_frequencies_per_min = np.sum(max_trading_frequencies_per_min)
+
+    return int(1 / total_max_trading_frequencies_per_min)
+
+
+
 def get_parameter_names(strategy_type):
     if strategy_type == 'ma':
         return ['aggregate_N', 'w']

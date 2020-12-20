@@ -79,13 +79,12 @@ def visualize_spreads(coin = 'ETH', m = 3, m_bear = 3):
     plt.show()
 
 
-def test(buy_info):
-    buy_info.loc['ETH_low_macross_3_3', 'trigger_order_id'] = '123'
 
 def main():
     # client = FtxClient(ftx_api_key, ftx_secret_key)
     # open_trigger_orders = get_conditional_orders(client)
     # print_dict(open_trigger_orders)
+
 
     # all_bounds = {
     #     'aggregate_N': (1, 12),
@@ -148,9 +147,10 @@ def main():
         strategy_types = ['ma', 'macross'],
         ms = [1, 3],
         m_bears = [0, 3],
-        N_repeat = 3,
+        N_repeat = 1,
         compress = None,
-        randomize = True,
+        trail_value_recalc_period = None,
+        randomize = False,
         Xs_index = [0, 1]
     )
 
