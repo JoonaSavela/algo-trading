@@ -70,46 +70,46 @@ def get_total_balance(client, separate = True, filter = None):
 
     return total_balance
 
-def sell_assets(client, symbol, amount, round_n = 4, debug = False):
-    quantity = floor_to_n(amount, round_n)
+def sell_assets(client, symbol, size, round_n = 4, debug = False):
+    size = floor_to_n(size, round_n)
 
     if not debug:
         client.place_order(
             market = symbol + '/' +  source_symbol,
             side = 'sell',
             price = None,
-            size = quantity,
+            size = size,
             type = 'market'
         )
         time.sleep(0.1)
 
-    return quantity
+    return size
 
-def buy_assets(client, symbol, usd_amount, round_n = 4, debug = False):
+def buy_assets(client, symbol, usd_size, round_n = 4, debug = False):
     price = ftx_price(client, symbol, side = 'ask')
-    quantity = floor_to_n(usd_amount / price, round_n)
+    size = floor_to_n(usd_size / price, round_n)
 
     if not debug:
         client.place_order(
             market = symbol + '/' +  source_symbol,
             side = 'buy',
             price = None,
-            size = quantity,
+            size = size,
             type = 'market'
         )
         time.sleep(0.1)
 
-    return quantity
+    return size
 
-def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger_param, round_n = 4, debug = False):
-    quantity = floor_to_n(amount, round_n)
+def place_trigger_order(client, symbol, buy_price, size, trigger_name, trigger_param, round_n = 4, debug = False):
+    size = floor_to_n(size, round_n)
 
     if not debug:
         if trigger_name == 'stop_loss':
             res = client.place_conditional_order(
                 market = symbol + '/' +  source_symbol,
                 side = 'sell',
-                size = quantity,
+                size = size,
                 order_type = 'stop',
                 triggerPrice = buy_price * trigger_param
             )
@@ -117,7 +117,7 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
             res = client.place_conditional_order(
                 market = symbol + '/' +  source_symbol,
                 side = 'sell',
-                size = quantity,
+                size = size,
                 order_type = 'takeProfit',
                 triggerPrice = buy_price * trigger_param
             )
@@ -125,7 +125,7 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
             res = client.place_conditional_order(
                 market = symbol + '/' +  source_symbol,
                 side = 'sell',
-                size = quantity,
+                size = size,
                 order_type = 'trailingStop',
                 trailValue = -(1 - trigger_param) * buy_price
             )
@@ -138,17 +138,18 @@ def place_trigger_order(client, symbol, buy_price, amount, trigger_name, trigger
             'id': None
         }
 
-    return res['id'], quantity
+    return res['id'], size
 
 def modify_trigger_order_size(
     client,
     order_id,
     trigger_name,
-    amount,
+    size,
+    trail_value = None,
     round_n = 4,
     debug = False):
 
-    quantity = floor_to_n(amount, round_n)
+    size = floor_to_n(size, round_n)
 
     trigger_name_to_order_type = {
         'stop_loss': 'stop',
@@ -160,7 +161,8 @@ def modify_trigger_order_size(
         res = client.modify_conditional_order(
             order_id = order_id,
             order_type = trigger_name_to_order_type[trigger_name],
-            size = quantity,
+            size = size,
+            trailValue = trail_value
         )
         time.sleep(0.1)
     else:
@@ -168,7 +170,7 @@ def modify_trigger_order_size(
             'id': None
         }
 
-    return res['id'], quantity
+    return res['id'], size
 
 
 
@@ -250,6 +252,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
 
     triggered = {}
     trigger_order_ids = {}
+    trailing_trigger_prices = {}
 
     # detect triggered trigger orders
     for strategy_key in buy_info.index:
@@ -267,11 +270,15 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                 trigger_order_id not in open_trigger_orders or \
                 open_trigger_orders[trigger_order_id]['status'] != 'open'
 
+            if buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
+                trailing_trigger_prices[strategy_key] = open_trigger_orders[trigger_order_id]['triggerPrice']
+
         if triggered[strategy_key]:
             trigger_order_ids[strategy_key] = None
 
     if verbose:
         print(trigger_order_ids)
+        print(trailing_trigger_prices)
 
     symbols = {}
     weights = {
@@ -322,19 +329,23 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
     for strategy_key, symbol in symbols.items():
         if symbol != source_symbol and trigger_order_ids[strategy_key] is not None:
             if buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
-                amount = min(
+                size = min(
                     1.0,
                     buy_info.loc[strategy_key, 'weight'] / actual_weights[symbol]
                 )
 
-                if amount * balances['usdValue'][symbol] / total_balance > min_amount:
-                    amount *= balances['total'][symbol]
+                if size * balances['usdValue'][symbol] / total_balance > min_amount:
+                    size *= balances['total'][symbol]
 
-                    id, quantity = modify_trigger_order_size(
+                    trail_value = trailing_trigger_prices[strategy_key] \
+                        - ftx_price(client, symbol)
+
+                    id, size = modify_trigger_order_size(
                         client,
                         trigger_order_ids[strategy_key],
                         buy_info.loc[strategy_key, 'trigger_name'],
-                        amount,
+                        size,
+                        trail_value = trail_value,
                         round_n = 5,
                         debug = debug
                     )
@@ -345,7 +356,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
 
                     if verbose:
                         print(strategy_key, id, type(id))
-                        print(f'Modified order, quantity = {quantity}')
+                        print(f'Modified order, size = {size}')
 
     # cancel orders if if their type is not 'trailing'
     for cond_order_id, cond_order in open_trigger_orders.items():
@@ -366,8 +377,8 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
 
     for symbol, weight_diff in weight_diffs[li_neg].items():
         if symbol != source_symbol and np.abs(weight_diff) > min_amount:
-            amount = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
-            quantity = sell_assets(client, symbol, amount, round_n = 5, debug = debug)
+            size = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
+            size = sell_assets(client, symbol, size, round_n = 5, debug = debug)
 
 
     if not debug:
@@ -378,40 +389,44 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
 
     for symbol, weight_diff in weight_diffs[li_pos].items():
         if symbol != source_symbol and weight_diff > min_amount:
-            usd_amount = weight_diff * total_balance
-            quantity = buy_assets(client, symbol, usd_amount, round_n = 5, debug = debug)
+            usd_size = weight_diff * total_balance
+            size = buy_assets(client, symbol, usd_size, round_n = 5, debug = debug)
 
     if not debug:
         time.sleep(1)
 
     total_balance, balances = get_total_balance(client, separate = True, filter = list(target_weights.keys()))
 
-    quantities = {}
+    sizes = {}
 
     # (re)apply trigger orders if trigger_name is not 'trailing' or if trigger_order_id is None
     # else modify order s.t. its weight is correct
     for strategy_key, symbol in symbols.items():
         if symbol != source_symbol and not triggered[strategy_key]:
-            amount = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol] * balances['total'][symbol]
+            size = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol] * balances['total'][symbol]
 
             if buy_info.loc[strategy_key, 'trigger_name'] != 'trailing' or \
                     trigger_order_ids[strategy_key] is None:
-                id, quantity = place_trigger_order(
+                id, size = place_trigger_order(
                     client,
                     symbol,
                     buy_info.loc[strategy_key, 'buy_price'],
-                    amount,
+                    size,
                     buy_info.loc[strategy_key, 'trigger_name'],
                     buy_info.loc[strategy_key, 'trigger_param'],
                     round_n = 5,
                     debug = debug
                 )
             else:
-                id, quantity = modify_trigger_order_size(
+                trail_value = trailing_trigger_prices[strategy_key] \
+                    - ftx_price(client, symbol)
+
+                id, size = modify_trigger_order_size(
                     client,
                     trigger_order_ids[strategy_key],
                     buy_info.loc[strategy_key, 'trigger_name'],
-                    amount,
+                    size,
+                    trail_value = trail_value,
                     round_n = 5,
                     debug = debug
                 )
@@ -420,14 +435,14 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
             buy_info.loc[strategy_key, 'trigger_order_id'] = id
             trigger_order_ids[strategy_key] = id
 
-            quantities[strategy_key] = quantity
+            sizes[strategy_key] = size
 
             if verbose:
                 print(id, type(id))
-                print(f'Modified or placed order, quantity = {quantity}')
+                print(f'Modified or placed order, size = {size}')
 
         else:
-            quantities[strategy_key] = None
+            sizes[strategy_key] = None
 
     # print all that was done
     print_df = pd.DataFrame({
@@ -436,7 +451,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
         'symbol': symbols,
         'triggered': triggered,
         'trigger_name': buy_info['trigger_name'],
-        'trigger_quantity': quantities,
+        'trigger_size': sizes,
         'trigger_order_id': buy_info['trigger_order_id'],
     }).transpose()
     print(print_df)
