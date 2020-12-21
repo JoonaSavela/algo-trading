@@ -478,9 +478,10 @@ def trading_pipeline(
     debug = False
     buy_info_from_file = True
     buy_info_file = 'optim_results/buy_info.csv'
+    wait_for_signal_to_change = False
 
     if ask_for_input:
-        debug_inp = input('Is this a debug run? ')
+        debug_inp = input('Is this a debug run (y/[n])? ')
         if 'y' in debug_inp:
             debug = True
 
@@ -490,6 +491,10 @@ def trading_pipeline(
         buy_info_from_file_inp = input("Load 'buy_info' from file ([y]/n)? ")
         if 'n' in buy_info_from_file_inp:
             buy_info_from_file = False
+
+        wait_for_signal_to_change_inp = input("Wait for buy/sell signal to change (y/[n])? ")
+        if 'y' in wait_for_signal_to_change_inp:
+            wait_for_signal_to_change = True
 
     if not buy_info_from_file:
         print("Won't load 'buy_info' from file")
@@ -558,13 +563,17 @@ def trading_pipeline(
     for key in strategy_keys:
         buy_info.loc[key, 'weight'] = weights[key]
 
-    transaction_count = {}
-    for key in strategy_keys:
-        # TODO: process case m, m_bear = 1, 0 better
-        transaction_count[key] = 1 #if not pd.isna(buy_info.loc[key, 'buy_state']) else 0
+    if wait_for_signal_to_change:
+        transaction_count = {}
+        for key in strategy_keys:
+            # TODO: process case m, m_bear = 1, 0 better
+            transaction_count[key] = 1 if not pd.isna(buy_info.loc[key, 'buy_state']) else 0
+    else:
+        transaction_count = {k: 1 for k in strategy_keys}
 
     if debug:
         print(buy_info)
+        print(transaction_count)
         print()
         # assert(False)
 
