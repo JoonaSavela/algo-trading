@@ -1078,7 +1078,7 @@ def optimize_weights_iterative(
     m_bears = [0, 3],
     n_iter = 20,
     compress = None,
-    trail_value_recalc_period = None):
+    init_trail_value_recalc_period = None):
 
     strategies, weights = get_filtered_strategies_and_weights(
         coins = coins,
@@ -1094,8 +1094,11 @@ def optimize_weights_iterative(
 
     print(f"Compress: {compress}")
 
-    if trail_value_recalc_period is None:
+    if init_trail_value_recalc_period is None:
         trail_value_recalc_period = get_average_trading_period(strategies)
+        print(trail_value_recalc_period)
+    else:
+        trail_value_recalc_period = init_trail_value_recalc_period
 
     weight_values = np.zeros((len(strategies),))
 
@@ -1125,6 +1128,17 @@ def optimize_weights_iterative(
         )
 
         weights, a, b, c = optimize_weights(compress, save = True, verbose = False)
+
+        would_be_strategies, _ = get_filtered_strategies_and_weights(
+            coins = coins,
+            freqs = freqs,
+            strategy_types = strategy_types,
+            ms = ms,
+            m_bears = m_bears,
+            filter = True
+        )
+        trail_value_recalc_period = get_average_trading_period(would_be_strategies)
+        print(trail_value_recalc_period)
 
         print("Weights:")
         print_dict(weights)
@@ -1516,9 +1530,9 @@ def save_displacements(
 
 if __name__ == '__main__':
     all_bounds = {
-        'aggregate_N': (1, 12),
-        'w': (1, 50),
-        'w2': (1, 20),
+        'aggregate_N': (2, 12),
+        'w': (1, 60),
+        'w2': (1, 25),
     }
     all_resolutions = {
         'aggregate_N': 1,
@@ -1596,8 +1610,8 @@ if __name__ == '__main__':
         ms = ms,
         m_bears = m_bears,
         n_iter = n_iter,
-        compress = None,
-        trail_value_recalc_period = None
+        compress = compress,
+        init_trail_value_recalc_period = None
     )
 
     sep = 2
