@@ -542,28 +542,18 @@ def trading_pipeline(
     #   - trigger_param: dtypes = [None, float]
     #   - weight: dtypes = [None, float]
     #   - trigger_order_id: dtypes = [None, int]
+    buy_info = pd.DataFrame(
+        columns=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
+        index=strategy_keys
+    )
+
     if buy_info_from_file:
-        buy_info = pd.read_csv(buy_info_file, index_col = 0)
+        prev_buy_info = pd.read_csv(buy_info_file, index_col = 0)
 
-        for strategy_key in strategy_keys:
-            if strategy_key not in buy_info.index:
-                buy_info_from_file = False
-                break
+        for i in buy_info.index:
+            if i in prev_buy_info.index:
+                buy_info.loc[i] = prev_buy_info.loc[i]
 
-        for col in buy_info.index:
-            if col not in strategy_keys:
-                buy_info_from_file = False
-                break
-
-        if not buy_info_from_file:
-            print("'buy_info' index and strategy_keys did not match exactly")
-
-
-    if not buy_info_from_file:
-        buy_info = pd.DataFrame(
-            columns=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
-            index=strategy_keys
-        )
 
     for key in strategy_keys:
         buy_info.loc[key, 'weight'] = weights[key]
@@ -571,7 +561,7 @@ def trading_pipeline(
     transaction_count = {}
     for key in strategy_keys:
         # TODO: process case m, m_bear = 1, 0 better
-        transaction_count[key] = 1 if not pd.isna(buy_info.loc[key, 'buy_state']) else 0
+        transaction_count[key] = 1 #if not pd.isna(buy_info.loc[key, 'buy_state']) else 0
 
     if debug:
         print(buy_info)
