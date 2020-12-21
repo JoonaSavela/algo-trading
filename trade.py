@@ -511,6 +511,9 @@ def trading_pipeline(
         ms,
         m_bears
     )
+
+    print_dict(strategies)
+
     get_buys_and_sells_fns = {}
     N_parameters = {}
 
