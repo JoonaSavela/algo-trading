@@ -16,8 +16,10 @@ except ImportError as e:
 
 
 
-def get_average_trading_period(strategies):
+def get_average_trading_period(strategies, unique = True):
     aggregate_Ns = np.array([v['params'][0] * 60 for v in strategies.values()])
+    if unique:
+        aggregate_Ns = np.unique(aggregate_Ns)
     max_trading_frequencies_per_min = 1 / aggregate_Ns
     total_max_trading_frequencies_per_min = np.sum(max_trading_frequencies_per_min)
 
