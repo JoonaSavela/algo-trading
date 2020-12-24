@@ -270,7 +270,8 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                 trigger_order_id not in open_trigger_orders or \
                 open_trigger_orders[trigger_order_id]['status'] != 'open'
 
-            if buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
+            # TODO: make thsi more logical?
+            if not triggered[strategy_key] and buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
                 trailing_trigger_prices[strategy_key] = open_trigger_orders[trigger_order_id]['triggerPrice']
 
         if triggered[strategy_key]:
