@@ -1,5 +1,4 @@
 from keys import ftx_api_key, ftx_secret_key, email_address, email_password
-# from model import build_model
 from ftx.rest.client import FtxClient
 import time
 from datetime import datetime
@@ -14,7 +13,6 @@ import json
 import smtplib
 from functools import reduce
 import os
-# from math import isnan
 
 source_symbol = 'USD'
 min_amount = 0.001
@@ -40,20 +38,6 @@ def ftx_price(client, symbol, side = 'ask'):
     markets = pd.DataFrame(client.list_markets())
     res = float(markets[(markets['baseCurrency'] == symbol) & (markets['quoteCurrency'] == source_symbol)][side])
     time.sleep(0.05)
-    return res
-
-# TODO: remove since not used
-def asset_balance(client, symbol, in_usd = False):
-    balances = pd.DataFrame(client.get_balances())
-    time.sleep(0.05)
-    balances = balances.set_index('coin')['usdValue' if in_usd else 'free']
-    if isinstance(symbol, list):
-        res = tuple(map(lambda x: balances.get(x, 0), symbol))
-        if len(res) == 1:
-            res = res[0]
-    else:
-        res = balances.get(symbol, 0)
-
     return res
 
 
@@ -140,7 +124,7 @@ def place_trigger_order(client, symbol, buy_price, size, trigger_name, trigger_p
 
     return res['id'], size
 
-def modify_trigger_order_size(
+def modify_trigger_order(
     client,
     order_id,
     trigger_name,
@@ -207,6 +191,7 @@ def cancel_order(client, order_id, debug = False):
 
 # TODO: implement
 def cancel_orders_and_sell_all(client):
+    raise NotImplementedError()
     cancel_orders(client)
 
     total_balance, balances = get_total_balance(client, separate = True)
@@ -341,7 +326,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                     trail_value = trailing_trigger_prices[strategy_key] \
                         - ftx_price(client, symbol)
 
-                    id, size = modify_trigger_order_size(
+                    id, size = modify_trigger_order(
                         client,
                         trigger_order_ids[strategy_key],
                         buy_info.loc[strategy_key, 'trigger_name'],
@@ -422,7 +407,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                 trail_value = trailing_trigger_prices[strategy_key] \
                     - ftx_price(client, symbol)
 
-                id, size = modify_trigger_order_size(
+                id, size = modify_trigger_order(
                     client,
                     trigger_order_ids[strategy_key],
                     buy_info.loc[strategy_key, 'trigger_name'],
@@ -729,6 +714,7 @@ def trading_pipeline(
         if not debug:
             buy_info.to_csv(buy_info_file)
 
+        # uncomment this to ignore error and resume algorithm
         # return error_flag, False, buy_info
 
 
@@ -746,4 +732,3 @@ if __name__ == '__main__':
             buy_info = buy_info,
             ask_for_input = ask_for_input
         )
-        # time.sleep(60)

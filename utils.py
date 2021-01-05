@@ -2,13 +2,13 @@ import numpy as np
 import pandas as pd
 import json
 from math import log10, floor, ceil
-from scipy.signal import find_peaks
 from scipy import stats
 from itertools import product
 import os
+
+# matplotlib is not installed in cloud since it is not needed
 try:
     import matplotlib.pyplot as plt
-    import torch
 except ImportError as e:
     print(e)
 
@@ -326,55 +326,6 @@ def get_obv(X, cumulative = True, use_sign = True):
     return signed_volumes
 
 
-def get_peaks(sells, prominence = 0.0125, distance = 30):
-    sell_peaks, _ = find_peaks(sells, distance=distance, prominence=prominence)
-    buy_peaks, _ = find_peaks(1 - sells, distance=distance, prominence=prominence)
-
-    return buy_peaks, sell_peaks
-
-def std_loss(out, sequence_length, batch_size, eps, e, n_epochs):
-    starts = torch.randint(sequence_length // 2, (batch_size,))
-    stds = []
-    for b in range(batch_size):
-        stds.append(out[starts[b]:starts[b]+sequence_length // 2, b, :2].std(dim = 0))
-    return eps / (torch.stack(stds).mean() + eps) * 0.99 ** (e  / n_epochs)
-
-def diff_loss(out, batch_size, use_tanh, e, n_epochs):
-    diffs = []
-
-    for b in range(batch_size):
-        if use_tanh:
-            sells = -out[:, b, 0].detach().numpy()
-        else:
-            sells = out[:, b, 1].detach().numpy()
-
-        max_sell = sells.max()
-        min_sell = sells.min()
-
-        sells = (sells - min_sell) / (max_sell - min_sell)
-
-        buy_peaks, sell_peaks = get_peaks(sells)
-        buy_peaks = torch.from_numpy(buy_peaks)
-        sell_peaks = torch.from_numpy(sell_peaks)
-
-        if use_tanh:
-            tmp1 = 1 - out[buy_peaks, b, 0]
-            tmp2 = out[sell_peaks, b, 0] + 1
-
-            # tmp1 = out[buy_peaks, b, 0].std()
-            # tmp2 = out[sell_peaks, b, 0].std()
-        else:
-            tmp1 = out[buy_peaks, b, 1]
-            tmp2 = 1 - out[sell_peaks, b, 1]
-
-            # tmp1 = out[buy_peaks, b, 1].std()
-            # tmp2 = out[sell_peaks, b, 1].std()
-
-        diffs.append(tmp1)
-        diffs.append(tmp2)
-
-    return torch.cat(diffs).mean() * (1 - 0.99 ** (e / n_epochs))
-
 def aggregate(X, n = 5, from_minute = True):
     if X.ndim == 1:
         X = X.reshape(-1, 1)
@@ -512,101 +463,6 @@ def get_time(filename):
     split2 = split1[2].split('.')
     return int(split2[0])
 
-
-def get_obs_input(X, inputs, params):
-    obs = []
-
-    if 'ma' not in inputs:
-        raise ValueError('"ma" must be included in the parameters in order to normalize the prices')
-    else:
-        ma_window_min_max = params['ma_window_min_max']
-        if inputs['ma'] == 0:
-            window_sizes = ma_window_min_max[1:]
-        else:
-            window_sizes = np.round(
-                np.linspace(ma_window_min_max[0], ma_window_min_max[1], inputs['ma'] + 1)
-            ).astype(int)
-
-        tp = np.mean(X[:, :3], axis = 1).reshape((X.shape[0], 1))
-        ma_ref = sma(tp, window_sizes[-1])
-
-        N = ma_ref.shape[0]
-
-        for w in window_sizes[:-1]:
-            ma = sma(tp, w)[-N:] / ma_ref
-            obs.append(ma)
-
-    if 'price' in inputs:
-        prices = X[-N:, :inputs['price']]
-        tmp = np.split(prices, inputs['price'], axis = 1)
-        for i in range(len(tmp)):
-            tmp[i] = tmp[i].reshape(-1) / (ma_ref if i < 4 else 1)
-        obs.extend(tmp)
-
-    if 'mus' in inputs:
-        returns = X[1:, 0] / X[:-1, 0] - 1
-
-        r = returns
-
-        for i in range(inputs['mus']):
-            r = smoothed_returns(np.cumprod(r + 1).reshape(-1, 1), alpha = params['alpha'])
-            obs.append(r[-N:])
-
-    if 'std' in inputs:
-        std_window_min_max = params['std_window_min_max']
-        window_sizes = np.round(
-            np.linspace(std_window_min_max[0], std_window_min_max[1], inputs['std'])
-        ).astype(int)
-
-        for w in window_sizes:
-            sd = std(tp, w)[-N:] / ma_ref
-            obs.append(sd)
-
-    if 'ha' in inputs:
-        ha = heikin_ashi(X)[-N:, :inputs['ha']]
-        tmp = np.split(ha, inputs['ha'], axis = 1)
-        for i in range(len(tmp)):
-            tmp[i] = tmp[i].reshape(-1) / ma_ref
-        obs.extend(tmp)
-
-    if 'stoch' in inputs:
-        stoch_window_min_max = params['stoch_window_min_max']
-        window_sizes = np.round(
-            np.linspace(stoch_window_min_max[0], stoch_window_min_max[1], inputs['stoch'])
-        ).astype(int)
-
-        for w in window_sizes:
-            stoch = stochastic_oscillator(X, w)[-N:]
-            obs.append(stoch)
-
-
-    obs = np.stack(obs, axis = 1)
-    obs = torch.from_numpy(obs).type(torch.float32)
-
-    ma_ref = torch.from_numpy(ma_ref).type(torch.float32)
-
-    #print(obs.shape)
-
-    return obs, N, ma_ref
-
-def init_state(inputs, batch_size, initial_usd = 1.0, initial_coin = 0.0):
-    state = []
-
-    capital_usd = initial_usd
-    state.append(capital_usd)
-
-    capital_coin = initial_coin
-    state.append(capital_coin)
-
-    timedelta = -1.0
-    state.append(timedelta)
-
-    buy_price = -1.0
-    state.append(buy_price)
-
-    state = torch.tensor(state).view(1, -1).repeat(batch_size, 1).type(torch.float32)
-
-    return state
 
 # TODO: test that with m = 1, X doesn't change
 def get_multiplied_X(X, multiplier = 1):

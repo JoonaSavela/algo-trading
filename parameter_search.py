@@ -192,7 +192,7 @@ def get_semi_adaptive_wealths(
             k, param, wealth = v
             N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
 
-            stop_loss_take_profit_wealth *= apply_commissions_and_spreads_fast(
+            stop_loss_take_profit_wealth *= apply_commissions_and_spreads(
                 np.log(wealth),
                 N_transactions / total_months,
                 commissions,
@@ -352,7 +352,7 @@ def get_objective_function(
         best_sltp_type = None
 
         for sltp_type in stop_loss_take_profit_wealths_dict[side].keys():
-            wealths = apply_commissions_and_spreads_fast(
+            wealths = apply_commissions_and_spreads(
                 stop_loss_take_profit_wealths_dict[side][sltp_type],
                 0,
                 0.0,
@@ -1410,7 +1410,7 @@ def get_displacements(
                     )
                     wealth_log = wealth_log[0]
 
-                    wealth = apply_commissions_and_spreads_fast(
+                    wealth = apply_commissions_and_spreads(
                         wealth_log,
                         0,
                         0.0,

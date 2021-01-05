@@ -13,13 +13,14 @@ from ftx.rest.client import FtxClient
 from utils import *
 
 # TODO: check if fetching of logs can be automated
+# TODO: handle deposits/withdrawals
 
 def combine_files(main_filename):
     files = glob.glob('trading_logs/*.csv')
 
     dataFrames = [pd.read_csv(file) for file in files]
 
-    # print([len(df) for df in dataFrames])
+    print([len(df) for df in dataFrames])
 
     df = pd.concat(dataFrames, sort = False, ignore_index = True).drop_duplicates('id')
 
@@ -29,6 +30,7 @@ def combine_files(main_filename):
 
     df.to_csv('trading_logs/' + main_filename, index = False)
 
+# TODO: group events wisely
 # TODO: handle new year
 # Assumes no FTT is ever bought
 # Assumes no new money is ever deposited
@@ -53,18 +55,20 @@ def get_taxable_profit(main_filename, year):
     profits_df = trades.groupby(['market', 'side']).apply(lambda x: (x['price'] * x['size']).sum())
     # print(profits_df)
     profits_df = profits_df.rename('total').reset_index()
+    print(profits_df)
 
-    buys = profits_df[profits_df['side'] == 'buy']['total'].values
-    sells = profits_df[profits_df['side'] == 'sell']['total'].values
-    profits = sells - buys
+    buys = profits_df[profits_df['side'] == 'buy']['total'].sum()
+    sells = profits_df[profits_df['side'] == 'sell']['total'].sum()
+    profit = sells - buys
 
-    profit = profits.sum()
+    # profit = profits.sum()
     total_fees = trades['fee'].sum()
 
     print(f'Taxable profit: {profit}')
     print(f'Fees payed: {total_fees}')
 
 
+# TODO: update this once total_balance is saved periodically in trade.py 
 def plot_trades(main_filename, years = None, months = None, normalize = False):
     plt.style.use('seaborn')
 
@@ -131,4 +135,4 @@ if __name__ == "__main__":
     main_filename = 'trades_all.csv'
     combine_files(main_filename)
     get_taxable_profit(main_filename, 2020)
-    plot_trades(main_filename)
+    # plot_trades(main_filename)

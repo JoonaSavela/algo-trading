@@ -23,8 +23,6 @@ from pypfopt import BlackLittermanModel
 import multiprocessing
 
 
-# TODO: train a (bayesian) NN on the (aggregated) data
-
 # TODO: add comments; improve readability
 
 # TODO: write a bunch of tests
@@ -34,7 +32,6 @@ import multiprocessing
 
 
 # TODO: check that get_recent_data works correctly
-
 
 # TODO: make a maker strategy instead of taker?
 
@@ -150,7 +147,7 @@ def main():
         N_repeat = 1,
         compress = None,
         trail_value_recalc_period = None,
-        randomize = False,
+        randomize = True,
         Xs_index = [0, 1]
     )
 
