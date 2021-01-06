@@ -6,7 +6,6 @@ import pandas as pd
 import time
 from datetime import datetime
 from utils import *
-from model import *
 from optimize import *
 from tqdm import tqdm
 from parameter_search import *
@@ -78,7 +77,80 @@ def visualize_spreads(coin = 'ETH', m = 3, m_bear = 3):
 
 
 def main():
+    trades_filename = 'trading_logs/trades.csv'
+    conditional_trades_filename = 'trading_logs/conditional_trades.csv'
+
+    trades = pd.read_csv(trades_filename, index_col = 0)
+    conditional_trades = pd.read_csv(conditional_trades_filename, index_col = 0)
+
+    for c in trades.columns:
+        print(c, trades[c].unique())
+        print()
+
+    print()
+    print()
+
+    for c in conditional_trades.columns:
+        print(c, conditional_trades[c].unique())
+        print()
+
+    ids = trades['id'].values.reshape(-1, 1)
+    ids1 = conditional_trades['orderId'].values.reshape(1, -1)
+
+    same_ids = ids == ids1
+    print(same_ids.shape)
+    print(np.sum(same_ids, axis=0))
+    print(conditional_trades['avgFillPrice'][np.sum(same_ids, axis=0) == 0] \
+        * conditional_trades['filledSize'][np.sum(same_ids, axis=0) == 0])
+    print(conditional_trades[np.sum(same_ids, axis=0) == 0].transpose())
+
+    # plt.style.use('seaborn')
+    # plt.spy(same_ids)
+    # plt.show()
+
+
     # client = FtxClient(ftx_api_key, ftx_secret_key)
+    #
+    # trade_history, conditional_trade_history = get_trade_history(client)
+    # print(trade_history)
+    # print(conditional_trade_history)
+
+
+    # end_time = time.time()
+    # order_history = client.get_conditional_order_history(end_time = end_time)
+    # time.sleep(0.1)
+    # order_history = pd.DataFrame(order_history)
+    # print(order_history['filledSize'].values)
+    # print(order_history['status'].values)
+    #
+    # for c in order_history.columns:
+    #     print(c, order_history[c].unique())
+    #     print()
+    #
+    #
+    # time_string_format = "%Y-%m-%dT%H:%M:%S"
+    # timestamps = order_history['createdAt'].map(
+    #     lambda x: time.mktime(
+    #         datetime.strptime(
+    #             x[:len(time_string_format) + 2],
+    #             time_string_format
+    #         ).timetuple()
+    #     )
+    # ) # '2021-01-03T03:54:07.975516+00:00'
+    # # print(timestamps)
+    #
+    # order_history1 = client.get_conditional_order_history(end_time = timestamps.min())
+    # order_history1 = pd.DataFrame(order_history1)
+    #
+    # ids = order_history['id'].values.reshape(-1, 1)
+    # ids1 = order_history1['id'].values.reshape(1, -1)
+    # same_id = ids == ids1
+    # print(np.sum(same_id))
+
+    # time.mktime(datetime.strptime(s, "%d/%m/%Y").timetuple())
+
+    # print(order_history.columns)
+    # print(order_history['remainingSize'].unique())
     # open_trigger_orders = get_conditional_orders(client)
     # print_dict(open_trigger_orders)
 
@@ -138,18 +210,18 @@ def main():
     #     debug = True
     # )
 
-    plot_weighted_adaptive_wealths(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        ms = [1, 3],
-        m_bears = [0, 3],
-        N_repeat = 1,
-        compress = None,
-        trail_value_recalc_period = None,
-        randomize = True,
-        Xs_index = [0, 1]
-    )
+    # plot_weighted_adaptive_wealths(
+    #     coins = ['ETH', 'BTC'],
+    #     freqs = ['low', 'high'],
+    #     strategy_types = ['ma', 'macross'],
+    #     ms = [1, 3],
+    #     m_bears = [0, 3],
+    #     N_repeat = 1,
+    #     compress = None,
+    #     trail_value_recalc_period = None,
+    #     randomize = True,
+    #     Xs_index = [0, 1]
+    # )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
 
