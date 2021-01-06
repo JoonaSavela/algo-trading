@@ -8,7 +8,7 @@ import pandas as pd
 from utils import aggregate as aggregate_F
 from utils import floor_to_n, print_dict, get_gcd, get_lcm, round_to_n, \
     choose_get_buys_and_sells_fn, get_filtered_strategies_and_weights, \
-    get_parameter_names
+    get_parameter_names, get_total_balance
 import json
 import smtplib
 from functools import reduce
@@ -41,18 +41,6 @@ def ftx_price(client, symbol, side = 'ask'):
     return res
 
 
-def get_total_balance(client, separate = True, filter = None):
-    balances = pd.DataFrame(client.get_balances()).set_index('coin')
-    time.sleep(0.05)
-    if filter is not None:
-        li = [ix in filter for ix in balances.index]
-        balances = balances.loc[li, :]
-    total_balance = balances['usdValue'].sum()
-
-    if separate:
-        return total_balance, balances
-
-    return total_balance
 
 def sell_assets(client, symbol, size, round_n = 4, debug = False):
     size = floor_to_n(size, round_n)

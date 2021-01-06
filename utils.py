@@ -5,6 +5,7 @@ from math import log10, floor, ceil
 from scipy import stats
 from itertools import product
 import os
+import time
 
 # matplotlib is not installed in cloud since it is not needed
 try:
@@ -14,6 +15,20 @@ except ImportError as e:
 
 # TODO: split this file into multiple files (based on function category)
 
+
+
+def get_total_balance(client, separate = True, filter = None):
+    balances = pd.DataFrame(client.get_balances()).set_index('coin')
+    time.sleep(0.05)
+    if filter is not None:
+        li = [ix in filter for ix in balances.index]
+        balances = balances.loc[li, :]
+    total_balance = balances['usdValue'].sum()
+
+    if separate:
+        return total_balance, balances
+
+    return total_balance
 
 
 def get_average_trading_period(strategies, unique = True):
