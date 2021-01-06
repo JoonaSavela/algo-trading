@@ -1,12 +1,12 @@
 import json
 import numpy as np
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import os
 import requests
 import glob
 from keys import cryptocompare_key
-from utils import get_time
+from utils import get_time, get_total_balance
 import time
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
@@ -122,7 +122,7 @@ def get_and_save_all():
             count += 1
 
         print('Coin', coin, 'processed,', count, 'interval(s) added')
-        print()
+    print()
 
 # TODO: use pandas
 def load_data(filename, sequence_length):
@@ -215,9 +215,11 @@ def save_orderbook_data():
                 json.dump(orderbook, fp)
 
         print(coin, "orderbook data saved")
+    print()
 
 
 # TODO: is max (the output) the best?
+# TODO: add comments
 def get_average_spread(coin, m, total_balances, m_bear = None, step = 0.0001):
     bull_folder = coin
     if m > 1:
@@ -306,9 +308,113 @@ def get_average_spread(coin, m, total_balances, m_bear = None, step = 0.0001):
     return np.max(average_spreads, axis=1)
 
 
+def get_order_history(client, end_time):
+    order_history = client.get_order_history(end_time = end_time)
+    time.sleep(0.05)
+    order_history = pd.DataFrame(order_history)
+    return order_history
+
+def get_conditional_order_history(client, end_time):
+    conditional_order_history = client.get_conditional_order_history(end_time = end_time)
+    time.sleep(0.05)
+    conditional_order_history = pd.DataFrame(conditional_order_history)
+    return conditional_order_history
+
+def get_timestamps(time_string_series, time_string_format = "%Y-%m-%dT%H:%M:%S"):
+    timestamps = time_string_series.map(
+        lambda x: time.mktime(
+            datetime.strptime(
+                x[:len(time_string_format) + 2],
+                time_string_format
+            ).timetuple()
+        )
+    )
+    return timestamps
+
+
+def get_trade_history(client, get_order_history_f, max_time = None):
+    if max_time is None:
+        max_time = -1
+
+    end_time = time.time()
+    order_history = get_order_history_f(client, end_time)
+    timestamps = get_timestamps(order_history['createdAt'])
+    end_time = timestamps.min()
+
+    res = [order_history]
+
+    while len(order_history.index) == 100 and end_time > max_time:
+        order_history = get_order_history_f(client, end_time)
+        res.append(order_history)
+        timestamps = get_timestamps(order_history['createdAt'])
+        end_time = timestamps.min()
+
+    res = pd.concat(res, ignore_index = True)
+    res = res[res['filledSize'] > 0.]
+
+    return res
+
+
+def get_trades_data_frame_and_max_time(fname):
+    if os.path.exists(fname):
+        df = pd.read_csv(fname, index_col = 0)
+        max_time = get_timestamps(df['createdAt']).max()
+    else:
+        df = None
+        max_time = None
+
+    return df, max_time
 
 
 
+def save_trade_history():
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+    trades_fname = 'trading_logs/trades.csv'
+    conditional_trades_fname = 'trading_logs/conditional_trades.csv'
+
+    def _helper(fname, get_order_history_f):
+        prev_trades, max_time = get_trades_data_frame_and_max_time(fname)
+        print(max_time)
+        trades = [prev_trades] if prev_trades is not None else []
+
+        trade_history = get_trade_history(client, get_order_history_f, max_time = max_time)
+
+        trades.append(trade_history)
+        trades = pd.concat(trades, ignore_index = True).drop_duplicates('id').sort_values('createdAt')
+
+        trades.to_csv(fname)
+
+    _helper(trades_fname, get_order_history)
+    _helper(conditional_trades_fname, get_conditional_order_history)
+
+    print()
+
+
+def save_total_balance():
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+
+    balance = pd.DataFrame([[
+        time.time(),
+        get_total_balance(client, separate = False),
+    ]], columns=['time', 'balance'])
+    print(float(balance['time']), float(balance['balance']))
+
+    fname = 'trading_logs/balances.csv'
+    balances = [balance]
+
+    if os.path.exists(fname):
+        balances.append(pd.read_csv(fname, index_col = 0))
+
+    balances = pd.concat(balances, ignore_index = True).sort_values('time')
+    balances.to_csv(fname)
+
+    print()
+
+
+# TODO: save deposits/withdrawals?
+# TODO: better prints
 if __name__ == "__main__":
     get_and_save_all()
     save_orderbook_data()
+    save_trade_history()
+    save_total_balance()
