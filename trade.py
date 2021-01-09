@@ -2,20 +2,20 @@ from keys import ftx_api_key, ftx_secret_key, email_address, email_password
 from ftx.rest.client import FtxClient
 import time
 from datetime import datetime
-from data import get_recent_data
+from data import get_recent_data, get_conditional_order_history, get_timestamps
 import numpy as np
 import pandas as pd
 from utils import aggregate as aggregate_F
 from utils import floor_to_n, print_dict, get_gcd, get_lcm, round_to_n, \
     choose_get_buys_and_sells_fn, get_filtered_strategies_and_weights, \
-    get_parameter_names, get_total_balance
+    get_parameter_names, get_total_balance, apply_taxes
 import json
 import smtplib
 from functools import reduce
 import os
 
 source_symbol = 'USD'
-min_amount = 0.001
+min_amount = 0.01
 
 def get_symbol(coin, m, bear = False):
     res = coin
@@ -57,7 +57,7 @@ def sell_assets(client, symbol, size, round_n = 4, debug = False):
 
     return size
 
-def buy_assets(client, symbol, usd_size, round_n = 4, debug = False):
+def buy_assets(client, symbol, usd_size, round_n = 4, debug = False, return_price = False):
     price = ftx_price(client, symbol, side = 'ask')
     size = floor_to_n(usd_size / price, round_n)
 
@@ -70,6 +70,9 @@ def buy_assets(client, symbol, usd_size, round_n = 4, debug = False):
             type = 'market'
         )
         time.sleep(0.1)
+
+    if return_price:
+        return size, price
 
     return size
 
@@ -211,8 +214,236 @@ def send_error_email(address, password):
 
         smtp.sendmail(address, address, msg)
 
+def get_weight_diffs(client, buy_info, symbols):
+    weights = {
+        source_symbol: 0
+    }
+
+    # Get all possible symbols
+    for strategy_key in buy_info.index:
+        symbol = get_symbol_from_key(strategy_key, bear = False)
+        if symbol not in weights:
+            weights[symbol] = 0
+
+        symbol = get_symbol_from_key(strategy_key, bear = True)
+        if symbol not in weights:
+            weights[symbol] = 0
+
+    # Get the target weights for the symbols
+    for strategy_key in buy_info.index:
+        weights[symbols[strategy_key]] += buy_info.loc[strategy_key, 'weight']
+
+    target_weights = pd.Series(weights)
+
+    # TODO: move this outside of the function
+    total_balance, balances = get_total_balance(client, separate = True, filter = list(target_weights.keys()))
+
+    actual_weights = balances['usdValue'] / total_balance
+    weight_diffs = target_weights - actual_weights
+
+    return weight_diffs, target_weights, actual_weights, total_balance, balances
+
+def transfer_taxes_to_taxes_subaccount(client, size):
+    client.transfer_to_subaccount(
+        coin = source_symbol,
+        size = size,
+        source = None,
+        destination = 'taxes'
+    )
+    time.sleep(0.05)
 
 
+
+
+# TODO: DRY DRY
+def process_trades(client, buy_info, taxes = True, debug = False, verbose = False):
+    open_trigger_orders = get_conditional_orders(client)
+
+    triggered = {}
+
+    # detect triggered trigger orders
+    for strategy_key in buy_info.index:
+        changed = buy_info.loc[strategy_key, 'changed']
+        trigger_order_id = buy_info.loc[strategy_key, 'trigger_order_id' if not changed else 'prev_trigger_order_id']
+
+        if pd.isna(trigger_order_id):
+            trigger_order_id = None
+        else:
+            trigger_order_id = str(int(trigger_order_id))
+
+        if trigger_order_id is None:
+            triggered[strategy_key] = False
+        else:
+            triggered[strategy_key] = \
+                trigger_order_id not in open_trigger_orders or \
+                open_trigger_orders[trigger_order_id]['status'] != 'open'
+
+
+    # get trigger prices for triggered orders
+    trigger_prices = {}
+
+    for strategy_key in buy_info.index:
+        trigger_order_id = buy_info.loc[strategy_key, 'prev_trigger_order_id']
+        if triggered[strategy_key]:
+            if buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
+                end_time = time.time()
+                conditional_order_history = get_conditional_order_history(client, end_time)
+
+                while trigger_order_id not in conditional_order_history['id']:
+                    if len(conditional_order_history.index) < 100:
+                        raise ValueError("Trigger order not found")
+                    timestamps = get_timestamps(conditional_order_history['createdAt'])
+                    end_time = timestamps.min()
+                    conditional_order_history = get_conditional_order_history(client, end_time)
+
+                idx = conditional_order_history.index
+                assert((conditional_order_history['id'] == trigger_order_i).sum() == 1)
+                i = idx[conditional_order_history['id'] == trigger_order_id][0]
+
+                trigger_prices[strategy_key] = conditional_order_history.loc[
+                    i, 'avgFillPrice'
+                ]
+
+            else:
+                changed = buy_info.loc[strategy_key, 'changed']
+                buy_price = buy_info.loc[strategy_key, 'buy_price' if not changed else 'prev_buy_price']
+                trigger_prices[strategy_key] = buy_info.loc[strategy_key, 'trigger_param'] * buy_price
+
+    # cancel trigger orders
+    for strategy_key in buy_info.index:
+        trigger_order_id = buy_info.loc[strategy_key, 'trigger_order_id']
+        if not pd.isna(trigger_order_id) and not triggered[strategy_key]:
+            cancel_conditional_order(client, trigger_order_id, debug = debug)
+
+    symbols = {}
+    for strategy_key in buy_info.index:
+        if buy_info.loc[strategy_key, 'buy_state'] == True:
+            symbol = get_symbol_from_key(strategy_key, bear = False)
+        elif buy_info.loc[strategy_key, 'buy_state'] == False:
+            symbol = get_symbol_from_key(strategy_key, bear = True)
+        else:
+            symbol = source_symbol
+
+        symbols[strategy_key] = symbol
+
+    # TODO: instead of this, save previous buy sizes and prices to a deque and
+    # use them to calculate profit and taxes later (minimizes trading volume and
+    # thus minimizes taxes)
+    profit = {}
+
+    # update usd value of each strategy
+    for strategy_key in buy_info.index:
+        if triggered[strategy_key]:
+            profit[strategy_key] = trigger_prices[strategy_key] / buy_info.loc[strategy_key, 'prev_buy_price']
+
+            buy_info.loc[strategy_key, 'usd_value'] = trigger_prices[strategy_key] * \
+                buy_info.loc[strategy_key, 'prev_size']
+
+        elif not pd.isna(buy_info.loc[strategy_key, 'prev_buy_price']):
+            price = ftx_price(client, symbols[strategy_key])
+            profit[strategy_key] = price / buy_info.loc[strategy_key, 'prev_buy_price']
+
+            buy_info.loc[strategy_key, 'usd_value'] = price * \
+                buy_info.loc[strategy_key, 'prev_size']
+
+        else:
+            profit[strategy_key] = 1.0
+
+    # update weights based on the current (updated) usd value
+    buy_info['weights'] = buy_info['usd_value'] / buy_info['usd_value'].sum()
+
+    weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, symbols)
+
+    if verbose:
+        print(weight_diffs)
+
+    # sell negatives
+    li_neg = weight_diffs < 0
+
+    for symbol, weight_diff in weight_diffs[li_neg].items():
+        if symbol != source_symbol and np.abs(weight_diff) > min_amount:
+            size = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
+            size = sell_assets(client, symbol, size, round_n = 5, debug = debug)
+
+    if taxes:
+        amount_to_taxes = 0
+
+        # update usd_value
+        for strategy_key in buy_info.index:
+            if profit[strategy_key] > 1.0:
+                pre_tax_usd_value = buy_info.loc[strategy_key, 'usd_value']
+                post_tax_usd_value = apply_taxes(profit[strategy_key], copy = True) / profit[strategy_key] * \
+                    pre_tax_usd_value
+
+                amount_to_taxes += pre_tax_usd_value - post_tax_usd_value
+
+                buy_info.loc[strategy_key, 'usd_value'] = post_tax_usd_value
+
+        # transfer taxes into 'taxes' subaccount
+        transfer_taxes_to_taxes_subaccount(client, amount_to_taxes)
+
+        # update weights
+        buy_info['weights'] = buy_info['usd_value'] / buy_info['usd_value'].sum()
+
+        # update weight diffs
+        weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, symbols)
+
+    if not debug:
+        time.sleep(1)
+
+    # buy positives
+    li_pos = ~li_neg
+    buy_sizes = {}
+
+    for symbol, weight_diff in weight_diffs[li_pos].items():
+        if symbol != source_symbol and weight_diff > min_amount:
+            usd_size = weight_diff * total_balance
+            size, price = buy_assets(client, symbol, usd_size, round_n = 5, debug = debug, return_price = True)
+            buy_sizes[symbol] = size
+            # TODO: see the declaration of dict 'profit'
+
+    for strategy_key in buy_info.index:
+        symbol = symbols[strategy_key]
+        relative_weight = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol]
+        buy_info.loc[strategy_key, 'prev_size'] = buy_sizes[symbol] * relative_weight
+
+    if not debug:
+        time.sleep(1)
+
+    total_balance, balances = get_total_balance(client, separate = True, filter = list(target_weights.keys()))
+
+    # (re)apply trigger orders if trigger_name is not 'trailing' or if trigger_order_id is None
+    # else modify order s.t. its weight is correct
+    for strategy_key, symbol in symbols.items():
+        if symbol != source_symbol:
+            size = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol] * balances['total'][symbol]
+
+            id, size = place_trigger_order(
+                client,
+                symbol,
+                buy_info.loc[strategy_key, 'buy_price'],
+                size,
+                buy_info.loc[strategy_key, 'trigger_name'],
+                buy_info.loc[strategy_key, 'trigger_param'],
+                round_n = 5,
+                debug = debug
+            )
+
+            id = str(int(id)) if id is not None else id
+            buy_info.loc[strategy_key, 'trigger_order_id'] = id
+
+            if verbose:
+                print(id, type(id))
+                print(f'Modified or placed order, size = {size}')
+
+    # print all that was done
+    print(buy_info.transpose())
+    print()
+
+    return buy_info
+
+
+# TODO: DRY DRY
 # buy_info: DataFrame of relevant information
 #   - buy_state: dtypes = [None, bool]
 #   - buy_price: dtypes = [None, float]
@@ -243,7 +474,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                 trigger_order_id not in open_trigger_orders or \
                 open_trigger_orders[trigger_order_id]['status'] != 'open'
 
-            # TODO: make thsi more logical?
+            # TODO: make this more logical?
             if not triggered[strategy_key] and buy_info.loc[strategy_key, 'trigger_name'] == 'trailing':
                 trailing_trigger_prices[strategy_key] = open_trigger_orders[trigger_order_id]['triggerPrice']
 
@@ -332,7 +563,7 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
                         print(strategy_key, id, type(id))
                         print(f'Modified order, size = {size}')
 
-    # cancel orders if if their type is not 'trailing'
+    # cancel orders if their type is not 'trailing'
     for cond_order_id, cond_order in open_trigger_orders.items():
         if cond_order['type'] != 'trailing_stop':
             cancel_conditional_order(client, cond_order_id, debug = debug)
@@ -353,7 +584,6 @@ def balance_portfolio(client, buy_info, debug = False, verbose = False):
         if symbol != source_symbol and np.abs(weight_diff) > min_amount:
             size = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
             size = sell_assets(client, symbol, size, round_n = 5, debug = debug)
-
 
     if not debug:
         time.sleep(1)
@@ -442,7 +672,9 @@ def trading_pipeline(
     strategy_types = ['ma', 'macross'],
     ms = [1, 3],
     m_bears = [0, 3],
-    ask_for_input = True
+    ask_for_input = True,
+    active_balancing = False, # TODO: move into optim_results folder, or remove altogether
+    taxes = True
 ):
     print('Starting trading pipeline...')
     print()
@@ -518,27 +750,33 @@ def trading_pipeline(
     counter = 0
 
     # DataFrame of relevant information
-    #   - buy_state: dtypes = [None, bool]
-    #   - buy_price: dtypes = [None, float]
-    #   - trigger_name: dtypes = [None, str]
-    #   - trigger_param: dtypes = [None, float]
-    #   - weight: dtypes = [None, float]
-    #   - trigger_order_id: dtypes = [None, int]
     buy_info = pd.DataFrame(
-        columns=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight', 'trigger_order_id'],
+        columns=['buy_state', 'buy_price', 'trigger_name', 'trigger_param', 'weight',
+            'usd_value', 'trigger_order_id', 'changed', 'prev_buy_price', 'prev_size',
+            'prev_trigger_order_id'],
         index=strategy_keys
     )
 
     if buy_info_from_file:
         prev_buy_info = pd.read_csv(buy_info_file, index_col = 0)
 
-        for i in buy_info.index:
-            if i in prev_buy_info.index:
-                buy_info.loc[i] = prev_buy_info.loc[i]
+        strategies_match_exactly = len(prev_buy_info.index) == len(buy_info.index)
+
+        for i in prev_buy_info.index:
+            if i not in buy_info.index:
+                strategies_match_exactly = False
+            for c in prev_buy_info.columns:
+                if i in buy_info.index and c in buy_info.columns:
+                    buy_info.loc[i, c] = prev_buy_info.loc[i, c]
 
 
-    for key in strategy_keys:
-        buy_info.loc[key, 'weight'] = weights[key]
+    if not buy_info_from_file or not strategies_match_exactly:
+        total_balance = get_total_balance(client, separate = False)
+
+        for key in strategy_keys:
+            buy_info.loc[key, 'weight'] = weights[key]
+            buy_info.loc[key, 'usd_value'] = buy_info.loc[key, 'weight'] * total_balance
+
 
     if wait_for_signal_to_change:
         transaction_count = {}
@@ -584,13 +822,6 @@ def trading_pipeline(
                     if not debug:
                         wait(displacement * 60, timeTo, verbose = debug)
 
-                # if debug:
-                #     if displacement == 0:
-                #         timeTo = timeTo0
-                #     localtime = time.localtime(timeTo)
-                #     now_string = time.strftime("%d/%m/%Y %H:%M:%S", localtime)
-                #     print(displacement, now_string)
-
                 li = displacement_values[li_counter] == displacement
                 keys = strategy_keys[li_counter][li]
 
@@ -613,7 +844,7 @@ def trading_pipeline(
                     if coin not in X_dict:
                         X_dict[coin] = X
 
-                changed = False
+                buy_info['changed'] = False
 
                 for key in keys:
                     coin = key.split('_')[0]
@@ -644,11 +875,13 @@ def trading_pipeline(
 
                             if transaction_count[key] > 1:
                                 buy_info.loc[key, 'buy_state'] = True
+                                buy_info.loc[key, 'prev_buy_price'] = buy_info.loc[key, 'buy_price']
                                 buy_info.loc[key, 'buy_price'] = ftx_price(client, get_symbol(coin, m, bear = False))
                                 buy_info.loc[key, 'trigger_name'] = sltp_args[0]
                                 buy_info.loc[key, 'trigger_param'] = sltp_args[1]
+                                buy_info.loc[key, 'prev_trigger_order_id'] = buy_info.loc[key, 'trigger_order_id']
                                 buy_info.loc[key, 'trigger_order_id'] = np.nan
-                                changed = True
+                                buy_info.loc[key, 'changed'] = True
 
                     elif sell and len(sltp_args) == 4:
                         if (not sell) != prev_buy_state[key]:
@@ -657,11 +890,13 @@ def trading_pipeline(
 
                             if transaction_count[key] > 1:
                                 buy_info.loc[key, 'buy_state'] = False
+                                buy_info.loc[key, 'prev_buy_price'] = buy_info.loc[key, 'buy_price']
                                 buy_info.loc[key, 'buy_price'] = ftx_price(client, get_symbol(coin, m_bear, bear = True))
                                 buy_info.loc[key, 'trigger_name'] = sltp_args[2]
                                 buy_info.loc[key, 'trigger_param'] = sltp_args[3]
+                                buy_info.loc[key, 'prev_trigger_order_id'] = buy_info.loc[key, 'trigger_order_id']
                                 buy_info.loc[key, 'trigger_order_id'] = np.nan
-                                changed = True
+                                buy_info.loc[key, 'changed'] = True
 
                     elif sell and len(sltp_args) == 2:
                         if (not sell) != prev_buy_state[key]:
@@ -670,19 +905,18 @@ def trading_pipeline(
 
                             if transaction_count[key] > 1:
                                 buy_info.loc[key, 'buy_state'] = np.nan
+                                buy_info.loc[key, 'prev_buy_price'] = buy_info.loc[key, 'buy_price']
                                 buy_info.loc[key, 'buy_price'] = np.nan
                                 buy_info.loc[key, 'trigger_name'] = np.nan
                                 buy_info.loc[key, 'trigger_param'] = np.nan
+                                buy_info.loc[key, 'prev_trigger_order_id'] = buy_info.loc[key, 'trigger_order_id']
                                 buy_info.loc[key, 'trigger_order_id'] = np.nan
-                                changed = True
+                                buy_info.loc[key, 'changed'] = True
 
-                if debug:
-                    print(buy_info)
-                    print()
-
-                # if changed:
-                # TODO: if this works well, remove variable 'changed'
-                buy_info = balance_portfolio(client, buy_info, debug = debug, verbose = debug)
+                if active_balancing:
+                    buy_info = balance_portfolio(client, buy_info, debug = debug, verbose = debug)
+                elif buy_info['changed'].any():
+                    buy_info = process_trades(client, buy_info, taxes = taxes, debug = debug, verbose = debug)
 
             counter = (counter + gcd) % lcm
 
