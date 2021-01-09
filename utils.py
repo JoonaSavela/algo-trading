@@ -16,6 +16,18 @@ except ImportError as e:
 # TODO: split this file into multiple files (based on function category)
 
 
+# TODO: move tax_rate into parameters.py
+def apply_taxes(trade_wealths, tax_rate = 0.34, copy = False):
+    if isinstance(trade_wealths, float):
+        if trade_wealths > 1:
+            trade_wealths = (trade_wealths - 1) * (1 - tax_rate) + 1
+    else:
+        if copy:
+            trade_wealths = np.copy(trade_wealths)
+        li = trade_wealths > 1
+        trade_wealths[li] = (trade_wealths[li] - 1) * (1 - tax_rate) + 1
+
+    return trade_wealths
 
 def get_total_balance(client, separate = True, filter = None):
     balances = pd.DataFrame(client.get_balances()).set_index('coin')

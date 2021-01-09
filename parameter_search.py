@@ -1053,12 +1053,12 @@ def optimize_weights(compress, save = True, verbose = False):
         print(wealths)
         print(np.dot(wealths, weights))
 
-        X_diff = X[1:, :] / X[:-1, :]
+        X_change = X[1:, :] / X[:-1, :]
 
-        wealths = np.prod(X_diff, axis = 0) ** (freq / len(X))
+        wealths = np.prod(X_change, axis = 0) ** (freq / len(X))
         # print(wealths)
 
-        weighted_diffs = np.matmul(X_diff, weights)
+        weighted_diffs = np.matmul(X_change, weights)
         wealth = np.prod(weighted_diffs) ** (freq / len(X))
         print(wealth)
 
@@ -1222,15 +1222,17 @@ def plot_weighted_adaptive_wealths(
         wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / (len(df) * compress))
         print("Non-balanced wealth (yearly):", round_to_n(wealth, 4))
 
-        X_diff = X[1:, :] / X[:-1, :]
+        X_change = X[1:, :] / X[:-1, :]
 
-        new_weights = X_diff * weight_values.reshape(1, -1)
+        new_weights = X_change * weight_values.reshape(1, -1)
         balanced_wealths = np.zeros((len(X),))
 
         for i in range(new_weights.shape[0]):
             new_weights_relative = new_weights[i] / np.sum(new_weights[i])
+            new_weights_relative = apply_taxes(new_weights_relative / weight_values) * weight_values
+            new_weights[i] = new_weights_relative * np.sum(new_weights[i])
 
-            li_neg = X_diff[i, :] < 0
+            li_neg = X_change[i, :] < 1
             li_pos = ~li_neg
 
             total_commisions_and_spread = []

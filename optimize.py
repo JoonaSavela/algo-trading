@@ -11,6 +11,8 @@ import copy
 from trade import get_total_balance
 
 
+
+
 # TODO: add comments or split this into multiple functions
 # TODO: check that short = False is handled correctly
 def get_adaptive_wealths(
@@ -25,7 +27,9 @@ def get_adaptive_wealths(
     trail_value_recalc_period = None,
     commissions = 0.0007,
     short = False,
-    X_bear = None
+    X_bear = None,
+    taxes = True,
+    tax_rate = 0.34
     ):
     # TODO: move this into a separate function?
     spread = potential_spreads[np.argmin(np.abs(potential_balances - total_balance))]
@@ -172,10 +176,16 @@ def get_adaptive_wealths(
                         min_i = min_i2
 
                 wealths[entry_i:entry_i + min_i] = sub_X[:min_i, 0] * old_wealth
-                wealths[entry_i + min_i:exit_i] = trigger_price / price * old_wealth
+
+                new_wealth = trigger_price / price * old_wealth
+                if trigger_price > buy_price and taxes:
+                    profit = trigger_price / buy_price
+                    new_wealth *= apply_taxes(profit, copy = True) / profit
+
+                wealths[entry_i + min_i:exit_i] = new_wealth
 
                 if trigger_triggered:
-                    spread = potential_spreads[np.argmin(np.abs(potential_balances - trigger_price / price * old_wealth * total_balance))]
+                    spread = potential_spreads[np.argmin(np.abs(potential_balances - new_wealth * total_balance))]
                     commissions_and_spread = (1 - commissions - spread)
 
                     wealths[entry_i + min_i:exit_i] *= commissions_and_spread
@@ -184,6 +194,12 @@ def get_adaptive_wealths(
                 wealths[entry_i:exit_i] = old_wealth
             else:
                 wealths[entry_i:exit_i] = sub_X[:, 0] * old_wealth
+
+        if exit_is_transaction and not trigger_triggered and (buy_state or short) and taxes:
+            sell_price = sub_X[-1, 0] * price
+            if sell_price > buy_price:
+                profit = sell_price / buy_price
+                wealths[exit_i - 1] *= apply_taxes(profit, copy = True) / profit
 
         spread = potential_spreads[np.argmin(np.abs(potential_balances - wealths[exit_i - 1] * total_balance))]
         commissions_and_spread = (1 - commissions - spread)
@@ -259,11 +275,16 @@ def get_sub_trade_wealths(X, entries, exits, N):
     return sub_trade_wealths, min_sub_trade_wealths, max_sub_trade_wealths
 
 
+
+
 # No commissions or spread
-def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_profit, total_months, return_total = True, return_as_log = False):
+def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_profit, total_months, return_total = True, return_as_log = False, taxes = True):
     trade_wealths = np.array(trade_wealths)
     max_trade_wealths = np.array(max_trade_wealths)
     trade_wealths[max_trade_wealths > take_profit] = take_profit
+
+    if taxes:
+        trade_wealths = apply_taxes(trade_wealths)
 
     if return_total:
         res = np.sum(np.log(trade_wealths)) / total_months
@@ -272,10 +293,13 @@ def get_take_profit_wealths_from_trades(trade_wealths, max_trade_wealths, take_p
     return np.log(trade_wealths) if return_as_log else trade_wealths
 
 # No commissions or spread
-def get_stop_loss_wealths_from_trades(trade_wealths, min_trade_wealths, stop_loss, total_months, return_total = True, return_as_log = False):
+def get_stop_loss_wealths_from_trades(trade_wealths, min_trade_wealths, stop_loss, total_months, return_total = True, return_as_log = False, taxes = True):
     trade_wealths = np.array(trade_wealths)
     min_trade_wealths = np.array(min_trade_wealths)
     trade_wealths[min_trade_wealths < stop_loss] = stop_loss
+
+    if taxes:
+        trade_wealths = apply_taxes(trade_wealths)
 
     if return_total:
         res = np.sum(np.log(trade_wealths)) / total_months
@@ -292,7 +316,8 @@ def get_trailing_stop_loss_wealths_from_sub_trades(
     total_months,
     trail_value_recalc_period = None,
     return_total = True,
-    return_as_log = False
+    return_as_log = False,
+    taxes = True
     ):
     trade_wealths = np.array([
         sub_trade_wealths[i][-1] for i in range(len(sub_trade_wealths))
@@ -347,6 +372,8 @@ def get_trailing_stop_loss_wealths_from_sub_trades(
                 (max(trigger_prices1[li2][0], min_sub_trade_wealths[i][li2][0]) + trigger_prices2[li2][0]) / 2
             ])
 
+    if taxes:
+        trade_wealths = apply_taxes(trade_wealths)
 
     if return_total:
         res = np.sum(np.log(trade_wealths)) / total_months
