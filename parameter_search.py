@@ -832,8 +832,9 @@ def get_adaptive_wealths_for_multiple_strategies(
         Xs_index = [0, 1],
         debug = False):
 
-    if trail_value_recalc_period is None:
-        trail_value_recalc_period = get_average_trading_period(strategies)
+    # TODO: have improved logic on this (i.e. a new boolean variable telling what to do)
+    # if trail_value_recalc_period is None:
+    #     trail_value_recalc_period = get_average_trading_period(strategies)
 
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
@@ -1094,11 +1095,13 @@ def optimize_weights_iterative(
 
     print(f"Compress: {compress}")
 
-    if init_trail_value_recalc_period is None:
-        trail_value_recalc_period = get_average_trading_period(strategies)
-        print(trail_value_recalc_period)
-    else:
-        trail_value_recalc_period = init_trail_value_recalc_period
+    # TODO: improved logic
+    # if init_trail_value_recalc_period is None:
+    #     trail_value_recalc_period = get_average_trading_period(strategies)
+    #     print(trail_value_recalc_period)
+    # else:
+    #     trail_value_recalc_period = init_trail_value_recalc_period
+    trail_value_recalc_period = init_trail_value_recalc_period
 
     weight_values = np.zeros((len(strategies),))
 
@@ -1137,8 +1140,8 @@ def optimize_weights_iterative(
             m_bears = m_bears,
             filter = True
         )
-        trail_value_recalc_period = get_average_trading_period(would_be_strategies)
-        print(trail_value_recalc_period)
+        # trail_value_recalc_period = get_average_trading_period(would_be_strategies)
+        # print(trail_value_recalc_period)
 
         print("Weights:")
         print_dict(weights)
@@ -1177,8 +1180,9 @@ def plot_weighted_adaptive_wealths(
         compress = get_average_trading_period(strategies)
         print("Compress:", compress)
 
-    if trail_value_recalc_period is None:
-        trail_value_recalc_period = get_average_trading_period(strategies)
+    # TODO: improved logic
+    # if trail_value_recalc_period is None:
+    #     trail_value_recalc_period = get_average_trading_period(strategies)
 
     keys = list(weights.keys())
     weight_values = np.array(list(weights.values()))
@@ -1294,8 +1298,12 @@ def get_displacements(
         normalize = False
     )
 
-    if trail_value_recalc_period is None:
-        trail_value_recalc_period = get_average_trading_period(strategies)
+    if len(strategies) == 0:
+        return {}
+
+    # TODO: improved logic
+    # if trail_value_recalc_period is None:
+    #     trail_value_recalc_period = get_average_trading_period(strategies)
 
     trade_wealth_categories = ['base', 'min', 'max']
 
@@ -1550,7 +1558,7 @@ if __name__ == '__main__':
     m_bear = 3
     N_repeat_inp = 40
     step = 0.01
-    trail_value_recalc_period = 180
+    trail_value_recalc_period = None
     skip_existing = False
     verbose = True
     disable = False
@@ -1600,10 +1608,31 @@ if __name__ == '__main__':
         debug = debug
     )
 
+    save_optimal_parameters(
+        all_bounds = all_bounds,
+        all_resolutions = all_resolutions,
+        coins = coins,
+        frequencies = ['low'],
+        strategy_types = strategy_types,
+        stop_loss_take_profit_types = stop_loss_take_profit_types,
+        N_iter = N_iter,
+        m = 1,
+        m_bear = 1,
+        N_repeat_inp = N_repeat_inp,
+        step = step,
+        trail_value_recalc_period = trail_value_recalc_period,
+        skip_existing = skip_existing,
+        verbose = verbose,
+        disable = disable,
+        short = short,
+        Xs_index = Xs_index,
+        debug = debug
+    )
+
     n_iter = 10
     compress = 1440
     ms = [1, 3]
-    m_bears = [0, 3]
+    m_bears = [0, 1, 3]
 
     optimize_weights_iterative(
         coins = coins,
