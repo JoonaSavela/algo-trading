@@ -6,7 +6,7 @@ import os
 import requests
 import glob
 from keys import cryptocompare_key
-from utils import get_time, get_total_balance
+from utils import get_time, get_total_balance, get_symbol
 import time
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
@@ -200,7 +200,8 @@ def save_orderbook_data():
         symbols = [
             coin,
             'BULL' if coin == 'BTC' else coin + 'BULL',
-            'BEAR' if coin == 'BTC' else coin + 'BEAR'
+            'BEAR' if coin == 'BTC' else coin + 'BEAR',
+            'HEDGE' if coin == 'BTC' else coin + 'HEDGE'
         ]
 
         for symbol in symbols:
@@ -221,19 +222,12 @@ def save_orderbook_data():
 # TODO: is max (the output) the best?
 # TODO: add comments
 def get_average_spread(coin, m, total_balances, m_bear = None, step = 0.0001):
-    bull_folder = coin
-    if m > 1:
-        if coin == 'BTC':
-            bull_folder = ''
-        bull_folder += 'BULL'
+    bull_folder = get_symbol(coin, m, bear = False)
     foldernames_bull = [f'data/orderbooks/{coin}/{bull_folder}/']
 
     if (m_bear is not None) and (m_bear != 0):
-        if coin == 'BTC':
-            bear_folder = ''
-        else:
-            bear_folder = coin
-        bear_folder += 'BEAR'
+        bear_folder = get_symbol(coin, m_bear, bear = True)
+
         foldernames_bear = [f'data/orderbooks/{coin}/{bear_folder}/']
     else:
         foldernames_bear = []

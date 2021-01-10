@@ -28,7 +28,7 @@ import multiprocessing
 
 # TODO: Automate everything
 
-
+# TODO: infer total balance from deposits, withdrawals, and trades
 
 # TODO: check that get_recent_data works correctly
 
@@ -62,7 +62,7 @@ def try_rounding_hours():
     print(time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(timeTo)))
 
 
-def visualize_spreads(coin = 'ETH', m = 3, m_bear = 3):
+def visualize_spreads(coin = 'ETH', m = 1, m_bear = 1):
     client = FtxClient(ftx_api_key, ftx_secret_key)
     total_balance = get_total_balance(client, False)
     total_balances = np.logspace(np.log10(total_balance / 10), np.log10(total_balance * 100), 100)
@@ -77,32 +77,46 @@ def visualize_spreads(coin = 'ETH', m = 3, m_bear = 3):
 
 
 def main():
-    trades_filename = 'trading_logs/trades.csv'
-    conditional_trades_filename = 'trading_logs/conditional_trades.csv'
+    # wealth = 3.
+    # buy_price = 1.
+    # sell_price = 2.
+    # profit = sell_price / buy_price
+    # profit = np.array([profit])
+    # print(profit, profit.shape)
+    # wealth *= profit
+    #
+    # print(wealth)
+    #
+    # wealth *= apply_taxes(profit, copy = True) / profit
+    # print(wealth)
+    # print(3 * 1.66)
 
-    trades = pd.read_csv(trades_filename, index_col = 0)
-    conditional_trades = pd.read_csv(conditional_trades_filename, index_col = 0)
-
-    for c in trades.columns:
-        print(c, trades[c].unique())
-        print()
-
-    print()
-    print()
-
-    for c in conditional_trades.columns:
-        print(c, conditional_trades[c].unique())
-        print()
-
-    ids = trades['id'].values.reshape(-1, 1)
-    ids1 = conditional_trades['orderId'].values.reshape(1, -1)
-
-    same_ids = ids == ids1
-    print(same_ids.shape)
-    print(np.sum(same_ids, axis=0))
-    print(conditional_trades['avgFillPrice'][np.sum(same_ids, axis=0) == 0] \
-        * conditional_trades['filledSize'][np.sum(same_ids, axis=0) == 0])
-    print(conditional_trades[np.sum(same_ids, axis=0) == 0].transpose())
+    # trades_filename = 'trading_logs/trades.csv'
+    # conditional_trades_filename = 'trading_logs/conditional_trades.csv'
+    #
+    # trades = pd.read_csv(trades_filename, index_col = 0)
+    # conditional_trades = pd.read_csv(conditional_trades_filename, index_col = 0)
+    #
+    # for c in trades.columns:
+    #     print(c, trades[c].unique())
+    #     print()
+    #
+    # print()
+    # print()
+    #
+    # for c in conditional_trades.columns:
+    #     print(c, conditional_trades[c].unique())
+    #     print()
+    #
+    # ids = trades['id'].values.reshape(-1, 1)
+    # ids1 = conditional_trades['orderId'].values.reshape(1, -1)
+    #
+    # same_ids = ids == ids1
+    # print(same_ids.shape)
+    # print(np.sum(same_ids, axis=0))
+    # print(conditional_trades['avgFillPrice'][np.sum(same_ids, axis=0) == 0] \
+    #     * conditional_trades['filledSize'][np.sum(same_ids, axis=0) == 0])
+    # print(conditional_trades[np.sum(same_ids, axis=0) == 0].transpose())
 
     # plt.style.use('seaborn')
     # plt.spy(same_ids)
@@ -187,7 +201,7 @@ def main():
     #     debug = False
     # )
 
-    # visualize_spreads()
+    visualize_spreads()
 
 
     # coins = ['ETH', 'BTC']
