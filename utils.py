@@ -16,6 +16,20 @@ except ImportError as e:
 # TODO: split this file into multiple files (based on function category)
 
 
+
+def get_symbol(coin, m, bear = False):
+    res = coin
+    if m > 1 or bear:
+        if coin == 'BTC':
+            res = ''
+        if bear:
+            res += 'BEAR' if m > 1 else 'HEDGE'
+        else:
+            res += 'BULL'
+
+    return res
+
+
 # TODO: move tax_rate into parameters.py
 def apply_taxes(trade_wealths, tax_rate = 0.34, copy = False):
     if isinstance(trade_wealths, float):

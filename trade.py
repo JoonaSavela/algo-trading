@@ -8,7 +8,7 @@ import pandas as pd
 from utils import aggregate as aggregate_F
 from utils import floor_to_n, print_dict, get_gcd, get_lcm, round_to_n, \
     choose_get_buys_and_sells_fn, get_filtered_strategies_and_weights, \
-    get_parameter_names, get_total_balance, apply_taxes
+    get_parameter_names, get_total_balance, apply_taxes, get_symbol
 import json
 import smtplib
 from functools import reduce
@@ -17,14 +17,7 @@ import os
 source_symbol = 'USD'
 min_amount = 0.01
 
-def get_symbol(coin, m, bear = False):
-    res = coin
-    if m > 1:
-        if coin == 'BTC':
-            res = ''
-        res += 'BULL' if not bear else 'BEAR'
 
-    return res
 
 def get_symbol_from_key(strategy_key, bear = False):
     coin = strategy_key.split('_')[0]
@@ -317,7 +310,9 @@ def process_trades(client, buy_info, taxes = True, debug = False, verbose = Fals
 
     symbols = {}
     for strategy_key in buy_info.index:
-        if buy_info.loc[strategy_key, 'buy_state'] == True:
+        if triggered[strategy_key]:
+            symbol = source_symbol
+        elif buy_info.loc[strategy_key, 'buy_state'] == True:
             symbol = get_symbol_from_key(strategy_key, bear = False)
         elif buy_info.loc[strategy_key, 'buy_state'] == False:
             symbol = get_symbol_from_key(strategy_key, bear = True)
@@ -370,7 +365,7 @@ def process_trades(client, buy_info, taxes = True, debug = False, verbose = Fals
 
         # update usd_value
         for strategy_key in buy_info.index:
-            if profit[strategy_key] > 1.0:
+            if buy_info.loc[strategy_key, 'changed'] and profit[strategy_key] > 1.0:
                 pre_tax_usd_value = buy_info.loc[strategy_key, 'usd_value']
                 post_tax_usd_value = apply_taxes(profit[strategy_key], copy = True) / profit[strategy_key] * \
                     pre_tax_usd_value
@@ -380,13 +375,14 @@ def process_trades(client, buy_info, taxes = True, debug = False, verbose = Fals
                 buy_info.loc[strategy_key, 'usd_value'] = post_tax_usd_value
 
         # transfer taxes into 'taxes' subaccount
-        transfer_taxes_to_taxes_subaccount(client, amount_to_taxes)
+        if amount_to_taxes > 0:
+            transfer_taxes_to_taxes_subaccount(client, amount_to_taxes)
 
-        # update weights
-        buy_info['weights'] = buy_info['usd_value'] / buy_info['usd_value'].sum()
+            # update weights
+            buy_info['weights'] = buy_info['usd_value'] / buy_info['usd_value'].sum()
 
-        # update weight diffs
-        weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, symbols)
+            # update weight diffs
+            weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, symbols)
 
     if not debug:
         time.sleep(1)
@@ -403,9 +399,10 @@ def process_trades(client, buy_info, taxes = True, debug = False, verbose = Fals
             # TODO: see the declaration of dict 'profit'
 
     for strategy_key in buy_info.index:
-        symbol = symbols[strategy_key]
-        relative_weight = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol]
-        buy_info.loc[strategy_key, 'prev_size'] = buy_sizes[symbol] * relative_weight
+        if buy_info.loc[strategy_key, 'changed']:
+            symbol = symbols[strategy_key]
+            relative_weight = buy_info.loc[strategy_key, 'weight'] / target_weights[symbol]
+            buy_info.loc[strategy_key, 'prev_size'] = buy_sizes[symbol] * relative_weight
 
     if not debug:
         time.sleep(1)
