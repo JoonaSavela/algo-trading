@@ -407,7 +407,6 @@ def get_objective_function(
 # TODO: possible strategy types:
 #   - stoch
 #   - candlestick
-#   - ma crossover
 #   - 2-timeframe ma
 def find_optimal_aggregated_strategy(
         client,
@@ -1289,6 +1288,8 @@ def get_displacements(
     plt.style.use('seaborn')
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
+    # as long as cryptocompare is used in trade.py, displacements can only be
+    # calculateed for frequency == 'high' strategies 
     strategies, weights = get_filtered_strategies_and_weights(
         coins,
         ['high'],

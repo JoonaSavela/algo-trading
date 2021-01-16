@@ -579,6 +579,7 @@ def get_entry_and_exit_idx(entries, exits, N):
 
 
 
+
 def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, from_minute = True):
     w = aggregate_N * w
     if from_minute:
@@ -587,6 +588,9 @@ def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, from_minute = T
     diff = X[w:, 0] - X[:-w, 0]
     N = diff.shape[0]
 
+    # Calculating buys and sells from "diff" is equivalent to
+    #   1. calculating a sma from X
+    #   2. calculating buys and sells from the difference of this sma
     buys = diff > 0
     sells = diff < 0
 
