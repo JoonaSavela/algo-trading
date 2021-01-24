@@ -20,6 +20,7 @@ from bayes_opt import BayesianOptimization
 import warnings
 from utils import choose_get_buys_and_sells_fn, get_filtered_strategies_and_weights, \
     get_parameter_names
+# from scipy.optimize import basinhopping
 
 
 def get_trade_wealths_dicts(
@@ -189,17 +190,18 @@ def get_semi_adaptive_wealths(
             print("Spread:", spread)
 
         for side, v in best_stop_loss_take_profit_wealths_dict.items():
-            k, param, wealth = v
-            N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
+            wealth = v[-1]
+            if wealth > 1.0 or side == 'long':
+                N_transactions = N_transactions_buy if side == 'long' else N_transactions_sell
 
-            stop_loss_take_profit_wealth *= apply_commissions_and_spreads(
-                np.log(wealth),
-                N_transactions / total_months,
-                commissions,
-                spread,
-                n_months = 1,
-                from_log = True
-            )
+                stop_loss_take_profit_wealth *= apply_commissions_and_spreads(
+                    np.log(wealth),
+                    N_transactions / total_months,
+                    commissions,
+                    spread,
+                    n_months = 1,
+                    from_log = True
+                )
 
     return stop_loss_take_profit_wealth
 
@@ -207,6 +209,9 @@ def get_objective_function(
         args,
         strategy_type,
         frequency,
+        coin,
+        m,
+        m_bear,
         N_repeat_inp,
         sides,
         X_origs,
@@ -218,9 +223,16 @@ def get_objective_function(
         total_balance,
         potential_balances,
         potential_spreads,
+        place_take_profit_and_stop_loss_simultaneously = False,
         trail_value_recalc_period = None,
         workers = None,
         debug = False):
+
+    sltp_results_dir = 'optim_results/sltp_results/'
+    if not os.path.exists(sltp_results_dir):
+        os.mkdir(sltp_results_dir)
+
+    joined_str_args = '_'.join(str(arg) for arg in args)
 
     if frequency not in ['low', 'high']:
         raise ValueError("'frequency' must be etiher 'low' or 'high'")
@@ -265,12 +277,14 @@ def get_objective_function(
             sub_trade_wealths_dict[side][category] = []
 
     t0 = time.time()
+    cumulative_time = 0
     trade_wealths_dicts = []
     for X_orig, X, X_bear in zip(X_origs, Xs, X_bears):
         t00 = time.time()
         buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, from_minute = True)
         t1 = time.time()
         t_X = t1 - t00
+        cumulative_time += t_X
         if debug:
             print("get_buys_and_sells_fn:", round_to_n(t_X, 4))
 
@@ -303,76 +317,240 @@ def get_objective_function(
                 sub_trade_wealths_dict[side][category].extend(sub_tw_dict[side][category])
 
     t1 = time.time()
-    t_X = t1 - t0
+    t_X = t1 - t0 - cumulative_time
     if debug:
-        print("Loop X:", round_to_n(t_X, 4))
+        print("Loop trade_wealths_dicts:", round_to_n(t_X, 4))
         print()
 
     max_take_profit = np.max([np.max(v['max']) for v in trade_wealths_dict.values()])
-    take_profit_candidates = np.arange(1.0, max_take_profit + step, step)
 
-    stop_loss_candidates = np.arange(0.0, 1.0, step)
+    if place_take_profit_and_stop_loss_simultaneously:
+        # GOAL: dict 'best_stop_loss_take_profit_wealths_dict' with
+        # best_stop_loss_take_profit_wealths_dict[side] = \
+        #   (best_take_profit, best_stop_loss_type, best_stop_loss, best_wealth)
+        # for side in sides (e.g. ['long', 'short'])
 
-    stop_loss_take_profit_wealths_dict = {}
-    t0 = time.time()
+        # inclusive on both sides
+        take_profit_limits = [0, max_take_profit + step]
+        stop_loss_limits = [0, 1.0 - step]
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers = workers) as executor:
-        futures = {executor.submit(
-            get_stop_loss_take_profit_wealth,
-            side,
-            stop_loss_take_profit_type,
-            trade_wealths_dict,
-            sub_trade_wealths_dict,
-            take_profit_candidates,
-            stop_loss_candidates,
-            trail_value_recalc_period = trail_value_recalc_period
-        ): (side, stop_loss_take_profit_type) for stop_loss_take_profit_type, side in \
-                product(stop_loss_take_profit_types, sides)}
+        # loop through regular stop loss and trailing stop loss
+        #   - filter such that only those in stop_loss_take_profit_types are processed
+        stop_loss_types = list(filter(lambda x: x in ['stop_loss', 'trailing'], stop_loss_take_profit_types))
+        stop_loss_types = list(sorted(stop_loss_types))
 
-        for future in concurrent.futures.as_completed(futures):
-            side, stop_loss_take_profit_type = futures[future]
+        if not stop_loss_types:
+            stop_loss_types = ['stop_loss']
+            stop_loss_limits = [0, 0] # equivalent to having no stop loss at all
 
-            if side not in stop_loss_take_profit_wealths_dict:
-                stop_loss_take_profit_wealths_dict[side] = {}
+        # lower_bounds = [take_profit_limits[0], stop_loss_limits[0]]
+        # upper_bounds = [take_profit_limits[1], stop_loss_limits[1]]
 
-            stop_loss_take_profit_wealths_dict[side][stop_loss_take_profit_type] = future.result()
+        best_stop_loss_take_profit_wealths_dict = {}
+        t0 = time.time()
 
-    t1 = time.time()
-    t_sltp = t1 - t0
-    if debug:
-        print("Loop sltp:", round_to_n(t_sltp, 4))
-        print()
+        for side in sides:
+            # TODO: move into a function
 
-    best_stop_loss_take_profit_wealths_dict = {}
+            best_take_profit = -1
+            best_stop_loss_type = None
+            best_stop_loss = -1
+            best_wealth = -1
 
-    for side in sides:
+            if debug:
+                print(side)
 
-        best_wealth = -1
-        best_param = -1
-        best_sltp_type = None
+            # for stop_loss_type in stop_loss_types:
+            #     stop_loss_type_is_trailing = stop_loss_type == 'trailing'
+            #
+            #     print(side, stop_loss_type)
 
-        for sltp_type in stop_loss_take_profit_wealths_dict[side].keys():
-            wealths = apply_commissions_and_spreads(
-                stop_loss_take_profit_wealths_dict[side][sltp_type],
-                0,
-                0.0,
-                0.0,
-                n_months = total_months,
-                from_log = True
+            def sltp_objective_function(take_profit, stop_loss, stop_loss_type):
+                stop_loss_type = int(round(stop_loss_type))
+                stop_loss_type = stop_loss_types[stop_loss_type]
+
+                return get_stop_loss_take_profit_wealths_from_sub_trades(
+                    sub_trade_wealths_dict[side]['base'],
+                    sub_trade_wealths_dict[side]['min'],
+                    sub_trade_wealths_dict[side]['max'],
+                    stop_loss = stop_loss,
+                    stop_loss_type_is_trailing = stop_loss_type == 'trailing',
+                    take_profit = take_profit,
+                    total_months = total_months,
+                    trail_value_recalc_period = trail_value_recalc_period,
+                    return_total = True,
+                    return_as_log = False,
+                    taxes = True
+                )
+
+            pbounds = {
+                'take_profit': take_profit_limits,
+                'stop_loss': stop_loss_limits,
+                'stop_loss_type': [0, len(stop_loss_types) - 1]
+            }
+
+            optimizer = BayesianOptimization(
+                f = sltp_objective_function,
+                pbounds = pbounds,
+                verbose = 1 if debug else 0
             )
-            i = np.argmax(wealths)
 
-            candidate_params = take_profit_candidates if sltp_type == 'take_profit' else stop_loss_candidates
+            filename = sltp_results_dir + \
+                f'{coin}_{frequency}_{strategy_type}_{m}_{m_bear}_{joined_str_args}_{"_".join(stop_loss_types)}_{side}.json'
 
-            stop_loss_take_profit_param = candidate_params[i]
-            stop_loss_take_profit_wealth = wealths[i]
+            if os.path.exists(filename):
+                with open(filename, 'r') as file:
+                    prev_best_sltp_args = json.load(file)
 
-            if stop_loss_take_profit_wealth > best_wealth:
-                best_wealth = stop_loss_take_profit_wealth
-                best_param = stop_loss_take_profit_param
-                best_sltp_type = sltp_type
+                optimizer.probe(
+                    params = prev_best_sltp_args,
+                    lazy = True
+                )
 
-        best_stop_loss_take_profit_wealths_dict[side] = (best_sltp_type, best_param, best_wealth)
+                init_points = 50
+            else:
+                init_points = 100
+
+            optimizer.maximize(
+                init_points = init_points,
+                n_iter = 5,
+            )
+
+            take_profit = optimizer.max['params']['take_profit']
+            stop_loss = optimizer.max['params']['stop_loss']
+            stop_loss_type = stop_loss_types[int(round(optimizer.max['params']['stop_loss_type']))]
+            wealth = optimizer.max['target']
+
+            with open(filename, 'w') as file:
+                json.dump(optimizer.max['params'], file)
+
+                # def sltp_objective_function(x):
+                #     outside_of_bounds = np.linalg.norm(np.clip(x, lower_bounds, upper_bounds) - np.array(x))
+                #     if outside_of_bounds > 0:
+                #         return outside_of_bounds
+                #
+                #     return -get_stop_loss_take_profit_wealths_from_sub_trades(
+                #         sub_trade_wealths_dict[side]['base'],
+                #         sub_trade_wealths_dict[side]['min'],
+                #         sub_trade_wealths_dict[side]['max'],
+                #         stop_loss = x[1],
+                #         stop_loss_type_is_trailing = stop_loss_type_is_trailing,
+                #         take_profit = x[0],
+                #         total_months = total_months,
+                #         trail_value_recalc_period = trail_value_recalc_period,
+                #         return_total = True,
+                #         return_as_log = False,
+                #         taxes = True
+                #     )
+                #
+                # # calculate optimal wealth and parameters
+                # min_result = basinhopping(
+                #     sltp_objective_function,
+                #     [2, min(0.9, stop_loss_limits[1])],
+                #     niter = 10,
+                #     # [take_profit_limits, stop_loss_limits],
+                #     # disp = debug,
+                #     # workers = workers
+                # )
+                #
+                # take_profit = min_result.x[0]
+                # stop_loss = min_result.x[1]
+                # wealth = -min_result.fun
+
+            if debug:
+                print(take_profit, stop_loss_type, stop_loss, wealth)
+
+            if wealth > best_wealth:
+                best_take_profit = take_profit
+                best_stop_loss_type = stop_loss_type
+                best_stop_loss = stop_loss
+                best_wealth = wealth
+
+            best_stop_loss_take_profit_wealths_dict[side] = \
+                (best_take_profit, best_stop_loss_type, best_stop_loss, best_wealth)
+
+        t1 = time.time()
+        t_sltp = t1 - t0
+        if debug:
+            print("Loop sltp:", round_to_n(t_sltp, 4))
+            print()
+
+    else:
+        take_profit_candidates = np.arange(1.0, max_take_profit + step, step)
+
+        stop_loss_candidates = np.arange(0.0, 1.0 - step, step)
+
+        stop_loss_take_profit_wealths_dict = {}
+        t0 = time.time()
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers = workers) as executor:
+            futures = {executor.submit(
+                get_stop_loss_take_profit_wealth,
+                side,
+                stop_loss_take_profit_type,
+                trade_wealths_dict,
+                sub_trade_wealths_dict,
+                take_profit_candidates,
+                stop_loss_candidates,
+                trail_value_recalc_period = trail_value_recalc_period
+            ): (side, stop_loss_take_profit_type) for stop_loss_take_profit_type, side in \
+                    product(stop_loss_take_profit_types, sides)}
+
+            for future in concurrent.futures.as_completed(futures):
+                side, stop_loss_take_profit_type = futures[future]
+
+                if side not in stop_loss_take_profit_wealths_dict:
+                    stop_loss_take_profit_wealths_dict[side] = {}
+
+                stop_loss_take_profit_wealths_dict[side][stop_loss_take_profit_type] = future.result()
+
+        t1 = time.time()
+        t_sltp = t1 - t0
+        if debug:
+            print("Loop sltp 1:", round_to_n(t_sltp, 4))
+            print()
+
+        best_stop_loss_take_profit_wealths_dict = {}
+
+        for side in sides:
+
+            best_sltp_type = None
+            best_param = -1
+            best_wealth = -1
+
+            for sltp_type in stop_loss_take_profit_wealths_dict[side].keys():
+                wealths = apply_commissions_and_spreads(
+                    stop_loss_take_profit_wealths_dict[side][sltp_type],
+                    0,
+                    0.0,
+                    0.0,
+                    n_months = total_months,
+                    from_log = True
+                )
+                i = np.argmax(wealths)
+
+                candidate_params = take_profit_candidates if sltp_type == 'take_profit' else stop_loss_candidates
+
+                stop_loss_take_profit_param = candidate_params[i]
+                stop_loss_take_profit_wealth = wealths[i]
+                if debug:
+                    print(side, sltp_type, i, stop_loss_take_profit_param, stop_loss_take_profit_wealth)
+
+                if stop_loss_take_profit_wealth > best_wealth:
+                    best_wealth = stop_loss_take_profit_wealth
+                    best_param = stop_loss_take_profit_param
+                    best_sltp_type = sltp_type
+
+            best_stop_loss_take_profit_wealths_dict[side] = (best_sltp_type, best_param, best_wealth)
+
+            if debug:
+                print()
+
+        t1 = time.time()
+        t_sltp = t1 - t0 - t_sltp
+        if debug:
+            print("Loop sltp 2:", round_to_n(t_sltp, 4))
+            print()
 
     stop_loss_take_profit_wealth = get_semi_adaptive_wealths(
         total_balance,
@@ -382,13 +560,18 @@ def get_objective_function(
         N_transactions_buy,
         N_transactions_sell,
         total_months,
-        debug = debug
+        debug = False #debug
     )
 
     stop_loss_take_profit_tuple = ()
 
-    for k, param, wealth in best_stop_loss_take_profit_wealths_dict.values():
-        stop_loss_take_profit_tuple += (k, round_to_n(param, 4))
+    for side, v in best_stop_loss_take_profit_wealths_dict.items():
+        wealth = v[-1]
+
+        # TODO: remove "side == 'long'"; requires some additional logic along the whole pipeline
+        if wealth > 1.0 or side == 'long':
+            new_tuple = tuple(round_to_n(x, 4) if not isinstance(x, str) else x for x in v[:-1])
+            stop_loss_take_profit_tuple += (side,) + new_tuple
 
     objective = stop_loss_take_profit_wealth ** (1 / 12)
 
@@ -397,8 +580,6 @@ def get_objective_function(
         "yearly profit": stop_loss_take_profit_wealth,
         "params": args + stop_loss_take_profit_tuple,
     }
-
-    # pbar.set_description(str(round_to_n(objective_dict[middle_spread], 4)))
 
     return params_dict
 
@@ -424,6 +605,7 @@ def find_optimal_aggregated_strategy(
         N_repeat_inp = None,
         objective_dict = None,
         step = 0.01,
+        place_take_profit_and_stop_loss_simultaneously = False,
         trail_value_recalc_period = None,
         verbose = True,
         disable = False,
@@ -509,6 +691,9 @@ def find_optimal_aggregated_strategy(
                             c_args,
                             strategy_type,
                             frequency,
+                            coin,
+                            m,
+                            m_bear,
                             N_repeat_inp,
                             sides,
                             X_origs,
@@ -520,6 +705,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                             trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
@@ -576,6 +762,9 @@ def find_optimal_aggregated_strategy(
                             args,
                             strategy_type,
                             frequency,
+                            coin,
+                            m,
+                            m_bear,
                             N_repeat_inp,
                             sides,
                             X_origs,
@@ -587,6 +776,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                             trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
@@ -603,6 +793,9 @@ def find_optimal_aggregated_strategy(
                             args,
                             strategy_type,
                             frequency,
+                            coin,
+                            m,
+                            m_bear,
                             N_repeat_inp,
                             sides,
                             X_origs,
@@ -614,6 +807,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                             trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
@@ -631,6 +825,9 @@ def find_optimal_aggregated_strategy(
                             args,
                             strategy_type,
                             frequency,
+                            coin,
+                            m,
+                            m_bear,
                             N_repeat_inp,
                             sides,
                             X_origs,
@@ -642,6 +839,7 @@ def find_optimal_aggregated_strategy(
                             total_balance,
                             potential_balances,
                             potential_spreads,
+                            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                             trail_value_recalc_period = trail_value_recalc_period,
                             workers = None,
                             debug = False
@@ -652,6 +850,7 @@ def find_optimal_aggregated_strategy(
         optimizer = BayesianOptimization(
             f = objective_fn,
             pbounds = bounds,
+            verbose = 2
         )
 
         if init_args is not None:
@@ -684,6 +883,7 @@ def save_optimal_parameters(
     m_bear = 3,
     N_repeat_inp = 40,
     step = 0.01,
+    place_take_profit_and_stop_loss_simultaneously = False,
     trail_value_recalc_period = None,
     skip_existing = False,
     verbose = True,
@@ -763,6 +963,7 @@ def save_optimal_parameters(
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = None,
                 step = step,
+                place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                 trail_value_recalc_period = trail_value_recalc_period,
                 verbose = verbose,
                 disable = disable,
@@ -789,6 +990,7 @@ def save_optimal_parameters(
                 N_repeat_inp = N_repeat_inp,
                 objective_dict = objective_dict,
                 step = step,
+                place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                 trail_value_recalc_period = trail_value_recalc_period,
                 verbose = verbose,
                 disable = disable,
@@ -800,10 +1002,14 @@ def save_optimal_parameters(
         if not debug:
             are_same = True
             if init_args is not None:
-                for i in range(len(params_dict_candidate['params'])):
-                    if params_dict_candidate['params'][i] != params_dict['params'][i]:
-                        are_same = False
-                        break
+                if len(params_dict_candidate['params']) != len(params_dict['params']):
+                    are_same = False
+
+                if are_same:
+                    for i in range(len(params_dict_candidate['params'])):
+                        if params_dict_candidate['params'][i] != params_dict['params'][i]:
+                            are_same = False
+                            break
 
             if are_same and init_args is not None:
                 if verbose:
@@ -824,6 +1030,7 @@ def get_adaptive_wealths_for_multiple_strategies(
         weights,
         N_repeat_inp = 60,
         compress = 60,#1440,
+        place_take_profit_and_stop_loss_simultaneously = False,
         trail_value_recalc_period = None,
         disable = False,
         verbose = True,
@@ -858,7 +1065,47 @@ def get_adaptive_wealths_for_multiple_strategies(
         rand_Ns = np.arange(0, min_aggregate_N * 60, min_aggregate_N * 60 // N_repeat)
 
     Xs_dict = {}
+    times_dict = {}
     wealths_dict = {}
+
+    for strategy_key in strategies.keys():
+        coin = strategy_key.split('_')[0]
+        if coin not in Xs_dict:
+            files = glob.glob(f'data/{coin}/*.json')
+            files.sort(key = get_time)
+            Xs, times = load_all_data(files, Xs_index, True)
+
+            if not isinstance(Xs, list):
+                Xs = [Xs]
+                times = [times]
+
+            Xs_dict[coin] = Xs
+            times_dict[coin] = times
+
+    if not isinstance(Xs_index, list):
+        Xs_index = [Xs_index]
+
+    # make the starting and ending times the same
+    for i in range(len(Xs_index)):
+        min_time = np.min([
+            v[i] for v in times_dict.values()
+        ])
+        max_time = np.max([
+            v[i] for v in times_dict.values()
+        ])
+
+        for coin in Xs_dict.keys():
+            time_diff_from_min = (times_dict[coin][i] - min_time) // 60
+            time_diff_to_max = (max_time - times_dict[coin][i]) // 60
+
+            if time_diff_from_min > 0:
+                Xs_dict[coin][i] = Xs_dict[coin][i][:-time_diff_from_min]
+
+            if time_diff_to_max > 0:
+                Xs_dict[coin][i] = Xs_dict[coin][i][time_diff_to_max:]
+
+    for i in range(len(Xs_index)):
+        assert(len(np.unique([len(Xs[i]) for Xs in Xs_dict.values()])) == 1)
 
     for strategy_key, strategy in strategies.items():
         strategy_type = strategy_key.split('_')[2]
@@ -870,21 +1117,15 @@ def get_adaptive_wealths_for_multiple_strategies(
         aggregate_N, w = args[:2]
 
         sltp_args = strategy['params'][len(parameter_names):]
-        short = len(sltp_args) == 4
+
+        if place_take_profit_and_stop_loss_simultaneously:
+            short = 'short' in sltp_args
+        else:
+            short = len(sltp_args) == 4
 
         get_buys_and_sells_fn = choose_get_buys_and_sells_fn(strategy_type)
 
         coin = strategy_key.split('_')[0]
-        if coin not in Xs_dict:
-            files = glob.glob(f'data/{coin}/*.json')
-            files.sort(key = get_time)
-            Xs = load_all_data(files, Xs_index)
-
-            if not isinstance(Xs, list):
-                Xs = [Xs]
-
-            Xs_dict[coin] = Xs
-
         Xs = Xs_dict[coin]
 
         N_years = max(len(X) for X in Xs) / minutes_in_a_year
@@ -948,6 +1189,7 @@ def get_adaptive_wealths_for_multiple_strategies(
                     total_balance = total_balance,
                     potential_balances = potential_balances,
                     potential_spreads = potential_spreads,
+                    place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
                     trail_value_recalc_period = trail_value_recalc_period,
                     commissions = commissions,
                     short = short,
@@ -991,6 +1233,7 @@ def save_wealths(
     weights,
     N_repeat_inp = 60,
     compress = 60,#1440,
+    place_take_profit_and_stop_loss_simultaneously = False,
     trail_value_recalc_period = None,
     disable = False,
     verbose = True,
@@ -1003,6 +1246,7 @@ def save_wealths(
         weights = weights,
         N_repeat_inp = N_repeat_inp,
         compress = compress,
+        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
         trail_value_recalc_period = trail_value_recalc_period,
         disable = disable,
         verbose = verbose,
@@ -1078,6 +1322,7 @@ def optimize_weights_iterative(
     m_bears = [0, 3],
     n_iter = 20,
     compress = None,
+    place_take_profit_and_stop_loss_simultaneously = False,
     init_trail_value_recalc_period = None):
 
     strategies, weights = get_filtered_strategies_and_weights(
@@ -1121,6 +1366,7 @@ def optimize_weights_iterative(
             weights = weights,
             N_repeat_inp = 5,
             compress = compress,
+            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
             trail_value_recalc_period = trail_value_recalc_period,
             disable = True,
             verbose = False,
@@ -1131,14 +1377,14 @@ def optimize_weights_iterative(
 
         weights, a, b, c = optimize_weights(compress, save = True, verbose = False)
 
-        would_be_strategies, _ = get_filtered_strategies_and_weights(
-            coins = coins,
-            freqs = freqs,
-            strategy_types = strategy_types,
-            ms = ms,
-            m_bears = m_bears,
-            filter = True
-        )
+        # would_be_strategies, _ = get_filtered_strategies_and_weights(
+        #     coins = coins,
+        #     freqs = freqs,
+        #     strategy_types = strategy_types,
+        #     ms = ms,
+        #     m_bears = m_bears,
+        #     filter = True
+        # )
         # trail_value_recalc_period = get_average_trading_period(would_be_strategies)
         # print(trail_value_recalc_period)
 
@@ -1160,9 +1406,12 @@ def plot_weighted_adaptive_wealths(
     m_bears = [0, 3],
     N_repeat = 1,
     compress = None,
+    place_take_profit_and_stop_loss_simultaneously = False,
     trail_value_recalc_period = None,
     randomize = True,
-    Xs_index = [0, 1]):
+    Xs_index = [0, 1],
+    active_balancing = False
+    ):
 
     plt.style.use('seaborn')
 
@@ -1210,6 +1459,7 @@ def plot_weighted_adaptive_wealths(
             weights,
             N_repeat_inp = 1,
             compress = compress,
+            place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
             trail_value_recalc_period = trail_value_recalc_period,
             disable = True,
             verbose = False,
@@ -1225,49 +1475,52 @@ def plot_weighted_adaptive_wealths(
         wealth = (weighted_wealths[-1] / weighted_wealths[0])  ** (minutes_in_a_year / (len(df) * compress))
         print("Non-balanced wealth (yearly):", round_to_n(wealth, 4))
 
-        X_change = X[1:, :] / X[:-1, :]
-
-        new_weights = X_change * weight_values.reshape(1, -1)
-        balanced_wealths = np.zeros((len(X),))
-
-        for i in range(new_weights.shape[0]):
-            new_weights_relative = new_weights[i] / np.sum(new_weights[i])
-            new_weights_relative = apply_taxes(new_weights_relative / weight_values) * weight_values
-            new_weights[i] = new_weights_relative * np.sum(new_weights[i])
-
-            li_neg = X_change[i, :] < 1
-            li_pos = ~li_neg
-
-            total_commisions_and_spread = []
-
-            spread_dict = {}
-
-            for j, key in enumerate(keys):
-                coin = key.split('_')[0]
-                m, m_bear = tuple([int(x) for x in key.split('_')[3:]])
-
-                if coin not in spread_dict:
-                    spread_dict[coin] = potential_spreads[(coin, m, m_bear)][np.argmin(np.abs(potential_balances - total_balance))]
-
-                spread = spread_dict[coin]
-
-                total_commisions_and_spread.append(np.abs(weight_values[j] - new_weights_relative[j]) * (commissions + spread))
-
-            total_commisions_and_spread = np.array(total_commisions_and_spread)
-            total_commisions_and_spread = np.log(1 - np.sum(total_commisions_and_spread[li_neg])) + \
-                np.log(1 - np.sum(total_commisions_and_spread[li_pos]))
-            balanced_wealths[i + 1] = balanced_wealths[i] + np.log(np.sum(new_weights[i])) + total_commisions_and_spread
-
-        balanced_wealths = np.exp(balanced_wealths)
-
-        balanced_wealth = balanced_wealths[-1] ** (minutes_in_a_year / (len(df) * compress))
-        print("Balanced wealth (yearly):", round_to_n(balanced_wealth, 4))
-        print("Improvement:", round_to_n(balanced_wealth / wealth, 4))
-        print()
-
         plt.plot(X, 'k', alpha = 0.25 / np.sqrt(N_repeat))
         plt.plot(weighted_wealths, 'b', alpha = 1.0 / np.sqrt(N_repeat))
-        plt.plot(balanced_wealths, 'g', alpha = 1.0 / np.sqrt(N_repeat))
+
+        if active_balancing:
+            X_change = X[1:, :] / X[:-1, :]
+
+            new_weights = X_change * weight_values.reshape(1, -1)
+            balanced_wealths = np.zeros((len(X),))
+
+            for i in range(new_weights.shape[0]):
+                new_weights_relative = new_weights[i] / np.sum(new_weights[i])
+                new_weights_relative = apply_taxes(new_weights_relative / weight_values) * weight_values
+                new_weights[i] = new_weights_relative * np.sum(new_weights[i])
+
+                li_neg = X_change[i, :] < 1
+                li_pos = ~li_neg
+
+                total_commisions_and_spread = []
+
+                spread_dict = {}
+
+                for j, key in enumerate(keys):
+                    coin = key.split('_')[0]
+                    m, m_bear = tuple([int(x) for x in key.split('_')[3:]])
+
+                    if coin not in spread_dict:
+                        spread_dict[coin] = potential_spreads[(coin, m, m_bear)][np.argmin(np.abs(potential_balances - total_balance))]
+
+                    spread = spread_dict[coin]
+
+                    total_commisions_and_spread.append(np.abs(weight_values[j] - new_weights_relative[j]) * (commissions + spread))
+
+                total_commisions_and_spread = np.array(total_commisions_and_spread)
+                total_commisions_and_spread = np.log(1 - np.sum(total_commisions_and_spread[li_neg])) + \
+                    np.log(1 - np.sum(total_commisions_and_spread[li_pos]))
+                balanced_wealths[i + 1] = balanced_wealths[i] + np.log(np.sum(new_weights[i])) + total_commisions_and_spread
+
+            balanced_wealths = np.exp(balanced_wealths)
+
+            balanced_wealth = balanced_wealths[-1] ** (minutes_in_a_year / (len(df) * compress))
+            print("Balanced wealth (yearly):", round_to_n(balanced_wealth, 4))
+            print("Improvement:", round_to_n(balanced_wealth / wealth, 4))
+
+            plt.plot(balanced_wealths, 'g', alpha = 1.0 / np.sqrt(N_repeat))
+
+        print()
 
     plt.yscale('log')
     plt.show()
@@ -1279,6 +1532,7 @@ def get_displacements(
     ms = [1, 3],
     m_bears = [0, 3],
     sep = 2,
+    place_take_profit_and_stop_loss_simultaneously = False,
     trail_value_recalc_period = None,
     Xs_index = [0, 1],
     plot = True,
@@ -1289,7 +1543,7 @@ def get_displacements(
     client = FtxClient(ftx_api_key, ftx_secret_key)
 
     # as long as cryptocompare is used in trade.py, displacements can only be
-    # calculateed for frequency == 'high' strategies 
+    # calculateed for frequency == 'high' strategies
     strategies, weights = get_filtered_strategies_and_weights(
         coins,
         ['high'],
@@ -1328,7 +1582,10 @@ def get_displacements(
         aggregate_N = args[0]
 
         sltp_args = strategy['params'][len(parameter_names):]
-        short = len(sltp_args) == 4
+        if place_take_profit_and_stop_loss_simultaneously:
+            short = 'short' in sltp_args
+        else:
+            short = len(sltp_args) == 4
 
         sides = ['long']
         if short:
@@ -1407,30 +1664,53 @@ def get_displacements(
                 stop_loss_take_profit_wealths_dict = {}
 
                 for i, side in enumerate(sides):
-                    sltp_type = sltp_args[i * 2]
-                    sltp_param = sltp_args[i * 2 + 1]
+                    if place_take_profit_and_stop_loss_simultaneously:
+                        take_profit = sltp_args[i * 4 + 1]
+                        stop_loss_type = sltp_args[i * 4 + 2]
+                        stop_loss = sltp_args[i * 4 + 3]
 
-                    wealth_log = get_stop_loss_take_profit_wealth(
-                        side,
-                        sltp_type,
-                        trade_wealths_dict,
-                        sub_trade_wealths_dict,
-                        [sltp_param],
-                        [sltp_param],
-                        trail_value_recalc_period = trail_value_recalc_period
-                    )
-                    wealth_log = wealth_log[0]
+                        wealth = get_stop_loss_take_profit_wealths_from_sub_trades(
+                            sub_trade_wealths_dict[side]['base'],
+                            sub_trade_wealths_dict[side]['min'],
+                            sub_trade_wealths_dict[side]['max'],
+                            stop_loss = stop_loss,
+                            stop_loss_type_is_trailing = stop_loss_type == 'trailing',
+                            take_profit = take_profit,
+                            total_months = total_months,
+                            trail_value_recalc_period = trail_value_recalc_period,
+                            return_total = True,
+                            return_as_log = False,
+                            taxes = True
+                        )
 
-                    wealth = apply_commissions_and_spreads(
-                        wealth_log,
-                        0,
-                        0.0,
-                        0.0,
-                        n_months = total_months,
-                        from_log = True
-                    )
+                        stop_loss_take_profit_wealths_dict[side] = \
+                            (side, take_profit, stop_loss_type, stop_loss, wealth)
 
-                    stop_loss_take_profit_wealths_dict[side] = (sltp_type, sltp_param, wealth)
+                    else:
+                        sltp_type = sltp_args[i * 2]
+                        sltp_param = sltp_args[i * 2 + 1]
+
+                        wealth_log = get_stop_loss_take_profit_wealth(
+                            side,
+                            sltp_type,
+                            trade_wealths_dict,
+                            sub_trade_wealths_dict,
+                            [sltp_param],
+                            [sltp_param],
+                            trail_value_recalc_period = trail_value_recalc_period
+                        )
+                        wealth_log = wealth_log[0]
+
+                        wealth = apply_commissions_and_spreads(
+                            wealth_log,
+                            0,
+                            0.0,
+                            0.0,
+                            n_months = total_months,
+                            from_log = True
+                        )
+
+                        stop_loss_take_profit_wealths_dict[side] = (sltp_type, sltp_param, wealth)
 
                 wealth = get_semi_adaptive_wealths(
                     total_balance,
@@ -1516,6 +1796,7 @@ def save_displacements(
     ms = [1, 3],
     m_bears = [0, 3],
     sep = 2,
+    place_take_profit_and_stop_loss_simultaneously = False,
     trail_value_recalc_period = None,
     Xs_index = [0, 1],
     plot = True,
@@ -1528,6 +1809,7 @@ def save_displacements(
         ms = ms,
         m_bears = m_bears,
         sep = sep,
+        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
         trail_value_recalc_period = trail_value_recalc_period,
         Xs_index = Xs_index,
         plot = plot,
@@ -1557,8 +1839,9 @@ if __name__ == '__main__':
     N_iter = None
     m = 3
     m_bear = 3
-    N_repeat_inp = 40
+    N_repeat_inp = 10
     step = 0.01
+    place_take_profit_and_stop_loss_simultaneously = True
     trail_value_recalc_period = None
     skip_existing = False
     verbose = True
@@ -1566,69 +1849,73 @@ if __name__ == '__main__':
     short = True
     Xs_index = [0, 1]
     debug = False
+    active_balancing = False
 
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = frequencies,
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = m,
-        m_bear = m_bear,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = short,
-        Xs_index = Xs_index,
-        debug = debug
-    )
-
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = ['low'],
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = 1,
-        m_bear = 0,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = False,
-        Xs_index = Xs_index,
-        debug = debug
-    )
-
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = ['low'],
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = 1,
-        m_bear = 1,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = short,
-        Xs_index = Xs_index,
-        debug = debug
-    )
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = coins,
+    #     frequencies = frequencies,
+    #     strategy_types = strategy_types,
+    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    #     N_iter = N_iter,
+    #     m = m,
+    #     m_bear = m_bear,
+    #     N_repeat_inp = N_repeat_inp,
+    #     step = step,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period = trail_value_recalc_period,
+    #     skip_existing = skip_existing,
+    #     verbose = verbose,
+    #     disable = disable,
+    #     short = short,
+    #     Xs_index = Xs_index,
+    #     debug = debug
+    # )
+    #
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = coins,
+    #     frequencies = ['low'],
+    #     strategy_types = strategy_types,
+    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    #     N_iter = N_iter,
+    #     m = 1,
+    #     m_bear = 0,
+    #     N_repeat_inp = N_repeat_inp,
+    #     step = step,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period = trail_value_recalc_period,
+    #     skip_existing = skip_existing,
+    #     verbose = verbose,
+    #     disable = disable,
+    #     short = False,
+    #     Xs_index = Xs_index,
+    #     debug = debug
+    # )
+    #
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = coins,
+    #     frequencies = ['low'],
+    #     strategy_types = strategy_types,
+    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    #     N_iter = N_iter,
+    #     m = 1,
+    #     m_bear = 1,
+    #     N_repeat_inp = N_repeat_inp,
+    #     step = step,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period = trail_value_recalc_period,
+    #     skip_existing = skip_existing,
+    #     verbose = verbose,
+    #     disable = disable,
+    #     short = short,
+    #     Xs_index = Xs_index,
+    #     debug = debug
+    # )
 
     n_iter = 10
     compress = 1440
@@ -1643,6 +1930,7 @@ if __name__ == '__main__':
         m_bears = m_bears,
         n_iter = n_iter,
         compress = compress,
+        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
         init_trail_value_recalc_period = None
     )
 
@@ -1655,6 +1943,7 @@ if __name__ == '__main__':
         ms = ms,
         m_bears = m_bears,
         sep = sep,
+        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
         trail_value_recalc_period = None,
         Xs_index = Xs_index,
         plot = plot,
@@ -1673,7 +1962,9 @@ if __name__ == '__main__':
         m_bears = m_bears,
         N_repeat = N_repeat,
         compress = None,
+        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
         trail_value_recalc_period = None,
         randomize = randomize,
-        Xs_index = Xs_index
+        Xs_index = Xs_index,
+        active_balancing = active_balancing
     )

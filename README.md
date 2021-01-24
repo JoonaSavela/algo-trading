@@ -68,25 +68,25 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
     - rename `m` and `m_bear`
 - create appealing visualizations for real-world performance
 - make a `requirements.txt`
+- calculate the average price limits of the orderbooks (25% of the orderbook), take this price limit into account in the strategy
 
 ### `data.py`
 
 - update old data gathering/saving code to use pandas
-- transfer into using FTX API instead of cryptocompare?
+- transfer into using FTX API instead of cryptocompare
+    - or start using both, and eventually transfer to FTX API
 
 
 ### `parameter_search.py`
 
-- change stop loss & take profit implementation such that each strategy places one take profit order and simultaneously either a stop loss or a trailing stop loss order
-    - try different optimization methods (bayesian optimization basin-hopping, ...), analyze running time & correctness -> choose the best one
-        - apply multiple attribute value theory to make a decision? unless the choice is obvious
-        - for each base parameter combination (e.g. (12, 41)), save the resulting optimal take profit/stop loss parameters so that they can be used as initial guesses in the future
-    - check that this can be done in ftx
+- implement orderbook price limits (25 % of the orderbook)
 - automate result visualization (saving)
+- rename to `optimize.py` or something similar
 
 
 ### `trade.py`
 
+- implement simultaneous take profit and stop loss orders
 - refactor code
     - only use "trigger order" or "conditional order" (not both) when naming variables/functions
 - make transitioning from an old strategy/parameters as smooth as possible
@@ -101,5 +101,13 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
 ### `taxes.py`
 
 - finish function for calculating taxes
+
+### `utils.py`
+
+-
+
+### `optimize.py`
+
+- rename to `optimize_utils.py`or something similar
 
 
