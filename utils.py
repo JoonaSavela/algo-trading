@@ -444,10 +444,28 @@ def std(X, window_size):
         X = X.reshape(-1, 1)
     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 
-def sma(X, window_size):
+def sma_old(X, window_size):
     if len(X.shape) == 1:
         X = X.reshape(-1, 1)
     return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
+
+def sma(X, window_size):
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+
+    S = np.sum(X[:window_size, 0])
+    res = [S]
+
+    for i in range(len(X) - window_size):
+        S += X[i + window_size, 0] - X[i, 0]
+        res.append(S)
+
+    res = np.array(res) / window_size
+
+    # assert(np.allclose(res, sma_old(X, window_size)))
+
+    return res
+
 
 # TODO: make this faster with concurrent.futures!
 def stochastic_oscillator(X, window_size = 3 * 14, k = 1):
