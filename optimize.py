@@ -602,10 +602,11 @@ def get_stop_loss_take_profit_wealths_from_sub_trades(
     stop_loss,
     stop_loss_type_is_trailing,
     take_profit,
-    total_months,
+    total_months = 1,
     trail_value_recalc_period = None,
     return_total = True,
     return_as_log = False,
+    return_latest_trigger_status = False,
     taxes = True
     ):
     trade_wealths = np.array([
@@ -686,7 +687,10 @@ def get_stop_loss_take_profit_wealths_from_sub_trades(
             if cond_stop_loss2:
                 i_stop_loss = idx[li_stop_loss][0]
 
+        trigger_triggered = False
+
         if cond_stop_loss2:
+            trigger_triggered = True
             if cond_take_profit:
                 if stop_loss_type_is_trailing:
                     # handle both cases of triggered trailing prices here (not just the minimum)
@@ -705,8 +709,17 @@ def get_stop_loss_take_profit_wealths_from_sub_trades(
             else:
                 trade_wealths[i] = stop_loss_trigger_price
         elif cond_take_profit:
+            trigger_triggered = True
             trade_wealths[i] = take_profit
 
+    if return_latest_trigger_status:
+        return return_trade_wealths(
+            trade_wealths,
+            total_months,
+            taxes = taxes,
+            return_total = return_total,
+            return_as_log = return_as_log
+        ), trigger_triggered
 
     return return_trade_wealths(
         trade_wealths,
