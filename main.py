@@ -21,6 +21,7 @@ from pypfopt import risk_models, expected_returns, black_litterman, \
 from pypfopt import BlackLittermanModel
 import multiprocessing
 from ciso8601 import parse_datetime
+from collections import deque
 
 
 # TODO: add comments; improve readability
@@ -111,10 +112,65 @@ def get_all_price_data(client, market):
 
 
 
+def get_buy_value_from_buy_history(buy_history, sell_size, verbose = False):
+    buy_prices = []
+    buy_sizes = []
+
+    while sell_size > 0 and buy_history:
+        buy_price, buy_size = buy_history.popleft()
+
+        size_diff = min(sell_size, buy_size)
+        sell_size -= size_diff
+        buy_size -= size_diff
+
+        buy_prices.append(buy_price)
+        buy_sizes.append(size_diff)
+
+        if buy_size > 0:
+            buy_history.appendleft((buy_price, buy_size))
+
+    if verbose:
+        print(buy_history)
+        print(buy_prices)
+        print(buy_sizes)
+
+    return np.dot(buy_prices, buy_sizes)
 
 
 
 def main():
+
+
+    # (price, size)
+    # buy1 = (1234.0, 0.2)
+    # buy2 = (1534.1, 0.36)
+    # buy3 = (1434.1, 0.1)
+    #
+    # symbol = 'ETHBULL'
+    # buy_history = {
+    #     symbol: deque()
+    # }
+    #
+    # buy_history[symbol].append(buy1)
+    # buy_history[symbol].append(buy2)
+    # buy_history[symbol].append(buy3)
+    #
+    # print(buy_history)
+    #
+    # sell_price, sell_size = (2643.12, 0.3)
+    # sell_value = sell_price * sell_size
+    # print(sell_value)
+    #
+    # buy_value = get_buy_value_from_buy_history(buy_history[symbol], sell_size, verbose = True)
+    #
+    # print(buy_history)
+    # print(buy_value)
+    # profit = sell_value / buy_value
+    # print(profit)
+
+
+
+
 
     # m = 3
     # m_bear = 3
@@ -254,7 +310,7 @@ def main():
     # plt.show()
 
 
-    # client = FtxClient(ftx_api_key, ftx_secret_key)
+    client = FtxClient(ftx_api_key, ftx_secret_key)
     #
     # X = get_all_price_data(
     #     client = client,
@@ -265,11 +321,15 @@ def main():
     # print(len(X))
     # print(len(X['startTime'].unique()))
 
-    # X = client.get_historical_prices(
-    #     market = 'ETH/USD',
-    #     resolution = 60,
-    #     limit = 50,
-    # )
+    X = client.get_historical_prices(
+        market = 'ETHBULL/USD',
+        resolution = 60,
+        limit = 1,
+        end_time = 1608472680,
+        start_time = 1608472680
+    )
+    print(X)
+
     #
     # X = pd.DataFrame(X)
     #
@@ -400,7 +460,7 @@ def main():
     #     debug = False
     # )
 
-    visualize_spreads()
+    # visualize_spreads()
 
 
     # coins = ['ETH', 'BTC']
@@ -423,20 +483,20 @@ def main():
     #     debug = True
     # )
 
-    plot_weighted_adaptive_wealths(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        ms = [1, 3],
-        m_bears = [0, 3],
-        N_repeat = 1,
-        compress = None,
-        place_take_profit_and_stop_loss_simultaneously = True,
-        trail_value_recalc_period = None,
-        randomize = False,
-        Xs_index = [0, 1],
-        active_balancing = False
-    )
+    # plot_weighted_adaptive_wealths(
+    #     coins = ['ETH', 'BTC'],
+    #     freqs = ['low', 'high'],
+    #     strategy_types = ['ma', 'macross'],
+    #     ms = [1, 3],
+    #     m_bears = [0, 3],
+    #     N_repeat = 1,
+    #     compress = None,
+    #     place_take_profit_and_stop_loss_simultaneously = True,
+    #     trail_value_recalc_period = None,
+    #     randomize = False,
+    #     Xs_index = [0, 1],
+    #     active_balancing = False
+    # )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
 

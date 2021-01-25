@@ -68,7 +68,6 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
     - rename `m` and `m_bear`
 - create appealing visualizations for real-world performance
 - make a `requirements.txt`
-- calculate the average price limits of the orderbooks (25% of the orderbook), take this price limit into account in the strategy
 
 ### `data.py`
 
@@ -79,23 +78,19 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
 
 ### `parameter_search.py`
 
-- implement orderbook price limits (25 % of the orderbook)
+- implement/calculate orderbook price limits (25 % of the orderbook), take this price limit into account in the strategies
 - automate result visualization (saving)
 - rename to `optimize.py` or something similar
 
 
 ### `trade.py`
 
-- implement simultaneous take profit and stop loss orders
 - refactor code
     - only use "trigger order" or "conditional order" (not both) when naming variables/functions
-- make transitioning from an old strategy/parameters as smooth as possible
-    - using deques is probably the simplest way
-        - how to save a dict of deques?
-- instead of creating 'prev_x' columns, create a copy of `buy_info`, and pass both the copy and the updated data frame into `process_trades`
-- instead of asking if to wait for signal to change for each strategy, get the time when the signal changed
-    - get the historical price from ftx
-    - only do this for frequency='low' strategies?
+- get the latest available time from `parameter_search.py` in addition to latest signal change time
+    - latest time can be used to check if signal has changed between last run of `parameter_search.py` and now
+- remove option to load buy_info from file? or only load weights?
+    - also no need to save buy_info to file? or only weights?
 
 
 ### `taxes.py`
