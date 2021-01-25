@@ -6,6 +6,7 @@ from scipy import stats
 from itertools import product
 import os
 import time
+from parameters import tax_rate
 
 # matplotlib is not installed in cloud since it is not needed
 try:
@@ -30,8 +31,7 @@ def get_symbol(coin, m, bear = False):
     return res
 
 
-# TODO: move tax_rate into parameters.py
-def apply_taxes(trade_wealths, tax_rate = 0.34, copy = False):
+def apply_taxes(trade_wealths, copy = False):
     if isinstance(trade_wealths, float):
         if trade_wealths > 1:
             trade_wealths = (trade_wealths - 1) * (1 - tax_rate) + 1
