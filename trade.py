@@ -573,6 +573,7 @@ def process_trades(
             buy_info.loc[strategy_key, 'size'] = size
 
             for trigger_name_col, trigger_param_col, trigger_order_id_col in trigger_order_columns:
+                # TODO: proces case when active_balancing = True correctly
                 id, size = place_trigger_order(
                     client,
                     symbol,
@@ -891,7 +892,7 @@ def trading_pipeline(
     triggered = {}
 
     for k in strategies.keys():
-        displacements[k] = displacements_and_last_signal_change_time[k][0]
+        displacements[k] = int(displacements_and_last_signal_change_time[k][0])
         last_signal_change_times[k] = displacements_and_last_signal_change_time[k][2]
         triggered[k] = displacements_and_last_signal_change_time[k][3]
 
@@ -930,8 +931,11 @@ def trading_pipeline(
                 if i in buy_info.index and c in buy_info.columns:
                     buy_info.loc[i, c] = prev_buy_info.loc[i, c]
 
+    initial_action_flag = False
 
     if not buy_info_from_file or not strategies_match_exactly:
+        initial_action_flag = True
+
         total_balance = get_total_balance(client, separate = False)
 
         for key in strategy_keys:
@@ -950,7 +954,6 @@ def trading_pipeline(
     prev_buy_state = {key: buy_info.loc[key, 'buy_state'] for key in strategy_keys}
 
     error_flag = True
-    initial_action_flag = True
 
     seconds = time.time()
     localtime = time.localtime(seconds)
@@ -1098,18 +1101,14 @@ def trading_pipeline(
                             buy_info.loc[key, 'buy_state'] = np.nan
                             buy_info.loc[key, 'buy_price'] = np.nan
                             buy_info.loc[key, 'size'] = np.nan
-                            if place_take_profit_and_stop_loss_simultaneously:
-                                buy_info.loc[key, 'trigger_name'] = np.nan
-                                buy_info.loc[key, 'trigger_param'] = np.nan
-                                buy_info.loc[key, 'trigger_order_id'] = np.nan
+                            buy_info.loc[key, 'trigger_name'] = np.nan
+                            buy_info.loc[key, 'trigger_param'] = np.nan
+                            buy_info.loc[key, 'trigger_order_id'] = np.nan
 
+                            if place_take_profit_and_stop_loss_simultaneously:
                                 buy_info.loc[key, 'trigger_name2'] = np.nan
                                 buy_info.loc[key, 'trigger_param2'] = np.nan
                                 buy_info.loc[key, 'trigger_order_id2'] = np.nan
-                            else:
-                                buy_info.loc[key, 'trigger_name'] = np.nan
-                                buy_info.loc[key, 'trigger_param'] = np.nan
-                                buy_info.loc[key, 'trigger_order_id'] = np.nan
 
                             buy_info.loc[key, 'changed'] = True
 
