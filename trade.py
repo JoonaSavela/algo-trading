@@ -497,8 +497,7 @@ def process_trades(
             price = ftx_price(client, symbol)
             size = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
             size = sell_assets(client, symbol, size, round_n = 5, debug = debug)
-            if verbose:
-                print(f'Sell ({symbol}):\n\tsize: {size}\n\tprice: {price}')
+            print(f'Sell ({symbol}):\n\tsize: {size}\n\tprice: {price}')
 
             sell_prices = append_to_dict_of_collections(sell_prices, symbol, price)
             sell_sizes = append_to_dict_of_collections(sell_sizes, symbol, size)
@@ -548,6 +547,10 @@ def process_trades(
             # update weight diffs
             weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, target_symbols)
 
+            if verbose:
+                print(weight_diffs)
+
+
     if not debug:
         time.sleep(1)
 
@@ -556,10 +559,9 @@ def process_trades(
 
     for symbol, weight_diff in weight_diffs[li_pos].items():
         if symbol != source_symbol and weight_diff > min_amount:
-            usd_size = weight_diff / actual_weights[symbol] * total_balance
+            usd_size = weight_diff * total_balance
             size, price = buy_assets(client, symbol, usd_size, round_n = 5, debug = debug, return_price = True)
-            if verbose:
-                print(f'Buy ({symbol}):\n\tsize: {size}\n\tprice: {price}')
+            print(f'Buy ({symbol}):\n\tsize: {size}\n\tprice: {price}')
 
             buy_history = append_to_dict_of_collections(
                 buy_history,
@@ -1123,6 +1125,11 @@ def trading_pipeline(
 
                             buy_info.loc[key, 'changed'] = True
 
+                if not initial_action_flag:
+                    for key in keys:
+                        if buy_info.loc[key, 'changed']:
+                            triggered[key] = False
+
                 if active_balancing or buy_info['changed'].any():
                     buy_info, buy_history = process_trades(
                         client,
@@ -1134,14 +1141,14 @@ def trading_pipeline(
                         active_balancing,
                         taxes = taxes,
                         debug = debug,
-                        verbose = debug
+                        verbose = True
                     )
 
             counter = (counter + gcd) % lcm
 
             wait(60 * 60 * gcd, timeTo0, verbose = debug)
             initial_action_flag = False
-            triggered = None
+            # triggered = None
 
             if debug:
                 break
