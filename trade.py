@@ -497,6 +497,8 @@ def process_trades(
             price = ftx_price(client, symbol)
             size = np.abs(weight_diff / actual_weights[symbol]) * balances['total'][symbol]
             size = sell_assets(client, symbol, size, round_n = 5, debug = debug)
+            if verbose:
+                print(f'Sell ({symbol}):\n\tsize: {size}\n\tprice: {price}')
 
             sell_prices = append_to_dict_of_collections(sell_prices, symbol, price)
             sell_sizes = append_to_dict_of_collections(sell_sizes, symbol, size)
@@ -525,12 +527,16 @@ def process_trades(
                     # update usd_value
                     strategy_subset_li = buy_info.loc[strategy_key, 'changed'] & \
                         (buy_info.index.map(lambda x: prev_symbols[x]) == symbol)
-                    strategy_subset = buy_info.index[li]
+                    strategy_subset = buy_info.index[strategy_subset_li]
                     total_weight_of_subset = buy_info.loc[strategy_subset, 'weight'].sum()
 
                     for strategy_key in strategy_subset:
                         conditional_weight = buy_info.loc[strategy_key, 'weight'] / total_weight_of_subset
                         buy_info.loc[strategy_key, 'usd_value'] -= conditional_weight * amount_to_taxes
+
+        if verbose:
+            print(total_amount_to_taxes)
+            print()
 
         # transfer taxes into 'taxes' subaccount
         if total_amount_to_taxes > 0:
@@ -550,8 +556,10 @@ def process_trades(
 
     for symbol, weight_diff in weight_diffs[li_pos].items():
         if symbol != source_symbol and weight_diff > min_amount:
-            usd_size = weight_diff * total_balance
+            usd_size = weight_diff / actual_weights[symbol] * total_balance
             size, price = buy_assets(client, symbol, usd_size, round_n = 5, debug = debug, return_price = True)
+            if verbose:
+                print(f'Buy ({symbol}):\n\tsize: {size}\n\tprice: {price}')
 
             buy_history = append_to_dict_of_collections(
                 buy_history,
@@ -573,24 +581,27 @@ def process_trades(
             buy_info.loc[strategy_key, 'size'] = size
 
             for trigger_name_col, trigger_param_col, trigger_order_id_col in trigger_order_columns:
-                # TODO: proces case when active_balancing = True correctly
-                id, size = place_trigger_order(
-                    client,
-                    symbol,
-                    buy_info.loc[strategy_key, 'buy_price'],
-                    size,
-                    buy_info.loc[strategy_key, trigger_name_col],
-                    buy_info.loc[strategy_key, trigger_param_col],
-                    round_n = 5,
-                    debug = debug
-                )
+                if not pd.isna(trigger_param_col):
+                    # TODO: proces case when active_balancing = True correctly
+                    id, size = place_trigger_order(
+                        client,
+                        symbol,
+                        buy_info.loc[strategy_key, 'buy_price'],
+                        size,
+                        buy_info.loc[strategy_key, trigger_name_col],
+                        buy_info.loc[strategy_key, trigger_param_col],
+                        round_n = 5,
+                        debug = debug
+                    )
 
-                id = str(int(id)) if id is not None else id
-                buy_info.loc[strategy_key, trigger_order_id_col] = id
+                    id = str(int(id)) if id is not None else np.nan
+                    buy_info.loc[strategy_key, trigger_order_id_col] = id
 
-                if verbose:
-                    print(id, type(id))
-                    print(f'Placed order, size = {size}')
+                    if verbose:
+                        print(id, type(id))
+                        print(f'Placed order, size = {size}')
+                elif verbose:
+                    print(trigger_name_col, 'is NaN')
 
     # print all that was done
     print(buy_info.transpose())
