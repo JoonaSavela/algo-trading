@@ -372,7 +372,7 @@ def process_trades(
                 trigger_order_id = str(int(trigger_order_id))
 
             if trigger_order_id is None:
-                prev_triggered[strategy_key] = False
+                prev_triggered[strategy_key] = None
             else:
                 prev_triggered[strategy_key] = \
                     trigger_order_id not in open_trigger_orders or \
@@ -382,7 +382,7 @@ def process_trades(
 
         for strategy_key in prev_buy_info.index:
             trigger_order_id = prev_buy_info.loc[strategy_key, trigger_order_id_col]
-            if prev_triggered[strategy_key]:
+            if prev_triggered[strategy_key] == True:
                 trigger_name = prev_buy_info.loc[strategy_key, trigger_name_col]
                 if trigger_name == 'trailing':
                     end_time = time.time()
@@ -411,7 +411,7 @@ def process_trades(
         # cancel trigger orders
         for strategy_key in prev_buy_info.index:
             trigger_order_id = prev_buy_info.loc[strategy_key, trigger_order_id_col]
-            if not pd.isna(trigger_order_id) and not prev_triggered[strategy_key]:
+            if not pd.isna(trigger_order_id) and prev_triggered[strategy_key] == False:
                 cancel_conditional_order(client, trigger_order_id, debug = debug)
 
     prev_triggered = {}
@@ -423,18 +423,21 @@ def process_trades(
         if len(triggered_for_strategy) == 1:
             prev_triggered[strategy_key] = triggered_for_strategy[0]
         else:
+            # reduce(lambda x, y: x or y, [None, None]) == None
             prev_triggered[strategy_key] = reduce(
                 lambda x, y: x or y,
                 triggered_for_strategy
             )
 
+    if verbose:
+        print(prev_triggered)
 
     target_symbols = {}
     prev_symbols = {}
     for strategy_key in buy_info.index:
         changed = buy_info.loc[strategy_key, 'changed']
 
-        if (prev_triggered[strategy_key] and not changed) or triggered[strategy_key]:
+        if ((prev_triggered[strategy_key] == True) and not changed) or triggered[strategy_key]:
             symbol = source_symbol
         elif buy_info.loc[strategy_key, 'buy_state'] == True:
             symbol = get_symbol_from_key(strategy_key, bear = False)
@@ -446,7 +449,7 @@ def process_trades(
         target_symbols[strategy_key] = symbol
 
         if changed:
-            if prev_triggered[strategy_key]:
+            if prev_triggered[strategy_key] != False:
                 symbol = source_symbol
             elif prev_buy_info.loc[strategy_key, 'buy_state'] == True:
                 symbol = get_symbol_from_key(strategy_key, bear = False)
@@ -459,13 +462,14 @@ def process_trades(
 
     if verbose:
         print(target_symbols)
+        print(prev_symbols)
 
     sell_prices = {}
     sell_sizes = {}
 
     # update usd value of each strategy
     for strategy_key in buy_info.index:
-        if prev_triggered[strategy_key]:
+        if prev_triggered[strategy_key] == True:
             size = prev_buy_info.loc[strategy_key, 'size']
             buy_info.loc[strategy_key, 'usd_value'] = prev_trigger_prices[strategy_key] * size
 
@@ -474,7 +478,7 @@ def process_trades(
                 sell_sizes = append_to_dict_of_collections(sell_sizes, prev_symbols[strategy_key], size)
 
         elif prev_symbols[strategy_key] != source_symbol:
-            buy_price = prev_buy_info.loc[strategy_key, 'buy_price']
+            # buy_price = prev_buy_info.loc[strategy_key, 'buy_price']
             price = ftx_price(client, prev_symbols[strategy_key])
 
             size = prev_buy_info.loc[strategy_key, 'size']
