@@ -418,7 +418,7 @@ def process_trades(
 
     for strategy_key in prev_buy_info.index:
         triggered_for_strategy = [t[strategy_key] for t in prev_triggered_list]
-        assert(np.sum(triggered_for_strategy) <= 1)
+        assert(np.sum(triggered_for_strategy == True) <= 1)
 
         if len(triggered_for_strategy) == 1:
             prev_triggered[strategy_key] = triggered_for_strategy[0]
@@ -491,6 +491,7 @@ def process_trades(
     weight_diffs, target_weights, actual_weights, total_balance, balances = get_weight_diffs(client, buy_info, target_symbols)
 
     if verbose:
+        print(target_weights)
         print(weight_diffs)
 
     # sell negatives
@@ -905,13 +906,15 @@ def trading_pipeline(
             displacements_and_last_signal_change_time = json.load(file)
 
     displacements = {}
+    last_buy_signal = {}
     last_signal_change_times = {}
     triggered = {}
 
     for k in strategies.keys():
         displacements[k] = int(displacements_and_last_signal_change_time[k][0])
-        last_signal_change_times[k] = displacements_and_last_signal_change_time[k][2]
-        triggered[k] = displacements_and_last_signal_change_time[k][3]
+        last_buy_signal[k] = displacements_and_last_signal_change_time[k][2]
+        last_signal_change_times[k] = displacements_and_last_signal_change_time[k][3]
+        triggered[k] = displacements_and_last_signal_change_time[k][4]
 
     displacement_values = np.sort(np.array([v for v in displacements.values()]))
 
@@ -1056,7 +1059,10 @@ def trading_pipeline(
 
                             buy_info.loc[key, 'buy_state'] = True
 
-                            if initial_action_flag:
+                            if not last_buy_signal[key]:
+                                triggered[key] = False
+
+                            if initial_action_flag and last_buy_signal[key]:
                                 last_signal_change_time = last_signal_change_times[key] + \
                                     (time.time() - last_signal_change_times[key]) % (aggregate_N * 60 * 60)
                                 buy_info.loc[key, 'buy_price'] = \
@@ -1086,7 +1092,10 @@ def trading_pipeline(
 
                             buy_info.loc[key, 'buy_state'] = False
 
-                            if initial_action_flag:
+                            if last_buy_signal[key]:
+                                triggered[key] = False
+
+                            if initial_action_flag and last_buy_signal[key] == False:
                                 last_signal_change_time = last_signal_change_times[key] + \
                                     (time.time() - last_signal_change_times[key]) % (aggregate_N * 60 * 60)
                                 buy_info.loc[key, 'buy_price'] = \
@@ -1133,6 +1142,10 @@ def trading_pipeline(
                     for key in keys:
                         if buy_info.loc[key, 'changed']:
                             triggered[key] = False
+
+                if debug:
+                    print(buy_info.transpose())
+                    print(triggered)
 
                 if active_balancing or buy_info['changed'].any():
                     buy_info, buy_history = process_trades(
