@@ -637,7 +637,7 @@ def find_optimal_aggregated_strategy(
 
     # TODO: move this into a function
     potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-        np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
+        np.log10(total_balance * 500 * N_years), int(2000 * N_years))
     potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
     if short:
@@ -1134,7 +1134,7 @@ def get_adaptive_wealths_for_multiple_strategies(
         total_balance = max(total_balance, 1)
 
         potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-            np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
+            np.log10(total_balance * 500 * N_years), int(2000 * N_years))
         potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
         if short:
@@ -1446,7 +1446,7 @@ def plot_weighted_adaptive_wealths(
     print()
 
     potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-        np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
+        np.log10(total_balance * 500 * N_years), int(2000 * N_years))
     potential_spreads = {}
 
     for coin, m, m_bear in product(coins, ms, m_bears):
@@ -1569,6 +1569,7 @@ def get_displacements_and_last_signal_change_time(
     saved_times_dict = {}
     online_times_dict = {}
     wealths_dict = {}
+    last_buy_signal = {}
     last_signal_change_times = {}
     triggered = {}
 
@@ -1623,7 +1624,7 @@ def get_displacements_and_last_signal_change_time(
         total_balance = max(total_balance, 1)
 
         potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
-            np.log10(total_balance * 1000 * N_years), int(4000 * N_years))
+            np.log10(total_balance * 500 * N_years), int(2000 * N_years))
         potential_spreads = get_average_spread(coin, m, potential_balances, m_bear = m_bear)
 
         # TODO: move this into a function
@@ -1649,6 +1650,9 @@ def get_displacements_and_last_signal_change_time(
         for i in range(len(Xs)):
             X_orig, X, X_bear = X_origs[i], Xs[i], X_bears[i]
             buys_orig, sells_orig, N_orig = get_buys_and_sells_fn(X_orig, *args, from_minute = True)
+
+            if i == len(Xs) - 1:
+                last_buy_signal[strategy_key] = buys_orig[-1] > sells_orig[-1]
 
             last_signal_change_i = np.argwhere(buys_orig != buys_orig[-1]).flatten()[-1] + 1
             last_signal_change_time_candidate = saved_times[i] - \
@@ -1862,8 +1866,8 @@ def get_displacements_and_last_signal_change_time(
     res = {}
 
     for key in strategies.keys():
-        res[key] = displacements[key] + (last_signal_change_times[key],) + \
-            (triggered[key],)
+        res[key] = displacements[key] + (last_buy_signal[strategy_key],
+            last_signal_change_times[key], triggered[key])
 
     if verbose:
         print_dict(res)
@@ -1943,88 +1947,66 @@ if __name__ == '__main__':
     debug = False
     active_balancing = False
 
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = frequencies,
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = m,
-        m_bear = m_bear,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = short,
-        Xs_index = Xs_index,
-        debug = debug
-    )
-
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = ['low'],
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = 1,
-        m_bear = 0,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = False,
-        Xs_index = Xs_index,
-        debug = debug
-    )
-
-    save_optimal_parameters(
-        all_bounds = all_bounds,
-        all_resolutions = all_resolutions,
-        coins = coins,
-        frequencies = ['low'],
-        strategy_types = strategy_types,
-        stop_loss_take_profit_types = stop_loss_take_profit_types,
-        N_iter = N_iter,
-        m = 1,
-        m_bear = 1,
-        N_repeat_inp = N_repeat_inp,
-        step = step,
-        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period = trail_value_recalc_period,
-        skip_existing = skip_existing,
-        verbose = verbose,
-        disable = disable,
-        short = short,
-        Xs_index = Xs_index,
-        debug = debug
-    )
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = coins,
+    #     frequencies = frequencies,
+    #     strategy_types = strategy_types,
+    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    #     N_iter = N_iter,
+    #     m = m,
+    #     m_bear = m_bear,
+    #     N_repeat_inp = N_repeat_inp,
+    #     step = step,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period = trail_value_recalc_period,
+    #     skip_existing = skip_existing,
+    #     verbose = verbose,
+    #     disable = disable,
+    #     short = short,
+    #     Xs_index = Xs_index,
+    #     debug = debug
+    # )
+    #
+    # save_optimal_parameters(
+    #     all_bounds = all_bounds,
+    #     all_resolutions = all_resolutions,
+    #     coins = coins,
+    #     frequencies = frequencies,#['low'],
+    #     strategy_types = strategy_types,
+    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    #     N_iter = N_iter,
+    #     m = 1,
+    #     m_bear = 0,
+    #     N_repeat_inp = N_repeat_inp,
+    #     step = step,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period = trail_value_recalc_period,
+    #     skip_existing = skip_existing,
+    #     verbose = verbose,
+    #     disable = disable,
+    #     short = False,
+    #     Xs_index = Xs_index,
+    #     debug = debug
+    # )
 
     n_iter = 10
     compress = 1440
     ms = [1, 3]
     m_bears = [0, 1, 3]
 
-    optimize_weights_iterative(
-        coins = coins,
-        freqs = frequencies,
-        strategy_types = strategy_types,
-        ms = ms,
-        m_bears = m_bears,
-        n_iter = n_iter,
-        compress = compress,
-        place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
-        init_trail_value_recalc_period = None
-    )
+    # optimize_weights_iterative(
+    #     coins = coins,
+    #     freqs = frequencies,
+    #     strategy_types = strategy_types,
+    #     ms = ms,
+    #     m_bears = m_bears,
+    #     n_iter = n_iter,
+    #     compress = compress,
+    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    #     init_trail_value_recalc_period = None
+    # )
 
     sep = 2
     plot = True
