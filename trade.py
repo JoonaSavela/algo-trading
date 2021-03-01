@@ -449,7 +449,7 @@ def process_trades(
         target_symbols[strategy_key] = symbol
 
         if changed:
-            if prev_triggered[strategy_key] != False:
+            if prev_triggered[strategy_key] == None:
                 symbol = source_symbol
             elif prev_buy_info.loc[strategy_key, 'buy_state'] == True:
                 symbol = get_symbol_from_key(strategy_key, bear = False)
