@@ -22,6 +22,7 @@ from pypfopt import BlackLittermanModel
 import multiprocessing
 from ciso8601 import parse_datetime
 from collections import deque
+from functools import reduce
 
 
 # TODO: add comments; improve readability
@@ -140,6 +141,38 @@ def get_buy_value_from_buy_history(buy_history, sell_size, verbose = False):
 
 def main():
 
+    # total_balance = 4500
+    # N_years = 1.8
+    # coin = 'ETH'
+    #
+    # potential_balances = np.logspace(np.log10(total_balance / (10 * N_years)), \
+    #     np.log10(total_balance * 100 * N_years), int(2000 * N_years))
+    # print(potential_balances.shape)
+    # print(np.max(potential_balances))
+    #
+    # t0 = time.time()
+    # avg_spread = get_average_spread(
+    #     coin = coin,
+    #     m = 3,
+    #     total_balances = potential_balances,
+    #     m_bear = 3,
+    #     step = 0.0001
+    # )
+    #
+    # print("New:", round_to_n(time.time() - t0, 3))
+    #
+    # t0 = time.time()
+    # avg_spread_old = get_average_spread_old(
+    #     coin = coin,
+    #     m = 3,
+    #     total_balances = potential_balances,
+    #     m_bear = 3,
+    #     step = 0.0001
+    # )
+    #
+    # print("Old:", round_to_n(time.time() - t0, 3))
+    #
+    # assert np.allclose(avg_spread_old, avg_spread)
 
     # (price, size)
     # buy1 = (1234.0, 0.2)
@@ -310,7 +343,7 @@ def main():
     # plt.show()
 
 
-    client = FtxClient(ftx_api_key, ftx_secret_key)
+    # client = FtxClient(ftx_api_key, ftx_secret_key)
     #
     # X = get_all_price_data(
     #     client = client,
@@ -321,14 +354,14 @@ def main():
     # print(len(X))
     # print(len(X['startTime'].unique()))
 
-    X = client.get_historical_prices(
-        market = 'ETHBULL/USD',
-        resolution = 60,
-        limit = 1,
-        end_time = 1608472680,
-        start_time = 1608472680
-    )
-    print(X)
+    # X = client.get_historical_prices(
+    #     market = 'ETHBULL/USD',
+    #     resolution = 60,
+    #     limit = 1,
+    #     end_time = 1608472680,
+    #     start_time = 1608472680
+    # )
+    # print(X)
 
     #
     # X = pd.DataFrame(X)
@@ -483,20 +516,42 @@ def main():
     #     debug = True
     # )
 
-    # plot_weighted_adaptive_wealths(
-    #     coins = ['ETH', 'BTC'],
-    #     freqs = ['low', 'high'],
-    #     strategy_types = ['ma', 'macross'],
-    #     ms = [1, 3],
-    #     m_bears = [0, 3],
-    #     N_repeat = 1,
-    #     compress = None,
-    #     place_take_profit_and_stop_loss_simultaneously = True,
-    #     trail_value_recalc_period = None,
-    #     randomize = False,
-    #     Xs_index = [0, 1],
-    #     active_balancing = False
-    # )
+    ms = [1]
+    m_bears = [0]
+
+    balancing_period = get_optimal_balancing_period(
+        coins = ['ETH', 'BTC'],
+        freqs = ['low', 'high'],
+        strategy_types = ['ma', 'macross'],
+        ms = ms,
+        m_bears = m_bears,
+        N_repeat = 1,
+        w = 11,
+        max_balancing_period_in_days = 7,
+        place_take_profit_and_stop_loss_simultaneously = True,
+        trail_value_recalc_period = None,
+        randomize = True,
+        Xs_index = [0, 1],
+        plot = True,
+        taxes = False
+    )
+
+    plot_weighted_adaptive_wealths(
+        coins = ['ETH', 'BTC'],
+        freqs = ['low', 'high'],
+        strategy_types = ['ma', 'macross'],
+        ms = ms,
+        m_bears = m_bears,
+        N_repeat = 1,
+        compress = 60,
+        place_take_profit_and_stop_loss_simultaneously = True,
+        trail_value_recalc_period = 60 * balancing_period,
+        randomize = False,
+        Xs_index = [0, 1],
+        active_balancing = True,
+        balancing_period = balancing_period,
+        taxes = False
+    )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
 

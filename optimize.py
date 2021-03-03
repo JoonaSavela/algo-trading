@@ -9,6 +9,61 @@ import os
 from tqdm import tqdm
 import copy
 from trade import get_total_balance
+from parameters import commissions
+
+def get_balanced_wealths(
+    X,
+    weight_values,
+    keys,
+    potential_spreads,
+    potential_balances,
+    total_balance,
+    balancing_period = 1,
+    taxes = False
+    ):
+    idx = np.arange(0, X.shape[0], balancing_period)
+    X = X[idx, :]
+
+    X_change = X[1:, :] / X[:-1, :]
+
+    new_weights = X_change * weight_values.reshape(1, -1)
+    balanced_wealths = np.zeros((len(X),))
+
+    for i in range(new_weights.shape[0]):
+        new_weights_relative = new_weights[i] / np.sum(new_weights[i])
+        if taxes:
+            new_weights_relative = apply_taxes(new_weights_relative / weight_values) * weight_values
+            new_weights[i] = new_weights_relative * np.sum(new_weights[i])
+
+        li_neg = X_change[i, :] < 1
+        li_pos = ~li_neg
+
+        total_commisions_and_spread = []
+
+        spread_dict = {}
+
+        for j, key in enumerate(keys):
+            coin = key.split('_')[0]
+            m, m_bear = tuple([int(x) for x in key.split('_')[3:]])
+
+            if coin not in spread_dict:
+                spread_dict[coin] = potential_spreads[(coin, m, m_bear)][np.argmin(
+                    np.abs(potential_balances - total_balance * new_weights_relative[j] * balanced_wealths[i])
+                )]
+
+            spread = spread_dict[coin]
+
+            total_commisions_and_spread.append(np.abs(weight_values[j] - new_weights_relative[j]) * (commissions + spread))
+
+        total_commisions_and_spread = np.array(total_commisions_and_spread)
+        total_commisions_and_spread = np.log(1 - np.sum(total_commisions_and_spread[li_neg])) + \
+            np.log(1 - np.sum(total_commisions_and_spread[li_pos]))
+        balanced_wealths[i + 1] = balanced_wealths[i] + np.log(np.sum(new_weights[i])) + total_commisions_and_spread
+
+    balanced_wealths = np.exp(balanced_wealths)
+
+    return balanced_wealths
+
 
 
 def return_trade_wealths(trade_wealths, total_months, taxes = True, return_total = True, return_as_log = True):
