@@ -5,3 +5,4 @@ trading_logs/
 optim_results/*.csv
 ftx/
 optim_results/sltp_results/
+.hypothesis
