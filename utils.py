@@ -17,21 +17,20 @@ except ImportError as e:
 # TODO: split this file into multiple files (based on function category)
 
 
-
-def get_symbol(coin, m, bear = False):
+def get_symbol(coin, m, bear=False):
     res = coin
     if m > 1 or bear:
-        if coin == 'BTC':
-            res = ''
+        if coin == "BTC":
+            res = ""
         if bear:
-            res += 'BEAR' if m > 1 else 'HEDGE'
+            res += "BEAR" if m > 1 else "HEDGE"
         else:
-            res += 'BULL'
+            res += "BULL"
 
     return res
 
 
-def apply_taxes(trade_wealths, copy = False):
+def apply_taxes(trade_wealths, copy=False):
     if isinstance(trade_wealths, float):
         if trade_wealths > 1:
             trade_wealths = (trade_wealths - 1) * (1 - tax_rate) + 1
@@ -43,13 +42,14 @@ def apply_taxes(trade_wealths, copy = False):
 
     return trade_wealths
 
-def get_total_balance(client, separate = True, filter = None):
-    balances = pd.DataFrame(client.get_balances()).set_index('coin')
+
+def get_total_balance(client, separate=True, filter=None):
+    balances = pd.DataFrame(client.get_balances()).set_index("coin")
     time.sleep(0.05)
     if filter is not None:
         li = [ix in filter for ix in balances.index]
         balances = balances.loc[li, :]
-    total_balance = balances['usdValue'].sum()
+    total_balance = balances["usdValue"].sum()
 
     if separate:
         return total_balance, balances
@@ -57,8 +57,8 @@ def get_total_balance(client, separate = True, filter = None):
     return total_balance
 
 
-def get_average_trading_period(strategies, unique = True):
-    aggregate_Ns = np.array([v['params'][0] * 60 for v in strategies.values()])
+def get_average_trading_period(strategies, unique=True):
+    aggregate_Ns = np.array([v["params"][0] * 60 for v in strategies.values()])
     if unique:
         aggregate_Ns = np.unique(aggregate_Ns)
     max_trading_frequencies_per_min = 1 / aggregate_Ns
@@ -67,49 +67,51 @@ def get_average_trading_period(strategies, unique = True):
     return int(1 / total_max_trading_frequencies_per_min)
 
 
-
 def get_parameter_names(strategy_type):
-    if strategy_type == 'ma':
-        return ['aggregate_N', 'w']
-    elif strategy_type == 'stoch':
-        return ['aggregate_N', 'w', 'th']
-    elif strategy_type == 'macross':
-        return ['aggregate_N', 'w', 'w2']
+    if strategy_type == "ma":
+        return ["aggregate_N", "w"]
+    elif strategy_type == "stoch":
+        return ["aggregate_N", "w", "th"]
+    elif strategy_type == "macross":
+        return ["aggregate_N", "w", "w2"]
     else:
-        raise ValueError('strategy_type')
+        raise ValueError("strategy_type")
 
 
 def choose_get_buys_and_sells_fn(strategy_type):
-    if strategy_type == 'ma':
+    if strategy_type == "ma":
         return get_buys_and_sells_ma
-    elif strategy_type == 'stoch':
+    elif strategy_type == "stoch":
         return get_buys_and_sells_stoch
-    elif strategy_type == 'macross':
+    elif strategy_type == "macross":
         return get_buys_and_sells_macross
     else:
         raise ValueError("strategy_type")
 
 
 def get_filtered_strategies_and_weights(
-    coins = ['ETH', 'BTC'],
-    freqs = ['low', 'high'],
-    strategy_types = ['ma', 'macross'],
-    ms = [1, 3],
-    m_bears = [0, 3],
-    normalize = True,
-    filter = True):
+    coins=["ETH", "BTC"],
+    freqs=["low", "high"],
+    strategy_types=["ma", "macross"],
+    ms=[1, 3],
+    m_bears=[0, 3],
+    normalize=True,
+    filter=True,
+):
 
     strategies = {}
 
-    for coin, freq, strategy_type, m, m_bear in product(coins, freqs, strategy_types, ms, m_bears):
-        strategy_key = '_'.join([coin, freq, strategy_type, str(m), str(m_bear)])
-        filename = f'optim_results/{strategy_key}.json'
+    for coin, freq, strategy_type, m, m_bear in product(
+        coins, freqs, strategy_types, ms, m_bears
+    ):
+        strategy_key = "_".join([coin, freq, strategy_type, str(m), str(m_bear)])
+        filename = f"optim_results/{strategy_key}.json"
         if os.path.exists(filename):
-            with open(filename, 'r') as file:
+            with open(filename, "r") as file:
                 strategies[strategy_key] = json.load(file)
 
-    if os.path.exists('optim_results/weights.json') and filter:
-        with open('optim_results/weights.json', 'r') as file:
+    if os.path.exists("optim_results/weights.json") and filter:
+        with open("optim_results/weights.json", "r") as file:
             weights = json.load(file)
 
         filtered_strategies = {}
@@ -129,37 +131,33 @@ def get_filtered_strategies_and_weights(
         if normalize:
             weight_values = np.array(list(weights.values()))
             weight_values /= np.sum(weight_values)
-            weights = dict(list(zip(
-                weights.keys(),
-                weight_values
-            )))
+            weights = dict(list(zip(weights.keys(), weight_values)))
     else:
-        weights = dict(list(zip(
-            strategies.keys(),
-            np.ones((len(strategies),)) / len(strategies)
-        )))
+        weights = dict(
+            list(zip(strategies.keys(), np.ones((len(strategies),)) / len(strategies)))
+        )
 
     return strategies, weights
 
 
-
-
 # This function computes GCD (Greatest Common Divisor)
 def get_gcd(x, y):
-   while(y):
-       x, y = y, x % y
-   return x
+    while y:
+        x, y = y, x % y
+    return x
+
 
 # This function computes LCM (Least Common Multiple)
 def get_lcm(x, y):
-   return x * y // get_gcd(x, y)
+    return x * y // get_gcd(x, y)
 
-def quick_plot(xs, colors, alphas, log = False):
-    plt.style.use('seaborn')
+
+def quick_plot(xs, colors, alphas, log=False):
+    plt.style.use("seaborn")
     for i in range(len(xs)):
-        plt.plot(xs[i], color = colors[i], alpha = alphas[i])
+        plt.plot(xs[i], color=colors[i], alpha=alphas[i])
     if log:
-        plt.yscale('log')
+        plt.yscale("log")
     plt.show()
 
 
@@ -176,13 +174,15 @@ class NpEncoder(json.JSONEncoder):
         else:
             return super(NpEncoder, self).default(obj)
 
-def print_dict(d, pad = ''):
+
+def print_dict(d, pad=""):
     for k, v in d.items():
         print(pad, k)
         if isinstance(v, dict):
-            print_dict(v, pad + '\t')
+            print_dict(v, pad + "\t")
         else:
-            print(pad + ' ', v)
+            print(pad + " ", v)
+
 
 def rolling_max(X, w):
     if len(X.shape) == 1:
@@ -199,13 +199,23 @@ def rolling_min(X, w):
 def p_to_logit(p):
     return np.log(p / (1 - p))
 
+
 def logit_to_p(logit):
     return 1 / (1 + np.exp(-logit))
+
 
 def rolling_quantile(X, w):
     if len(X.shape) == 1:
         X = X.reshape(-1, 1)
-    return pd.Series(X[:, 0]).rolling(w).apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True).dropna().values * 0.01
+    return (
+        pd.Series(X[:, 0])
+        .rolling(w)
+        .apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True)
+        .dropna()
+        .values
+        * 0.01
+    )
+
 
 def apply_trend(x, limits, trend, strength):
     min_x = limits[0]
@@ -219,14 +229,14 @@ def apply_trend(x, limits, trend, strength):
     return x
 
 
-def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
+def risk_management(X, trends, risk_args, limits, commissions=0.00075):
     # base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
-    base_stop_loss = risk_args['base_stop_loss']
-    profit_fraction = risk_args['profit_fraction']
-    increment = np.log(1 + risk_args['increment'])
-    trailing_alpha = risk_args['trailing_alpha']
-    steam_th = risk_args['steam_th']
-    strength = risk_args['strength']
+    base_stop_loss = risk_args["base_stop_loss"]
+    profit_fraction = risk_args["profit_fraction"]
+    increment = np.log(1 + risk_args["increment"])
+    trailing_alpha = risk_args["trailing_alpha"]
+    steam_th = risk_args["steam_th"]
+    strength = risk_args["strength"]
 
     i = 0
     N = X.shape[0]
@@ -248,14 +258,18 @@ def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
     # TODO: return information about the pseudo trades
     # TODO: use trend to change thresholds
     while i < N:
-        no_position = buy_price is None and buy_time is None and \
-                        sell_price is not None and sell_time is not None
+        no_position = (
+            buy_price is None
+            and buy_time is None
+            and sell_price is not None
+            and sell_time is not None
+        )
 
         if no_position:
-            log_prices = - np.log(X[sell_time:i + 1, 0] / sell_price)
-            trend = - trends[i]
+            log_prices = -np.log(X[sell_time : i + 1, 0] / sell_price)
+            trend = -trends[i]
         else:
-            log_prices = np.log(X[buy_time:i + 1, 0] / buy_price)
+            log_prices = np.log(X[buy_time : i + 1, 0] / buy_price)
             trend = trends[i]
 
         log_return = log_prices[-1]
@@ -270,18 +284,20 @@ def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
         else:
             event_time += buy_time
 
-        stop_loss = apply_trend(base_stop_loss, limits['base_stop_loss'], trend, strength) # TODO: add trend
+        stop_loss = apply_trend(
+            base_stop_loss, limits["base_stop_loss"], trend, strength
+        )  # TODO: add trend
         stop_losses.append(stop_loss)
         stop_loss = np.log(1 - stop_loss)
-        take_profit = - profit_fraction * stop_loss
-        stop_loss = trailing_level - \
-                        increment * trailing_alpha * (1 - trailing_alpha ** trailing_n) / \
-                        (1 - trailing_alpha) + \
-                        stop_loss * trailing_alpha ** trailing_n
-
-
-
-
+        take_profit = -profit_fraction * stop_loss
+        stop_loss = (
+            trailing_level
+            - increment
+            * trailing_alpha
+            * (1 - trailing_alpha ** trailing_n)
+            / (1 - trailing_alpha)
+            + stop_loss * trailing_alpha ** trailing_n
+        )
 
         if no_position:
             if log_return < stop_loss:
@@ -289,45 +305,42 @@ def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
             elif (i - event_time) * (log_return - trailing_level) < steam_th:
                 risk_buys[i] = True
 
-
             if risk_buys[i]:
                 buy_price = X[i, 0]
                 buy_time = i
                 sell_price = None
                 sell_time = None
 
-
         else:
             min_i = np.argmin(log_prices)
-            cause = '–'
+            cause = "–"
 
             if log_return < stop_loss:
                 risk_sells[i] = True
-                cause = 'stop loss'
+                cause = "stop loss"
             elif np.log(X[i, 0] / X[buy_time + min_i, 0]) > take_profit:
                 risk_sells[i] = True
-                cause = 'take profit'
+                cause = "take profit"
             elif (i - event_time) * (log_return - trailing_level) < steam_th:
                 risk_sells[i] = True
-                cause = 'steam'
+                cause = "steam"
 
             if risk_sells[i]:
                 sell_price = X[i, 0]
                 sell_time = i
 
                 trade = {
-                    'buy_time': buy_time,
-                    'sell_time': sell_time,
-                    'buy_price': buy_price,
-                    'sell_price': sell_price,
-                    'cause': cause,
+                    "buy_time": buy_time,
+                    "sell_time": sell_time,
+                    "buy_price": buy_price,
+                    "sell_price": sell_price,
+                    "cause": cause,
                 }
 
                 trades.append(trade)
 
                 buy_price = None
                 buy_time = None
-
 
         i += 1
 
@@ -336,13 +349,15 @@ def risk_management(X, trends, risk_args, limits, commissions = 0.00075):
 
     trades = pd.DataFrame(trades)
 
-    trades['profit'] = np.log(trades['sell_price'] / trades['buy_price']) + np.log(1 - commissions) * 2
-    trades['winning'] = trades['profit'] > 0
+    trades["profit"] = (
+        np.log(trades["sell_price"] / trades["buy_price"]) + np.log(1 - commissions) * 2
+    )
+    trades["winning"] = trades["profit"] > 0
 
     return risk_buys, risk_sells, trades
 
 
-def get_ad(X, w, cumulative = True):
+def get_ad(X, w, cumulative=True):
     lows = pd.Series(X[:, 0]).rolling(w).min().dropna().values
     highs = pd.Series(X[:, 0]).rolling(w).max().dropna().values
 
@@ -355,7 +370,8 @@ def get_ad(X, w, cumulative = True):
 
     return cmfv
 
-def get_obv(X, cumulative = True, use_sign = True):
+
+def get_obv(X, cumulative=True, use_sign=True):
     log_returns = np.log(X[1:, 0] / X[:-1, 0])
 
     if use_sign:
@@ -369,7 +385,7 @@ def get_obv(X, cumulative = True, use_sign = True):
     return signed_volumes
 
 
-def aggregate(X, n = 5, from_minute = True):
+def aggregate(X, n=5, from_minute=True):
     if X.ndim == 1:
         X = X.reshape(-1, 1)
     if from_minute:
@@ -378,24 +394,24 @@ def aggregate(X, n = 5, from_minute = True):
     aggregated_X = np.zeros((X.shape[0] // n, X.shape[1]))
 
     idx = np.arange((X.shape[0] % n) + n - 1, X.shape[0], n)
-    aggregated_X[:, 0] = X[idx, 0] # close
+    aggregated_X[:, 0] = X[idx, 0]  # close
 
     if X.shape[1] >= 2:
         highs = rolling_max(X[:, 1], n)
         idx = np.arange(X.shape[0] % n, len(highs), n)
-        aggregated_X[:, 1] = highs[idx] # high
+        aggregated_X[:, 1] = highs[idx]  # high
 
     if X.shape[1] >= 3:
         lows = rolling_min(X[:, 2], n)
         idx = np.arange(X.shape[0] % n, len(lows), n)
-        aggregated_X[:, 2] = lows[idx] # low
+        aggregated_X[:, 2] = lows[idx]  # low
 
     if X.shape[1] >= 4:
         idx = np.arange(X.shape[0] % n, X.shape[0], n)
-        aggregated_X[:, 3] = X[idx, 3] # open
+        aggregated_X[:, 3] = X[idx, 3]  # open
 
     if X.shape[1] > 4:
-        X = X[-n * aggregated_X.shape[0]:, :]
+        X = X[-n * aggregated_X.shape[0] :, :]
 
         for i in range(aggregated_X.shape[0]):
             js = np.arange(i * n, (i + 1) * n)
@@ -407,7 +423,8 @@ def aggregate(X, n = 5, from_minute = True):
 
     return aggregated_X
 
-def ema(X, alpha, mu_prior = 0.0):
+
+def ema(X, alpha, mu_prior=0.0):
     alpha_is_not_float = not (type(alpha) is float or type(alpha) is np.float64)
     if alpha_is_not_float:
         alphas = alpha
@@ -432,24 +449,27 @@ def ema(X, alpha, mu_prior = 0.0):
     return mus
 
 
-def smoothed_returns(X, alpha = 0.75, n = 1):
+def smoothed_returns(X, alpha=0.75, n=1):
     # returns = X[1:, 0] / X[:-1, 0] - 1
     returns = np.log(X[1:, 0] / X[:-1, 0])
 
     for i in range(n):
-        returns = ema(returns, alpha = alpha)
+        returns = ema(returns, alpha=alpha)
 
     return returns
+
 
 def std(X, window_size):
     if len(X.shape) == 1:
         X = X.reshape(-1, 1)
     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 
+
 def sma_old(X, window_size):
     if len(X.shape) == 1:
         X = X.reshape(-1, 1)
-    return np.convolve(X[:, 0], np.ones((window_size,))/window_size, mode='valid')
+    return np.convolve(X[:, 0], np.ones((window_size,)) / window_size, mode="valid")
+
 
 def sma(X, window_size):
     if len(X.shape) == 1:
@@ -470,20 +490,21 @@ def sma(X, window_size):
 
 
 # TODO: make this faster with concurrent.futures!
-def stochastic_oscillator(X, window_size = 3 * 14, k = 1):
+def stochastic_oscillator(X, window_size=3 * 14, k=1):
     if len(X.shape) == 1:
-        X = np.repeat(X.reshape((-1, 1)), 4, axis = 1)
+        X = np.repeat(X.reshape((-1, 1)), 4, axis=1)
     res = []
     for i in range(X.shape[0] - window_size + 1):
-        max_price = np.max(X[i:i + window_size, 1])
-        min_price = np.min(X[i:i + window_size, 2])
-        min_close = np.min(X[i:i + window_size, 0])
+        max_price = np.max(X[i : i + window_size, 1])
+        min_price = np.min(X[i : i + window_size, 2])
+        min_close = np.min(X[i : i + window_size, 0])
         stoch = (X[i + window_size - 1, 0] - min_close) / (max_price - min_price)
         res.append(stoch)
     res = np.array(res)
     if k > 1:
-        res = np.convolve(res, np.ones((k,))/k, mode='valid')
+        res = np.convolve(res, np.ones((k,)) / k, mode="valid")
     return res
+
 
 def heikin_ashi(X):
     res = np.zeros((X.shape[0] - 1, 4))
@@ -499,48 +520,51 @@ def heikin_ashi(X):
     return res
 
 
-def round_to_n(x, n = 2):
-    if x == 0: return x
+def round_to_n(x, n=2):
+    if x == 0:
+        return x
     res = round(x, -int(floor(log10(abs(x)))) + (n - 1)) if x != 0 else 0
-    res = int(res) if abs(res) >= 10**(n - 1) else res
+    res = int(res) if abs(res) >= 10 ** (n - 1) else res
     return res
 
-def floor_to_n(x, n = 2):
-    if x == 0: return x
+
+def floor_to_n(x, n=2):
+    if x == 0:
+        return x
     p = -int(floor(log10(abs(x)))) + (n - 1)
     res = floor(x * 10 ** p) / 10 ** p
-    res = int(res) if abs(res) >= 10**(n - 1) else res
+    res = int(res) if abs(res) >= 10 ** (n - 1) else res
     return res
 
-def ceil_to_n(x, n = 2):
-    if x == 0: return x
+
+def ceil_to_n(x, n=2):
+    if x == 0:
+        return x
     p = -int(floor(log10(abs(x)))) + (n - 1)
     res = ceil(x * 10 ** p) / 10 ** p
-    res = int(res) if abs(res) >= 10**(n - 1) else res
+    res = int(res) if abs(res) >= 10 ** (n - 1) else res
     return res
 
+
 def get_time(filename):
-    split1 = filename.split('/')
-    split2 = split1[2].split('.')
+    split1 = filename.split("/")
+    split2 = split1[2].split(".")
     return int(split2[0])
 
 
 # TODO: test that with m = 1, X doesn't change
-def get_multiplied_X(X, multiplier = 1):
+def get_multiplied_X(X, multiplier=1):
     if X.shape[1] > 1:
         returns = X[1:, 3] / X[:-1, 3] - 1
         returns = multiplier * returns
-        assert(np.all(returns > -1.0))
+        assert np.all(returns > -1.0)
 
         X_res = np.zeros_like(X)
-        X_res[:, 3] = np.concatenate([
-            [1.0],
-            np.cumprod(returns + 1)
-        ])
+        X_res[:, 3] = np.concatenate([[1.0], np.cumprod(returns + 1)])
 
         other_returns = X[:, :3] / X[:, 3].reshape((-1, 1)) - 1
         other_returns = multiplier * other_returns
-        assert(np.all(other_returns > -1.0))
+        assert np.all(other_returns > -1.0)
         X_res[:, :3] = X_res[:, 3].reshape((-1, 1)) * (other_returns + 1)
 
         if multiplier < 0:
@@ -550,17 +574,15 @@ def get_multiplied_X(X, multiplier = 1):
     else:
         returns = X[1:, 0] / X[:-1, 0] - 1
         returns = multiplier * returns
-        assert(np.all(returns > -1.0))
+        assert np.all(returns > -1.0)
 
         X_res = np.zeros_like(X)
-        X_res[:, 0] = np.concatenate([
-            [1.0],
-            np.cumprod(returns + 1)
-        ])
+        X_res[:, 0] = np.concatenate([[1.0], np.cumprod(returns + 1)])
 
     return X_res
 
-def get_max_dropdown(wealths, return_indices = False):
+
+def get_max_dropdown(wealths, return_indices=False):
     res = np.Inf
     I = -1
     J = -1
@@ -577,6 +599,7 @@ def get_max_dropdown(wealths, return_indices = False):
         return res, I, J
 
     return res
+
 
 def get_or_create(d, k, create_func, *args):
     if not k in d:
@@ -597,10 +620,7 @@ def get_entry_and_exit_idx(entries, exits, N):
     return entries_idx, exits_idx
 
 
-
-
-
-def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, from_minute = True):
+def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean=False, from_minute=True):
     w = aggregate_N * w
     if from_minute:
         w *= 60
@@ -627,21 +647,24 @@ def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean = False, from_minute = T
 
     return (buys, sells) + return_tuple
 
-def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False, from_minute = True):
+
+def get_buys_and_sells_macross(
+    X, aggregate_N, w_max, w_min, as_boolean=False, from_minute=True
+):
     w_max = aggregate_N * w_max
     w_min = aggregate_N * w_min
     if from_minute:
         w_max *= 60
         w_min *= 60
 
-    assert(w_max > w_min)
+    assert w_max > w_min
 
     ma_max = sma(X[1:, 0] / X[0, 0], w_max)
-    ma_min = sma(X[(w_max - w_min + 1):, 0] / X[0, 0], w_min)
+    ma_min = sma(X[(w_max - w_min + 1) :, 0] / X[0, 0], w_min)
 
     N = ma_max.shape[0]
-    assert(N == len(X) - w_max)
-    assert(N == ma_min.shape[0])
+    assert N == len(X) - w_max
+    assert N == ma_min.shape[0]
 
     buys = ma_min > ma_max
     sells = ma_min < ma_max
@@ -660,9 +683,7 @@ def get_buys_and_sells_macross(X, aggregate_N, w_max, w_min, as_boolean = False,
     return (buys, sells) + return_tuple
 
 
-
-
-def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean = False, from_minute = True):
+def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean=False, from_minute=True):
     w = aggregate_N * w
     if from_minute:
         w *= 60
