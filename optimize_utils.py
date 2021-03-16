@@ -1,4 +1,4 @@
-from data import load_all_data, get_average_spread
+from data import load_all_data
 import numpy as np
 import pandas as pd
 import glob
@@ -10,6 +10,222 @@ from tqdm import tqdm
 import copy
 from trade import get_total_balance
 from parameters import commissions
+
+
+def get_trade_wealths_dicts(
+    rand_N,
+    X,
+    X_bear,
+    short,
+    aggregate_N,
+    buys_orig,
+    sells_orig,
+    N_orig,
+    sides,
+    trade_wealth_categories,
+):
+
+    trade_wealths_dict = {}
+    sub_trade_wealths_dict = {}
+
+    for side in sides:
+        trade_wealths_dict[side] = {}
+        sub_trade_wealths_dict[side] = {}
+
+        for category in trade_wealth_categories:
+            trade_wealths_dict[side][category] = []
+            sub_trade_wealths_dict[side][category] = []
+
+    if rand_N > 0:
+        X1 = X[:-rand_N, :]
+        if short:
+            X1_bear = X_bear[:-rand_N, :]
+    else:
+        X1 = X
+        if short:
+            X1_bear = X_bear
+    X1_agg = aggregate(X1[:, :3], aggregate_N)
+    if short:
+        X1_bear_agg = aggregate(X1_bear[:, :3], aggregate_N)
+
+    N_skip = (N_orig - rand_N) % (aggregate_N * 60)
+
+    start_i = N_skip + aggregate_N * 60 - 1
+    idx = np.arange(start_i, N_orig, aggregate_N * 60)
+
+    buys = buys_orig[idx]
+    sells = sells_orig[idx]
+    N = buys.shape[0]
+
+    X1_agg = X1_agg[-N:, :]
+    if short:
+        X1_bear_agg = X1_bear_agg[-N:, :]
+
+    n_months = N * aggregate_N / (24 * 30)
+    total_months = n_months
+
+    buys_idx, sells_idx = get_entry_and_exit_idx(buys, sells, N)
+    N_transactions_buy = len(buys_idx) * 2
+    N_transactions_sell = len(sells_idx) * 2
+
+    side_tuples = [
+        ("long", X1_agg, buys, sells),
+    ]
+
+    if short:
+        side_tuples.append(("short", X1_bear_agg, sells, buys))
+
+    for side, X1, entries, exits in side_tuples:
+        for category, category_trade_wealths in zip(
+            trade_wealth_categories, get_trade_wealths(X1, entries, exits, N)
+        ):
+            trade_wealths_dict[side][category].extend(category_trade_wealths)
+
+        for category, category_sub_trade_wealths in zip(
+            trade_wealth_categories, get_sub_trade_wealths(X1, entries, exits, N)
+        ):
+            sub_trade_wealths_dict[side][category].extend(category_sub_trade_wealths)
+
+    return (
+        trade_wealths_dict,
+        sub_trade_wealths_dict,
+        N_transactions_buy,
+        N_transactions_sell,
+        total_months,
+    )
+
+
+def get_stop_loss_take_profit_wealth(
+    side,
+    stop_loss_take_profit_type,
+    trade_wealths_dict,
+    sub_trade_wealths_dict,
+    take_profit_candidates,
+    stop_loss_candidates,
+    trail_value_recalc_period=None,
+):
+
+    if stop_loss_take_profit_type == "take_profit":
+        return np.array(
+            list(
+                map(
+                    lambda x: get_take_profit_wealths_from_trades(
+                        trade_wealths_dict[side]["base"],
+                        trade_wealths_dict[side]["max"],
+                        x,
+                        total_months=1,
+                        return_total=True,
+                        return_as_log=True,
+                    ),
+                    take_profit_candidates,
+                )
+            )
+        )
+
+    elif stop_loss_take_profit_type == "stop_loss":
+        return np.array(
+            list(
+                map(
+                    lambda x: get_stop_loss_wealths_from_trades(
+                        trade_wealths_dict[side]["base"],
+                        trade_wealths_dict[side]["min"],
+                        x,
+                        total_months=1,
+                        return_total=True,
+                        return_as_log=True,
+                    ),
+                    stop_loss_candidates,
+                )
+            )
+        )
+
+    elif stop_loss_take_profit_type == "trailing":
+        return np.array(
+            list(
+                map(
+                    lambda x: get_trailing_stop_loss_wealths_from_sub_trades(
+                        sub_trade_wealths_dict[side]["base"],
+                        sub_trade_wealths_dict[side]["min"],
+                        sub_trade_wealths_dict[side]["max"],
+                        x,
+                        total_months=1,
+                        trail_value_recalc_period=trail_value_recalc_period,
+                        return_total=True,
+                        return_as_log=True,
+                    ),
+                    stop_loss_candidates,
+                )
+            )
+        )
+
+    raise ValueError("stop_loss_take_profit_type")
+    return np.array([1.0])
+
+
+def skip_condition(strategy_type, frequency, args):
+    aggregate_N, w = args[:2]
+    test_value = (w + 1) * 60 * aggregate_N / 10000 - 1
+    if frequency == "high" and test_value >= 0:
+        return True, -test_value
+    elif frequency == "low" and test_value < 0:
+        return True, test_value
+
+    if strategy_type == "macross":
+        aggregate_N, w, w2 = args
+
+        test_value = w / w2 - 1
+        if test_value <= 0:
+            return True, test_value
+
+    return False, 0
+
+
+def get_semi_adaptive_wealths(
+    total_balance,
+    potential_balances,
+    potential_spreads,
+    best_stop_loss_take_profit_wealths_dict,
+    N_transactions_buy,
+    N_transactions_sell,
+    total_months,
+    debug=False,
+):
+
+    stop_loss_take_profit_wealth = 1
+
+    for i in range(12):
+        if total_balance * stop_loss_take_profit_wealth > np.max(potential_balances):
+            warnings.warn(
+                "total balance times wealth is greater than the max of potential balances."
+            )
+            # print(i, stop_loss_take_profit_wealth, np.max(potential_balances))
+        spread = potential_spreads[
+            np.argmin(
+                np.abs(
+                    potential_balances - total_balance * stop_loss_take_profit_wealth
+                )
+            )
+        ]
+        if debug:
+            print("Spread:", spread)
+
+        for side, v in best_stop_loss_take_profit_wealths_dict.items():
+            wealth = v[-1]
+            if wealth > 1.0 or side == "long":
+                N_transactions = (
+                    N_transactions_buy if side == "long" else N_transactions_sell
+                )
+
+                stop_loss_take_profit_wealth *= apply_commissions_and_spreads(
+                    np.log(wealth),
+                    N_transactions / total_months,
+                    commissions,
+                    spread,
+                    n_months=1,
+                    from_log=True,
+                )
+
+    return stop_loss_take_profit_wealth
 
 
 def get_balanced_wealths(

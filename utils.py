@@ -17,6 +17,20 @@ except ImportError as e:
 # TODO: split this file into multiple files (based on function category)
 
 
+def append_to_dict_of_collections(d, k, v, collection_type="list"):
+    if k not in d:
+        if collection_type == "list":
+            d[k] = []
+        elif collection_type == "deque":
+            d[k] = deque()
+        else:
+            raise ValueError("Invalid collection_type")
+
+    d[k].append(v)
+
+    return d
+
+
 def get_symbol(coin, m, bear=False):
     res = coin
     if m > 1 or bear:
@@ -227,134 +241,6 @@ def apply_trend(x, limits, trend, strength):
 
     x = p * range_x + min_x
     return x
-
-
-def risk_management(X, trends, risk_args, limits, commissions=0.00075):
-    # base_stop_loss = np.log(1 - risk_args['base_stop_loss'])
-    base_stop_loss = risk_args["base_stop_loss"]
-    profit_fraction = risk_args["profit_fraction"]
-    increment = np.log(1 + risk_args["increment"])
-    trailing_alpha = risk_args["trailing_alpha"]
-    steam_th = risk_args["steam_th"]
-    strength = risk_args["strength"]
-
-    i = 0
-    N = X.shape[0]
-
-    buy_price = None
-    buy_time = None
-    sell_price = X[0, 0]
-    sell_time = 0
-    trailing_level = 0.0
-
-    risk_buys = np.zeros((N,)).astype(bool)
-    risk_sells = np.zeros((N,)).astype(bool)
-
-    trades = []
-
-    stop_losses = []
-
-    # TODO: reduce repetition
-    # TODO: return information about the pseudo trades
-    # TODO: use trend to change thresholds
-    while i < N:
-        no_position = (
-            buy_price is None
-            and buy_time is None
-            and sell_price is not None
-            and sell_time is not None
-        )
-
-        if no_position:
-            log_prices = -np.log(X[sell_time : i + 1, 0] / sell_price)
-            trend = -trends[i]
-        else:
-            log_prices = np.log(X[buy_time : i + 1, 0] / buy_price)
-            trend = trends[i]
-
-        log_return = log_prices[-1]
-        max_log_return = np.max(log_prices)
-
-        trailing_n = np.floor(max_log_return / increment).astype(int)
-        trailing_level = trailing_n * increment
-        event_time = np.argmax(log_prices > trailing_level)
-
-        if no_position:
-            event_time += sell_time
-        else:
-            event_time += buy_time
-
-        stop_loss = apply_trend(
-            base_stop_loss, limits["base_stop_loss"], trend, strength
-        )  # TODO: add trend
-        stop_losses.append(stop_loss)
-        stop_loss = np.log(1 - stop_loss)
-        take_profit = -profit_fraction * stop_loss
-        stop_loss = (
-            trailing_level
-            - increment
-            * trailing_alpha
-            * (1 - trailing_alpha ** trailing_n)
-            / (1 - trailing_alpha)
-            + stop_loss * trailing_alpha ** trailing_n
-        )
-
-        if no_position:
-            if log_return < stop_loss:
-                risk_buys[i] = True
-            elif (i - event_time) * (log_return - trailing_level) < steam_th:
-                risk_buys[i] = True
-
-            if risk_buys[i]:
-                buy_price = X[i, 0]
-                buy_time = i
-                sell_price = None
-                sell_time = None
-
-        else:
-            min_i = np.argmin(log_prices)
-            cause = "–"
-
-            if log_return < stop_loss:
-                risk_sells[i] = True
-                cause = "stop loss"
-            elif np.log(X[i, 0] / X[buy_time + min_i, 0]) > take_profit:
-                risk_sells[i] = True
-                cause = "take profit"
-            elif (i - event_time) * (log_return - trailing_level) < steam_th:
-                risk_sells[i] = True
-                cause = "steam"
-
-            if risk_sells[i]:
-                sell_price = X[i, 0]
-                sell_time = i
-
-                trade = {
-                    "buy_time": buy_time,
-                    "sell_time": sell_time,
-                    "buy_price": buy_price,
-                    "sell_price": sell_price,
-                    "cause": cause,
-                }
-
-                trades.append(trade)
-
-                buy_price = None
-                buy_time = None
-
-        i += 1
-
-    # plt.hist(stop_losses, 50)
-    # plt.show()
-
-    trades = pd.DataFrame(trades)
-
-    trades["profit"] = (
-        np.log(trades["sell_price"] / trades["buy_price"]) + np.log(1 - commissions) * 2
-    )
-    trades["winning"] = trades["profit"] > 0
-
-    return risk_buys, risk_sells, trades
 
 
 def get_ad(X, w, cumulative=True):

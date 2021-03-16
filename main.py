@@ -1,12 +1,13 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from data import *
+from data_utils import get_average_spread
 import numpy as np
 import pandas as pd
 import time
 from datetime import datetime
 from utils import *
-from optimize import *
+from optimize_utils import *
 from tqdm import tqdm
 from parameter_search import *
 from parameters import commissions, minutes_in_a_year
@@ -14,10 +15,14 @@ from itertools import product
 import matplotlib.animation as animation
 from keys import ftx_api_key, ftx_secret_key
 from ftx.rest.client import FtxClient
-from trade import ftx_price, get_total_balance, get_conditional_orders, balance_portfolio
+from trade import (
+    ftx_price,
+    get_total_balance,
+    get_conditional_orders,
+    balance_portfolio,
+)
 from pypfopt.efficient_frontier import EfficientFrontier
-from pypfopt import risk_models, expected_returns, black_litterman, \
-    objective_functions
+from pypfopt import risk_models, expected_returns, black_litterman, objective_functions
 from pypfopt import BlackLittermanModel
 import multiprocessing
 from ciso8601 import parse_datetime
@@ -38,8 +43,6 @@ from functools import reduce
 # TODO: make a maker strategy instead of taker?
 
 # TODO: implement different objective functions in find_optimal_aggregated_strategy?
-
-
 
 
 def try_rounding_hours():
@@ -65,16 +68,18 @@ def try_rounding_hours():
     print(time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(timeTo)))
 
 
-def visualize_spreads(coin = 'ETH', m = 1, m_bear = 1):
+def visualize_spreads(coin="ETH", m=1, m_bear=1):
     client = FtxClient(ftx_api_key, ftx_secret_key)
     total_balance = get_total_balance(client, False)
-    total_balances = np.logspace(np.log10(total_balance / 10), np.log10(total_balance * 100), 100)
+    total_balances = np.logspace(
+        np.log10(total_balance / 10), np.log10(total_balance * 100), 100
+    )
     spreads = get_average_spread(coin, m, total_balances, m_bear)
     spread = spreads[np.argmin(np.abs(total_balances - total_balance))]
     print(spread)
-    plt.style.use('seaborn')
+    plt.style.use("seaborn")
     plt.plot(total_balances, spreads)
-    plt.plot([total_balance], [spread], '.k')
+    plt.plot([total_balance], [spread], ".k")
     plt.show()
 
 
@@ -82,38 +87,34 @@ def get_all_price_data(client, market):
     res = []
 
     X = client.get_historical_prices(
-        market = market,
-        resolution = 60,
-        limit = 5000,
+        market=market,
+        resolution=60,
+        limit=5000,
     )
     time.sleep(0.05)
     res.extend(X)
     count = 1
-    start_time = min(parse_datetime(x['startTime']) for x in X)
+    start_time = min(parse_datetime(x["startTime"]) for x in X)
     print(count, len(X), start_time)
     start_time = start_time.timestamp()
 
     while len(X) >= 5000:
         X = client.get_historical_prices(
-            market = market,
-            resolution = 60,
-            limit = 5000,
-            end_time = start_time
+            market=market, resolution=60, limit=5000, end_time=start_time
         )
         time.sleep(0.05)
         res.extend(X)
         count += 1
-        start_time = min(parse_datetime(x['startTime']) for x in X)
+        start_time = min(parse_datetime(x["startTime"]) for x in X)
         print(count, len(X), start_time)
         start_time = start_time.timestamp()
 
-    res = pd.DataFrame(res).drop_duplicates('startTime').sort_values('startTime')
+    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
 
     return res
 
 
-
-def get_buy_value_from_buy_history(buy_history, sell_size, verbose = False):
+def get_buy_value_from_buy_history(buy_history, sell_size, verbose=False):
     buy_prices = []
     buy_sizes = []
 
@@ -136,7 +137,6 @@ def get_buy_value_from_buy_history(buy_history, sell_size, verbose = False):
         print(buy_sizes)
 
     return np.dot(buy_prices, buy_sizes)
-
 
 
 def main():
@@ -200,10 +200,6 @@ def main():
     # print(buy_value)
     # profit = sell_value / buy_value
     # print(profit)
-
-
-
-
 
     # m = 3
     # m_bear = 3
@@ -296,7 +292,6 @@ def main():
     # print(params_dict)
     # print()
 
-
     # wealth = 3.
     # buy_price = 1.
     # sell_price = 2.
@@ -341,7 +336,6 @@ def main():
     # plt.style.use('seaborn')
     # plt.spy(same_ids)
     # plt.show()
-
 
     # client = FtxClient(ftx_api_key, ftx_secret_key)
     #
@@ -421,7 +415,6 @@ def main():
     # print(trade_history)
     # print(conditional_trade_history)
 
-
     # end_time = time.time()
     # order_history = client.get_conditional_order_history(end_time = end_time)
     # time.sleep(0.1)
@@ -460,7 +453,6 @@ def main():
     # open_trigger_orders = get_conditional_orders(client)
     # print_dict(open_trigger_orders)
 
-
     # all_bounds = {
     #     'aggregate_N': (1, 12),
     #     'w': (1, 50),
@@ -495,7 +487,6 @@ def main():
 
     # visualize_spreads()
 
-
     # coins = ['ETH', 'BTC']
     # freqs = ['low', 'high']
     # strategy_types = ['ma', 'macross']
@@ -520,37 +511,37 @@ def main():
     m_bears = [0]
 
     balancing_period = get_optimal_balancing_period(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        ms = ms,
-        m_bears = m_bears,
-        N_repeat = 1,
-        w = 11,
-        max_balancing_period_in_days = 7,
-        place_take_profit_and_stop_loss_simultaneously = True,
-        trail_value_recalc_period = None,
-        randomize = True,
-        Xs_index = [0, 1],
-        plot = True,
-        taxes = False
+        coins=["ETH", "BTC"],
+        freqs=["low", "high"],
+        strategy_types=["ma", "macross"],
+        ms=ms,
+        m_bears=m_bears,
+        N_repeat=1,
+        w=11,
+        max_balancing_period_in_days=7,
+        place_take_profit_and_stop_loss_simultaneously=True,
+        trail_value_recalc_period=None,
+        randomize=True,
+        Xs_index=[0, 1],
+        plot=True,
+        taxes=False,
     )
 
     plot_weighted_adaptive_wealths(
-        coins = ['ETH', 'BTC'],
-        freqs = ['low', 'high'],
-        strategy_types = ['ma', 'macross'],
-        ms = ms,
-        m_bears = m_bears,
-        N_repeat = 1,
-        compress = 60,
-        place_take_profit_and_stop_loss_simultaneously = True,
-        trail_value_recalc_period = 60 * balancing_period,
-        randomize = False,
-        Xs_index = [0, 1],
-        active_balancing = True,
-        balancing_period = balancing_period,
-        taxes = False
+        coins=["ETH", "BTC"],
+        freqs=["low", "high"],
+        strategy_types=["ma", "macross"],
+        ms=ms,
+        m_bears=m_bears,
+        N_repeat=1,
+        compress=60,
+        place_take_profit_and_stop_loss_simultaneously=True,
+        trail_value_recalc_period=60 * balancing_period,
+        randomize=False,
+        Xs_index=[0, 1],
+        active_balancing=True,
+        balancing_period=balancing_period,
+        taxes=False,
     )
 
     # optimize_weights(compress = 60, save = True, verbose = True)
@@ -575,9 +566,6 @@ def main():
     #     verbose = True,
     #     disable = False
     # )
-
-
-
 
 
 if __name__ == "__main__":

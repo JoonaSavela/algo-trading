@@ -266,20 +266,6 @@ def transfer_taxes_to_taxes_subaccount(client, size, debug=False):
         time.sleep(0.05)
 
 
-def append_to_dict_of_collections(d, k, v, collection_type="list"):
-    if k not in d:
-        if collection_type == "list":
-            d[k] = []
-        elif collection_type == "deque":
-            d[k] = deque()
-        else:
-            raise ValueError("Invalid collection_type")
-
-    d[k].append(v)
-
-    return d
-
-
 def get_buy_value_from_buy_history(buy_history, sell_size, verbose=False):
     buy_prices = []
     buy_sizes = []
