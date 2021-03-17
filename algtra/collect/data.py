@@ -5,11 +5,8 @@ from datetime import date, timedelta, datetime
 import os
 import requests
 import glob
-from keys import cryptocompare_key
-from utils import get_time, get_total_balance, get_symbol
+from ccontext import FtxClient, keys, utils
 import time
-from keys import ftx_api_key, ftx_secret_key
-from ftx.rest.client import FtxClient
 
 
 def _get_recent_data(coin, TimeTo, size, type, aggregate):
@@ -28,7 +25,7 @@ def _get_recent_data(coin, TimeTo, size, type, aggregate):
         + "&aggregate="
         + str(aggregate)
         + "&api_key="
-        + cryptocompare_key
+        + keys.cryptocompare_key
     )
 
     request = requests.get(url)
@@ -74,7 +71,7 @@ def get_recent_data(coin, size=3 * 14, type="m", aggregate=1):
     return res, timeTo
 
 
-def get_and_save(coin, t):
+def get_and_save(data_dir, coin, t):
     if t > time.time():
         return False
     time_str = str(t)
@@ -84,7 +81,7 @@ def get_and_save(coin, t):
         + "&tsym=USD&limit=2000&toTs="
         + time_str
         + "&api_key="
-        + cryptocompare_key
+        + keys.cryptocompare_key
     )
     request = requests.get(url)
     content = json.loads(request._content)
@@ -96,7 +93,7 @@ def get_and_save(coin, t):
         and len(content["Data"]) > 2000
         and is_same_time
     ):
-        with open("data/" + coin + "/" + time_str + ".json", "w") as file:
+        with open(data_dir + "/" + coin + "/" + time_str + ".json", "w") as file:
             json.dump(content, file)
     elif not is_same_time:
         # print('The "To" time was different than expected')
@@ -116,14 +113,14 @@ def get_and_save(coin, t):
 coins = ["BTC", "ETH", "XRP", "BCH", "LTC"]
 
 
-def get_and_save_all():
+def get_and_save_all(data_dir):
     for coin in coins:
-        if not os.path.exists("data/" + coin):
-            os.mkdir("data/" + coin)
+        if not os.path.exists(data_dir + "/" + coin):
+            os.mkdir(data_dir + "/" + coin)
         t_max = -1
-        for filename in glob.glob("data/" + coin + "/*.json"):
+        for filename in glob.glob(data_dir + "/" + coin + "/*.json"):
             split1 = filename.split("/")
-            split2 = split1[2].split(".")
+            split2 = split1[-1].split(".")
             if int(split2[0]) > t_max:
                 t_max = int(split2[0])
 
@@ -134,7 +131,7 @@ def get_and_save_all():
                 "https://min-api.cryptocompare.com/data/histominute?fsym="
                 + coin
                 + "&tsym=USD&limit=2000&api_key="
-                + cryptocompare_key
+                + keys.cryptocompare_key
             )
             request = requests.get(url)
             content = json.loads(request._content)
@@ -143,7 +140,7 @@ def get_and_save_all():
 
         count = 0
 
-        while get_and_save(coin, t):
+        while get_and_save(data_dir, coin, t):
             t += 2000 * 60
             count += 1
 
@@ -174,10 +171,10 @@ def load_data(filename, sequence_length):
 
 
 def load_all_data(filenames, index=0, return_time=False):
-    filenames = sorted(filenames, key=get_time)
+    filenames = sorted(filenames, key=utils.get_time)
 
     idx = np.arange(1, len(filenames))
-    li = np.diff(np.array(list(map(lambda x: get_time(x), filenames)))) != 120000
+    li = np.diff(np.array(list(map(lambda x: utils.get_time(x), filenames)))) != 120000
 
     points = [0]
     for p in idx[li]:
@@ -211,11 +208,13 @@ def load_all_data(filenames, index=0, return_time=False):
 
     if len(res) == 1:
         if return_time:
-            return res[0], get_time(filenames[points[idx[0]][1] - 1])
+            return res[0], utils.get_time(filenames[points[idx[0]][1] - 1])
         return res[0]
 
     if return_time:
-        return res, list(map(lambda x: get_time(filenames[points[x][1] - 1]), idx))
+        return res, list(
+            map(lambda x: utils.get_time(filenames[points[x][1] - 1]), idx)
+        )
     return res
 
 
@@ -250,12 +249,12 @@ def get_all_price_data(client, market):
     return res
 
 
-def save_orderbook_data():
+def save_orderbook_data(data_dir):
     source_symbol = "USD"
-    client = FtxClient(ftx_api_key, ftx_secret_key)
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     for coin in coins:
-        if not os.path.exists("data/orderbooks/" + coin):
-            os.mkdir("data/orderbooks/" + coin)
+        if not os.path.exists(data_dir + "/" + "orderbooks/" + coin):
+            os.mkdir(data_dir + "/" + "orderbooks/" + coin)
 
         symbols = [
             coin,
@@ -265,13 +264,15 @@ def save_orderbook_data():
         ]
 
         for symbol in symbols:
-            if not os.path.exists("data/orderbooks/" + coin + "/" + symbol):
-                os.mkdir("data/orderbooks/" + coin + "/" + symbol)
+            if not os.path.exists(data_dir + "/" + "orderbooks/" + coin + "/" + symbol):
+                os.mkdir(data_dir + "/" + "orderbooks/" + coin + "/" + symbol)
             orderbook = client.get_orderbook(symbol + "/" + source_symbol, 100)
             time.sleep(0.05)
 
             filename = (
-                "data/orderbooks/"
+                data_dir
+                + "/"
+                + "orderbooks/"
                 + coin
                 + "/"
                 + symbol
@@ -287,8 +288,8 @@ def save_orderbook_data():
 
 
 def visualize_spreads(coin="ETH", m=1, m_bear=1):
-    client = FtxClient(ftx_api_key, ftx_secret_key)
-    total_balance = get_total_balance(client, False)
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    total_balance = utils.get_total_balance(client, False)
     total_balances = np.logspace(
         np.log10(total_balance / 10), np.log10(total_balance * 100), 100
     )
@@ -360,10 +361,10 @@ def get_trades_data_frame_and_max_time(fname):
     return df, max_time
 
 
-def save_trade_history():
-    client = FtxClient(ftx_api_key, ftx_secret_key)
-    trades_fname = "trading_logs/trades.csv"
-    conditional_trades_fname = "trading_logs/conditional_trades.csv"
+def save_trade_history(data_dir):
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    trades_fname = data_dir + "/" + "trades.csv"
+    conditional_trades_fname = data_dir + "/" + "conditional_trades.csv"
 
     def _helper(fname, get_order_history_f):
         prev_trades, max_time = get_trades_data_frame_and_max_time(fname)
@@ -391,21 +392,21 @@ def save_trade_history():
     print()
 
 
-def save_total_balance():
-    client = FtxClient(ftx_api_key, ftx_secret_key)
+def save_total_balance(data_dir):
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
 
     balance = pd.DataFrame(
         [
             [
                 time.time(),
-                get_total_balance(client, separate=False),
+                utils.get_total_balance(client, separate=False),
             ]
         ],
         columns=["time", "balance"],
     )
     print(float(balance["time"]), float(balance["balance"]))
 
-    fname = "trading_logs/balances.csv"
+    fname = data_dir + "/" + "balances.csv"
     balances = [balance]
 
     if os.path.exists(fname):
@@ -416,12 +417,15 @@ def save_total_balance():
 
     print()
 
-def main():
-    get_and_save_all()
-    save_orderbook_data()
-    save_trade_history()
-    save_total_balance()
 
+def main():
+    data_dir = os.path.dirname(os.path.realpath(__file__))
+    data_dir = os.path.abspath(os.path.join(data_dir, "../../data"))
+
+    get_and_save_all(data_dir)
+    save_orderbook_data(data_dir)
+    save_trade_history(data_dir)
+    save_total_balance(data_dir)
 
 
 # TODO: save deposits/withdrawals?

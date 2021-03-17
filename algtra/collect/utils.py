@@ -5,14 +5,14 @@ import json
 
 # TODO: is max (the output) the best?
 # TODO: add comments
-def get_average_spread_old(coin, m, total_balances, m_bear=None, step=0.0001):
+def get_average_spread_old(data_dir, coin, m, total_balances, m_bear=None, step=0.0001):
     bull_folder = get_symbol(coin, m, bear=False)
-    foldernames_bull = [f"data/orderbooks/{coin}/{bull_folder}/"]
+    foldernames_bull = [data_dir + "/" + f"orderbooks/{coin}/{bull_folder}/"]
 
     if (m_bear is not None) and (m_bear != 0):
         bear_folder = get_symbol(coin, m_bear, bear=True)
 
-        foldernames_bear = [f"data/orderbooks/{coin}/{bear_folder}/"]
+        foldernames_bear = [data_dir + "/" + f"orderbooks/{coin}/{bear_folder}/"]
     else:
         foldernames_bear = []
 
@@ -94,14 +94,14 @@ def get_average_spread_old(coin, m, total_balances, m_bear=None, step=0.0001):
     return np.max(average_spreads, axis=1)
 
 
-def get_average_spread(coin, m, total_balances, m_bear=None, step=0.0001):
+def get_average_spread(data_dir, coin, m, total_balances, m_bear=None, step=0.0001):
     bull_folder = get_symbol(coin, m, bear=False)
-    foldernames_bull = [f"data/orderbooks/{coin}/{bull_folder}/"]
+    foldernames_bull = [data_dir + "/" + f"orderbooks/{coin}/{bull_folder}/"]
 
     if (m_bear is not None) and (m_bear != 0):
         bear_folder = get_symbol(coin, m_bear, bear=True)
 
-        foldernames_bear = [f"data/orderbooks/{coin}/{bear_folder}/"]
+        foldernames_bear = [data_dir + "/" + f"orderbooks/{coin}/{bear_folder}/"]
     else:
         foldernames_bear = []
 
