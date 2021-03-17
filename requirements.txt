@@ -1,0 +1,15 @@
+scipy
+numpy
+pandas
+matplotlib
+pytest
+hypothesis
+black
+requests
+ciso8601
+hmac
+urllib
+tqdm
+PyPortfolioOpt
+bayesian-optimization
+loguru
