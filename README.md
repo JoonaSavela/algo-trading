@@ -68,19 +68,22 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
     - rename `m` and `m_bear`
 - create appealing visualizations for real-world performance
 - make a `requirements.txt`
+- make a maker strategy instead of just taker?
 
 ### `data.py`
 
 - update old data gathering/saving code to use pandas
 - transfer into using FTX API instead of cryptocompare
     - or start using both, and eventually transfer to FTX API
+- check that `get_recent_data` works correctly
 
 
-### `parameter_search.py`
+### `optimize.py`
 
 - implement/calculate orderbook price limits (25 % of the orderbook), take this price limit into account in the strategies
 - automate result visualization (saving)
-- rename to `optimize.py` or something similar
+- implement different objective functions
+    - especially sharpe ratio (or something similar)
 
 
 ### `trade.py`
@@ -95,14 +98,14 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
 
 ### `taxes.py`
 
-- finish function for calculating taxes
+- take withdrawals and/or deposits into account
 
 ### `utils.py`
 
--
+- 
 
-### `optimize.py`
+### `optimize_utils.py`
 
-- rename to `optimize_utils.py`or something similar
+- 
 
 

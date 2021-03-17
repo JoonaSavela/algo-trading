@@ -9,7 +9,7 @@ from ftx.rest.client import FtxClient
 from utils import *
 
 
-def calculate_taxes(x):
+def get_taxes(x):
     if x <= 30000:
         taxes = x * 0.3
     else:
@@ -214,7 +214,7 @@ def get_taxes(
                 # losses are eligible for exemption
                 taxable_profit += loss
 
-            taxes = calculate_taxes(taxable_profit)
+            taxes = get_taxes(taxable_profit)
 
             profits[market] = {
                 "profit": profit,

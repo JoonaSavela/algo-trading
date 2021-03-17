@@ -219,6 +219,37 @@ def load_all_data(filenames, index=0, return_time=False):
     return res
 
 
+def get_all_price_data(client, market):
+    res = []
+
+    X = client.get_historical_prices(
+        market=market,
+        resolution=60,
+        limit=5000,
+    )
+    time.sleep(0.05)
+    res.extend(X)
+    count = 1
+    start_time = min(parse_datetime(x["startTime"]) for x in X)
+    print(count, len(X), start_time)
+    start_time = start_time.timestamp()
+
+    while len(X) >= 5000:
+        X = client.get_historical_prices(
+            market=market, resolution=60, limit=5000, end_time=start_time
+        )
+        time.sleep(0.05)
+        res.extend(X)
+        count += 1
+        start_time = min(parse_datetime(x["startTime"]) for x in X)
+        print(count, len(X), start_time)
+        start_time = start_time.timestamp()
+
+    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
+
+    return res
+
+
 def save_orderbook_data():
     source_symbol = "USD"
     client = FtxClient(ftx_api_key, ftx_secret_key)
@@ -253,6 +284,21 @@ def save_orderbook_data():
 
         print(coin, "orderbook data saved")
     print()
+
+
+def visualize_spreads(coin="ETH", m=1, m_bear=1):
+    client = FtxClient(ftx_api_key, ftx_secret_key)
+    total_balance = get_total_balance(client, False)
+    total_balances = np.logspace(
+        np.log10(total_balance / 10), np.log10(total_balance * 100), 100
+    )
+    spreads = get_average_spread(coin, m, total_balances, m_bear)
+    spread = spreads[np.argmin(np.abs(total_balances - total_balance))]
+    print(spread)
+    plt.style.use("seaborn")
+    plt.plot(total_balances, spreads)
+    plt.plot([total_balance], [spread], ".k")
+    plt.show()
 
 
 def get_order_history(client, end_time):
@@ -335,7 +381,7 @@ def save_trade_history():
             .sort_values("createdAt")
         )
 
-        print(f"Added {len(trades) - n} trades (total length {len(trades)})")
+        print(f"Added {len(trades) - n} trade(s) (total length {len(trades)})")
 
         trades.to_csv(fname)
 
@@ -370,11 +416,14 @@ def save_total_balance():
 
     print()
 
-
-# TODO: save deposits/withdrawals?
-# TODO: better prints
-if __name__ == "__main__":
+def main():
     get_and_save_all()
     save_orderbook_data()
     save_trade_history()
     save_total_balance()
+
+
+
+# TODO: save deposits/withdrawals?
+if __name__ == "__main__":
+    main()

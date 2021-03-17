@@ -1,5 +1,5 @@
 import numpy as np
-from utils import get_symbol
+import utils
 import glob
 import json
 
