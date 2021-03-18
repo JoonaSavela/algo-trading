@@ -14,7 +14,7 @@ The assets traded by this algorithm include some popular cryptocurrencies and th
 
 ## Overview
 
-### Data gathering (`data.py`)
+### Data gathering (`algtra/collect/data.py`)
 
 I collected cryptocurrency data from the website [cryptocompare.com](https://www.cryptocompare.com/). This website has real-time and historical minute price data available easily and quickly, but the same is true for FTX API as well, so there is no real reason to be using this website over FTX (see TODOs). To save time and space, I only collect data from the cryptocurrencies BTC, ETH, BCH, LTC, and XRP.
 
@@ -26,7 +26,7 @@ Other data that I gather includes
 
 Due to the changing nature of the oriderbooks and the total value of my FTX wallet, and since cryptocompare minute price data is only availabe up to 7 days into the past (for my free API created 1.5 years ago; nowadays it's only 1 day for the free API), I run this data collection code once every two days or so.
 
-### Strategy optimization (`parameter_search.py`)
+### Strategy optimization (`algtra/optimize/strategies.py`)
 
 Strategy: any decision making process which could be used to trade assets. Here each strategy cannot trade more frequently than once every 2 hours.
 
@@ -43,9 +43,9 @@ When optimizing a strategy, some options must be specified: what type of strateg
 Finally, for some strategies it is possible to change the execution time from immediately after the hour change (e.g. at 3:00 PM, at 5:00 PM, ...) to x minutes after the hour change (e.g. 54 minutes after: at 3:54 PM, at 5:54 PM, ...). If real-time data can be collected such that it ends precisely when requested (i.e. at 3:54 PM, which is now from the point of view of the strategy), then it is often the case that the strategy performs better when executed e.g. 40-59 minutes after the hour change (e.g. during 2:40-2:59) rather than at exactly at the hour change (e.g. at 3:00). These values are called `displacements` in the code.
 
 
-### Implementing strategies on FTX API (`trade.py`)
+### Implementing strategies on FTX API (`algtra/run/algorithm.py`)
 
-This file takes the saved strategy parameters and their weights – both of which were calculated in `parameter_search.py` – and starts trading on FTX according to those values. In short, the ideas that were simulated when the strategies were being optimized are implemented for the real world here, using a [fork](https://github.com/JoonaSavela/ftx) of the python sample code of the FTX REST API.
+This file takes the saved strategy parameters and their weights – both of which were calculated in `algtra/optimize/strategies.py` – and starts trading on FTX according to those values. In short, the ideas that were simulated when the strategies were being optimized are implemented for the real world here, using a [fork](https://github.com/JoonaSavela/ftx) of the python sample code of the FTX REST API.
 
 
 
@@ -65,28 +65,41 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
 - refactor code
     - rename files
     - split long functions into many functions
+        - test these smaller functions
     - rename `m` and `m_bear`
 - create appealing visualizations for real-world performance
 - make a `requirements.txt`
 - make a maker strategy instead of just taker?
 
-### `data.py`
+### `collect`
 
 - update old data gathering/saving code to use pandas
+- make a temporary function for merging json files
 - transfer into using FTX API instead of cryptocompare
     - or start using both, and eventually transfer to FTX API
 - check that `get_recent_data` works correctly
 
 
-### `optimize.py`
+### `optimize`
 
+- make a strategy class
+    - has all the methods related to profit/loss calculations
+    - maybe also some methods related to the actual implementation of the algorithm
+- add better rebalancing methods and optimization
+    - e.g. the following:
+        - each strategy keeps e.g. 10% (parameter) of its worth as cash in the beginning of a trade
+        - then, if the asset which is traded rises/falls e.g. 5% (parameter, for both long and short side?), the strategy rebalances such that the cash percentage is met again (after possible taxes)
+- take taxes into account
+    - determine automatically if the coin is leveraged, i.e. if it is eligible for exemption or not
+    - add option to "pay" taxes immediately after trades or only once a year
+        - if coin is not eligible for exemption and taxes are chosen to be "payed" only once per year, then detect if taxes are larger than total capital?
 - implement/calculate orderbook price limits (25 % of the orderbook), take this price limit into account in the strategies
 - automate result visualization (saving)
 - implement different objective functions
     - especially sharpe ratio (or something similar)
 
 
-### `trade.py`
+### `run`
 
 - refactor code
     - only use "trigger order" or "conditional order" (not both) when naming variables/functions
@@ -96,7 +109,7 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
     - also no need to save buy_info to file? or only weights?
 
 
-### `taxes.py`
+### `tax`
 
 - take withdrawals and/or deposits into account
 
@@ -104,8 +117,5 @@ Visualization of real-world performance of my algorithm is not yet implemented; 
 
 - 
 
-### `optimize_utils.py`
-
-- 
 
 
