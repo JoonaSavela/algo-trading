@@ -1,3 +1,6 @@
+if __name__ == "__main__":
+    raise ValueError("algtra/utils.py should not be run as main.")
+
 import numpy as np
 import pandas as pd
 import json
@@ -5,16 +8,15 @@ from math import log10, floor, ceil
 from scipy import stats
 from itertools import product
 import os
+import sys
 import time
-from parameters import tax_rate
+from algtra.constants import TAX_RATE, PARTIAL_LEVERAGED_SYMBOLS
 
 # matplotlib is not installed in cloud since it is not needed
 try:
     import matplotlib.pyplot as plt
 except ImportError as e:
     print(e)
-
-# TODO: split this file into multiple files (based on function category)
 
 
 def append_to_dict_of_collections(d, k, v, collection_type="list"):
@@ -29,6 +31,18 @@ def append_to_dict_of_collections(d, k, v, collection_type="list"):
     d[k].append(v)
 
     return d
+
+
+def get_coin(symbol):
+    for partial_leveraged_symbol in PARTIAL_LEVERAGED_SYMBOLS:
+        symbol = symbol.replace(partial_leveraged_symbol, "")
+
+    if not symbol:
+        coin = "BTC"
+    else:
+        coin = symbol
+
+    return coin
 
 
 def get_symbol(coin, m, bear=False):
@@ -47,12 +61,12 @@ def get_symbol(coin, m, bear=False):
 def apply_taxes(trade_wealths, copy=False):
     if isinstance(trade_wealths, float):
         if trade_wealths > 1:
-            trade_wealths = (trade_wealths - 1) * (1 - tax_rate) + 1
+            trade_wealths = (trade_wealths - 1) * (1 - TAX_RATE) + 1
     else:
         if copy:
             trade_wealths = np.copy(trade_wealths)
         li = trade_wealths > 1
-        trade_wealths[li] = (trade_wealths[li] - 1) * (1 - tax_rate) + 1
+        trade_wealths[li] = (trade_wealths[li] - 1) * (1 - TAX_RATE) + 1
 
     return trade_wealths
 

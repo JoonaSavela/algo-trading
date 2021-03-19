@@ -1,5 +1,9 @@
+if __name__ == "__main__":
+    raise ValueError("algtra/collect/utils.py should not be run as main.")
+
 import numpy as np
-import utils
+
+# import utils
 import glob
 import json
 

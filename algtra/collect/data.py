@@ -1,12 +1,27 @@
+import os
+import sys
+
+if __name__ == "__main__":
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+
 import json
 import numpy as np
 import pandas as pd
 from datetime import date, timedelta, datetime
-import os
 import requests
 import glob
-from ccontext import FtxClient, keys, utils
+from ftx.rest.client import FtxClient
+import keys
+from algtra import utils
+from algtra.constants import NON_USD_FIAT_CURRENCIES, ORDERBOOK_STEP_SIZE, ASKS_AND_BIDS
 import time
+from ciso8601 import parse_datetime
+from tqdm import tqdm
+from pathlib import Path
+from loguru import logger
 
 
 def _get_recent_data(coin, TimeTo, size, type, aggregate):
@@ -218,38 +233,7 @@ def load_all_data(filenames, index=0, return_time=False):
     return res
 
 
-def get_all_price_data(client, market):
-    res = []
-
-    X = client.get_historical_prices(
-        market=market,
-        resolution=60,
-        limit=5000,
-    )
-    time.sleep(0.05)
-    res.extend(X)
-    count = 1
-    start_time = min(parse_datetime(x["startTime"]) for x in X)
-    print(count, len(X), start_time)
-    start_time = start_time.timestamp()
-
-    while len(X) >= 5000:
-        X = client.get_historical_prices(
-            market=market, resolution=60, limit=5000, end_time=start_time
-        )
-        time.sleep(0.05)
-        res.extend(X)
-        count += 1
-        start_time = min(parse_datetime(x["startTime"]) for x in X)
-        print(count, len(X), start_time)
-        start_time = start_time.timestamp()
-
-    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
-
-    return res
-
-
-def save_orderbook_data(data_dir):
+def save_orderbook_data_old(data_dir):
     source_symbol = "USD"
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     for coin in coins:
@@ -285,6 +269,160 @@ def save_orderbook_data(data_dir):
 
         print(coin, "orderbook data saved")
     print()
+
+
+def get_spread_distributions(client, market):
+    orderbook = client.get_orderbook(market, 100)
+    time.sleep(0.05)
+
+    asks = np.array(orderbook["asks"])
+    bids = np.array(orderbook["bids"])
+    side_arrays = {"asks": asks, "bids": bids}
+    price = (asks[0, 0] + bids[0, 0]) / 2
+
+    distributions = {"N": 1}
+
+    for side in ASKS_AND_BIDS:
+        usd_values = np.prod(orderbook[side], axis=1)
+        log_percentages = np.log(side_arrays[side][:, 0] / price)
+
+        try:
+            assert np.all(np.diff(np.abs(log_percentages)) >= 0)
+        except AssertionError:
+            logger.error(log_percentages.tostring())
+            raise
+
+        distribution = np.zeros(
+            int(np.max(np.abs(log_percentages)) / ORDERBOOK_STEP_SIZE + 2)
+        )
+        idx = np.ceil(np.abs(log_percentages) / ORDERBOOK_STEP_SIZE).astype(int)
+
+        for i in range(len(idx)):
+            distribution[idx[i]] += usd_values[i]
+
+        distributions[side] = distribution
+
+    return distributions
+
+
+def load_spread_distributions(data_dir, symbol):
+    coin = utils.get_coin(symbol)
+    coin_dir = os.path.join(data_dir, "spreads", coin)
+
+    data_file = os.path.join(coin_dir, symbol + ".json")
+
+    # Default if file doesn't exist
+    distributions = {"N": 0}
+    for side in ASKS_AND_BIDS:
+        distributions[side] = np.array([0])
+
+    if os.path.exists(data_file):
+        with open(data_file, "r") as file:
+            distributions = json.load(file)
+
+        for side in ASKS_AND_BIDS:
+            distributions[side] = np.array(distributions[side])
+
+    return distributions
+
+
+def combine_spread_distributions(prev_spread_distributions, new_spread_distributions):
+    distributions = {
+        "N": prev_spread_distributions["N"] + new_spread_distributions["N"]
+    }
+
+    for side in ASKS_AND_BIDS:
+        distribution = np.zeros(
+            max(
+                len(prev_spread_distributions[side]),
+                len(new_spread_distributions[side]),
+            )
+        )
+
+        distribution[: len(prev_spread_distributions[side])] += (
+            prev_spread_distributions[side] * prev_spread_distributions["N"]
+        )
+        distribution[: len(new_spread_distributions[side])] += (
+            new_spread_distributions[side] * new_spread_distributions["N"]
+        )
+        distribution /= distributions["N"]
+
+        distributions[side] = distribution
+
+    return distributions
+
+
+def save_spread_distributions(data_dir, debug=False):
+    spreads_dir = os.path.join(data_dir, "spreads")
+    if not os.path.exists(spreads_dir) and not debug:
+        os.mkdir(spreads_dir)
+
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+
+    markets = get_filtered_markets(client, filter_volume=True)
+
+    print("Saving average spread (orderbook) data...")
+
+    max_N = 0
+    max_symbol = None
+
+    max_distribution_length = 0
+    max_distr_symbol = None
+
+    for coin, markets_group in tqdm(markets.groupby("coin")):
+        coin_dir = os.path.join(spreads_dir, coin)
+        if not os.path.exists(coin_dir) and not debug:
+            os.mkdir(coin_dir)
+
+        for market in markets_group["name"]:
+            symbol = market.split("/")[0]
+
+            prev_spread_distributions = load_spread_distributions(data_dir, symbol)
+
+            new_spread_distributions = get_spread_distributions(client, market)
+
+            spread_distributions = combine_spread_distributions(
+                prev_spread_distributions, new_spread_distributions
+            )
+
+            if spread_distributions["N"] > max_N:
+                max_N = spread_distributions["N"]
+                max_symbol = symbol
+
+            for side in ASKS_AND_BIDS:
+                if len(spread_distributions[side]) > max_distribution_length:
+                    max_distribution_length = len(spread_distributions[side])
+                    max_distr_symbol = symbol
+
+            data_file = os.path.join(coin_dir, symbol + ".json")
+            if not debug:
+                with open(data_file, "w") as file:
+                    json.dump(spread_distributions, file, cls=utils.NpEncoder)
+
+    print(f"Done, max. effective number of orderbooks: {max_N} (symbol {max_symbol})")
+    print(
+        f"Max distribution size: {max_distribution_length} (symbol {max_distr_symbol})"
+    )
+    print()
+
+
+def calculate_max_average_spread(distributions, total_balance):
+    res = []
+
+    for side in ASKS_AND_BIDS:
+        li = np.cumsum(distributions[side]) < total_balance
+        weights = distributions[side][li] / total_balance
+
+        if len(weights) < len(distributions[side]):
+            weights = np.concatenate([weights, [1 - np.sum(weights)]])
+        else:
+            weights[-1] += 1 - np.sum(weights)
+
+        log_percentage = np.arange(len(distributions[side])) * ORDERBOOK_STEP_SIZE
+
+        average_spread = np.dot(log_percentage[: len(weights)], weights)
+
+    return np.exp(np.max(res)) - 1
 
 
 def visualize_spreads(coin="ETH", m=1, m_bear=1):
@@ -382,7 +520,7 @@ def save_trade_history(data_dir):
             .sort_values("createdAt")
         )
 
-        print(f"Added {len(trades) - n} trade(s) (total length {len(trades)})")
+        print(f"Saved {len(trades) - n} new trade(s) (total length {len(trades)})")
 
         trades.to_csv(fname)
 
@@ -404,7 +542,6 @@ def save_total_balance(data_dir):
         ],
         columns=["time", "balance"],
     )
-    print(float(balance["time"]), float(balance["balance"]))
 
     fname = data_dir + "/" + "balances.csv"
     balances = [balance]
@@ -415,15 +552,192 @@ def save_total_balance(data_dir):
     balances = pd.concat(balances, ignore_index=True).sort_values("time")
     balances.to_csv(fname)
 
+    print(f"Saved total balance (total length {len(balances)})")
     print()
 
 
-def main():
-    data_dir = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.abspath(os.path.join(data_dir, "../../data"))
+def get_filtered_markets(client, filter_volume=False):
+    markets = pd.DataFrame(client.list_markets())
+    time.sleep(0.05)
 
-    get_and_save_all(data_dir)
-    save_orderbook_data(data_dir)
+    markets = markets[markets["name"].str.contains("/USD")]
+    markets = markets[markets["quoteCurrency"] == "USD"]
+    markets = markets[~markets["name"].str.contains("USDT")]
+    for curr in NON_USD_FIAT_CURRENCIES:
+        markets = markets[~markets["name"].str.contains(curr)]
+    markets = markets[markets["tokenizedEquity"].isna()]
+    if filter_volume:
+        markets = markets[markets["volumeUsd24h"] > 0]
+
+    markets["coin"] = markets["baseCurrency"].map(lambda x: utils.get_coin(x))
+    markets = markets.sort_values("volumeUsd24h", ascending=False)
+
+    return markets
+
+
+# TODO: intead of limit=5000, calculate the optimal limit based on prev_end_time
+def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False):
+    res = []
+
+    X = client.get_historical_prices(
+        market=market,
+        resolution=60,
+        limit=5000 if limit is None else min(limit, 5000),
+    )
+    time.sleep(0.05)
+    if limit is not None:
+        limit -= len(X)
+    res.extend(X)
+    count = 1
+
+    start_time = min(parse_datetime(x["startTime"]) for x in X)
+    if verbose:
+        print(count, len(X), start_time)
+    start_time = start_time.timestamp()
+
+    while (
+        len(X) >= 5000
+        and (limit is None or limit > 0)
+        and (prev_end_time is None or prev_end_time < start_time)
+    ):
+        X = client.get_historical_prices(
+            market=market,
+            resolution=60,
+            limit=5000 if limit is None else min(limit, 5000),
+            end_time=start_time,
+        )
+        time.sleep(0.05)
+        if limit is not None:
+            limit -= len(X)
+        res.extend(X)
+        count += 1
+
+        start_time = min(parse_datetime(x["startTime"]) for x in X)
+        if verbose:
+            print(count, len(X), start_time)
+        start_time = start_time.timestamp()
+
+    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
+    if prev_end_time is not None:
+        res = res[
+            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x).now()))
+            > prev_end_time
+        ]
+
+    return res
+
+
+def load_price_data(
+    data_dir, market, return_price_data=True, return_price_data_only=False
+):
+    symbol = market.split("/")[0]
+    coin = utils.get_coin(symbol)
+
+    data_file = os.path.join(data_dir, coin, symbol + ".csv")
+    price_data = None
+    prev_end_time = None
+    data_length = 0
+
+    if os.path.exists(data_file):
+        price_data = pd.read_csv(data_file, index_col=0)
+        prev_end_time = datetime.timestamp(
+            parse_datetime(price_data["startTime"].max()).now()
+        )
+        data_length = len(price_data)
+
+    if return_price_data:
+        if return_price_data_only:
+            return price_data
+
+        return price_data, prev_end_time, data_length
+
+    return prev_end_time
+
+
+def save_price_data(data_dir):
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+
+    markets = get_filtered_markets(client)
+
+    datapoints_added = 0
+    total_datapoints = 0
+
+    print("Saving price data...")
+
+    for coin, markets_group in tqdm(markets.groupby("coin")):
+        coin_dir = os.path.join(data_dir, coin)
+        if not os.path.exists(coin_dir):
+            os.mkdir(coin_dir)
+
+        for market in markets_group["name"]:
+            (
+                prev_price_data,
+                prev_end_time,
+                prev_data_length,
+            ) = load_price_data(data_dir, market, return_price_data=True)
+
+            new_price_data = get_price_data(
+                client,
+                market,
+                limit=None,
+                prev_end_time=prev_end_time,
+                verbose=False,
+            )
+
+            symbol = market.split("/")[0]
+            if (
+                new_price_data["startTime"]
+                .map(lambda x: datetime.timestamp(parse_datetime(x).now()))
+                .min()
+                - prev_end_time
+                > 60
+            ):
+                logger.warning(
+                    f"There is a gap in previous and new price data for symbol {symbol}. Splitting required."
+                )
+
+            price_data = (
+                pd.concat([prev_price_data, new_price_data], ignore_index=True)
+                .drop_duplicates("startTime")
+                .sort_values("startTime")
+            )
+            datapoints_added += len(price_data) - prev_data_length
+            total_datapoints += len(price_data)
+
+            data_file = os.path.join(coin_dir, symbol + ".csv")
+            price_data.to_csv(data_file)
+
+    print(f"Saved {datapoints_added} price data points (total {total_datapoints})")
+    print()
+
+
+def experiments():
+    pass
+
+
+def clean(data_dir):
+    pass
+
+
+def main():
+    # TODO: change this to cwd?
+    FILE_ROOT = os.path.dirname(os.path.realpath(__file__))
+    PROJECT_ROOT = os.path.abspath(os.path.join(FILE_ROOT, "../../data"))
+    data_dir = os.getcwd()
+    if Path(PROJECT_ROOT) in Path(data_dir).parents:
+        raise ValueError(
+            "Current working directory must not be inside any subdirectory of the project."
+        )
+    data_dir = os.path.abspath(os.path.join(data_dir, "data"))
+
+    if not os.path.exists(data_dir):
+        os.mkdir(data_dir)
+
+    save_price_data(data_dir)
+    save_spread_distributions(data_dir)
+
+    # get_and_save_all(data_dir)
+    # save_orderbook_data(data_dir)
     save_trade_history(data_dir)
     save_total_balance(data_dir)
 
@@ -431,3 +745,4 @@ def main():
 # TODO: save deposits/withdrawals?
 if __name__ == "__main__":
     main()
+    # experiments()
