@@ -16,12 +16,13 @@ import glob
 from ftx.rest.client import FtxClient
 import keys
 from algtra import utils
-from algtra.constants import NON_USD_FIAT_CURRENCIES, ORDERBOOK_STEP_SIZE, ASKS_AND_BIDS
+from algtra import constants
 import time
 from ciso8601 import parse_datetime
 from tqdm import tqdm
 from pathlib import Path
 from loguru import logger
+import matplotlib.pyplot as plt
 
 
 def _get_recent_data(coin, TimeTo, size, type, aggregate):
@@ -271,6 +272,9 @@ def save_orderbook_data_old(data_dir):
     print()
 
 
+# TODO: remove all functions above ^, once legacy/old data is no longer used
+
+
 def get_spread_distributions(client, market):
     orderbook = client.get_orderbook(market, 100)
     time.sleep(0.05)
@@ -282,7 +286,7 @@ def get_spread_distributions(client, market):
 
     distributions = {"N": 1}
 
-    for side in ASKS_AND_BIDS:
+    for side in constants.ASKS_AND_BIDS:
         usd_values = np.prod(orderbook[side], axis=1)
         log_percentages = np.log(side_arrays[side][:, 0] / price)
 
@@ -293,9 +297,11 @@ def get_spread_distributions(client, market):
             raise
 
         distribution = np.zeros(
-            int(np.max(np.abs(log_percentages)) / ORDERBOOK_STEP_SIZE + 2)
+            int(np.max(np.abs(log_percentages)) / constants.ORDERBOOK_STEP_SIZE + 2)
         )
-        idx = np.ceil(np.abs(log_percentages) / ORDERBOOK_STEP_SIZE).astype(int)
+        idx = np.ceil(np.abs(log_percentages) / constants.ORDERBOOK_STEP_SIZE).astype(
+            int
+        )
 
         for i in range(len(idx)):
             distribution[idx[i]] += usd_values[i]
@@ -313,14 +319,14 @@ def load_spread_distributions(data_dir, symbol):
 
     # Default if file doesn't exist
     distributions = {"N": 0}
-    for side in ASKS_AND_BIDS:
+    for side in constants.ASKS_AND_BIDS:
         distributions[side] = np.array([0])
 
     if os.path.exists(data_file):
         with open(data_file, "r") as file:
             distributions = json.load(file)
 
-        for side in ASKS_AND_BIDS:
+        for side in constants.ASKS_AND_BIDS:
             distributions[side] = np.array(distributions[side])
 
     return distributions
@@ -331,7 +337,7 @@ def combine_spread_distributions(prev_spread_distributions, new_spread_distribut
         "N": prev_spread_distributions["N"] + new_spread_distributions["N"]
     }
 
-    for side in ASKS_AND_BIDS:
+    for side in constants.ASKS_AND_BIDS:
         distribution = np.zeros(
             max(
                 len(prev_spread_distributions[side]),
@@ -389,7 +395,7 @@ def save_spread_distributions(data_dir, debug=False):
                 max_N = spread_distributions["N"]
                 max_symbol = symbol
 
-            for side in ASKS_AND_BIDS:
+            for side in constants.ASKS_AND_BIDS:
                 if len(spread_distributions[side]) > max_distribution_length:
                     max_distribution_length = len(spread_distributions[side])
                     max_distr_symbol = symbol
@@ -409,7 +415,7 @@ def save_spread_distributions(data_dir, debug=False):
 def calculate_max_average_spread(distributions, total_balance):
     res = []
 
-    for side in ASKS_AND_BIDS:
+    for side in constants.ASKS_AND_BIDS:
         li = np.cumsum(distributions[side]) < total_balance
         weights = distributions[side][li] / total_balance
 
@@ -418,21 +424,29 @@ def calculate_max_average_spread(distributions, total_balance):
         else:
             weights[-1] += 1 - np.sum(weights)
 
-        log_percentage = np.arange(len(distributions[side])) * ORDERBOOK_STEP_SIZE
+        log_percentage = (
+            np.arange(len(distributions[side])) * constants.ORDERBOOK_STEP_SIZE
+        )
 
         average_spread = np.dot(log_percentage[: len(weights)], weights)
+        res.append(average_spread)
 
     return np.exp(np.max(res)) - 1
 
 
-def visualize_spreads(coin="ETH", m=1, m_bear=1):
+def visualize_spreads(data_dir, symbol):
+    distributions = load_spread_distributions(data_dir, symbol)
+
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     total_balance = utils.get_total_balance(client, False)
     total_balances = np.logspace(
-        np.log10(total_balance / 10), np.log10(total_balance * 100), 100
+        np.log10(total_balance / 10), np.log10(total_balance * 10), 100
     )
-    spreads = get_average_spread(coin, m, total_balances, m_bear)
-    spread = spreads[np.argmin(np.abs(total_balances - total_balance))]
+    spreads = np.zeros(len(total_balances))
+    for i, balance in enumerate(total_balances):
+        spreads[i] = calculate_max_average_spread(distributions, balance)
+
+    spread = calculate_max_average_spread(distributions, total_balance)
     print(spread)
     plt.style.use("seaborn")
     plt.plot(total_balances, spreads)
@@ -563,7 +577,7 @@ def get_filtered_markets(client, filter_volume=False):
     markets = markets[markets["name"].str.contains("/USD")]
     markets = markets[markets["quoteCurrency"] == "USD"]
     markets = markets[~markets["name"].str.contains("USDT")]
-    for curr in NON_USD_FIAT_CURRENCIES:
+    for curr in constants.NON_USD_FIAT_CURRENCIES:
         markets = markets[~markets["name"].str.contains(curr)]
     markets = markets[markets["tokenizedEquity"].isna()]
     if filter_volume:
@@ -576,6 +590,7 @@ def get_filtered_markets(client, filter_volume=False):
 
 
 # TODO: intead of limit=5000, calculate the optimal limit based on prev_end_time
+# TODO: add option for hourly data
 def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False):
     res = []
 
@@ -596,7 +611,8 @@ def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False
     start_time = start_time.timestamp()
 
     while (
-        len(X) >= 5000
+        # count <= 10 and
+        len(X) > 1
         and (limit is None or limit > 0)
         and (prev_end_time is None or prev_end_time < start_time)
     ):
@@ -620,7 +636,7 @@ def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False
     res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
     if prev_end_time is not None:
         res = res[
-            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x).now()))
+            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
             > prev_end_time
         ]
 
@@ -633,17 +649,27 @@ def load_price_data(
     symbol = market.split("/")[0]
     coin = utils.get_coin(symbol)
 
-    data_file = os.path.join(data_dir, coin, symbol + ".csv")
+    data_files = glob.glob(os.path.join(data_dir, coin, symbol + "_*_*.csv"))
+    assert len(data_files) <= 1
+    # data_file = os.path.join(data_dir, coin, symbol + ".csv")
     price_data = None
     prev_end_time = None
     data_length = 0
 
-    if os.path.exists(data_file):
-        price_data = pd.read_csv(data_file, index_col=0)
-        prev_end_time = datetime.timestamp(
-            parse_datetime(price_data["startTime"].max()).now()
-        )
-        data_length = len(price_data)
+    if len(data_files) == 1:
+        data_file = data_files[0]
+        if return_price_data:
+            price_data = pd.read_csv(data_file, index_col=0).reset_index()
+            data_length = len(price_data)
+
+            price_data["startTimestamp"] = price_data["startTime"].map(
+                lambda x: datetime.timestamp(parse_datetime(x))
+            )
+            prev_end_time = price_data["startTimestamp"].max()
+        else:
+            data_file_split = data_file.split("_")
+            prev_end_time = int(data_file_split[1])
+            data_length = int(data_file_split[-1].split(".csv")[0])
 
     if return_price_data:
         if return_price_data_only:
@@ -651,7 +677,7 @@ def load_price_data(
 
         return price_data, prev_end_time, data_length
 
-    return prev_end_time
+    return prev_end_time, data_length
 
 
 def save_price_data(data_dir):
@@ -660,7 +686,9 @@ def save_price_data(data_dir):
     markets = get_filtered_markets(client)
 
     datapoints_added = 0
-    total_datapoints = 0
+
+    max_data_length = 0
+    max_symbol = None
 
     print("Saving price data...")
 
@@ -670,11 +698,9 @@ def save_price_data(data_dir):
             os.mkdir(coin_dir)
 
         for market in markets_group["name"]:
-            (
-                prev_price_data,
-                prev_end_time,
-                prev_data_length,
-            ) = load_price_data(data_dir, market, return_price_data=True)
+            prev_end_time, prev_data_length = load_price_data(
+                data_dir, market, return_price_data=False
+            )
 
             new_price_data = get_price_data(
                 client,
@@ -685,61 +711,103 @@ def save_price_data(data_dir):
             )
 
             symbol = market.split("/")[0]
-            if (
-                new_price_data["startTime"]
-                .map(lambda x: datetime.timestamp(parse_datetime(x).now()))
-                .min()
-                - prev_end_time
-                > 60
-            ):
-                logger.warning(
-                    f"There is a gap in previous and new price data for symbol {symbol}. Splitting required."
-                )
 
-            price_data = (
-                pd.concat([prev_price_data, new_price_data], ignore_index=True)
-                .drop_duplicates("startTime")
-                .sort_values("startTime")
+            price_data = new_price_data.drop_duplicates("startTime").sort_values(
+                "startTime"
             )
-            datapoints_added += len(price_data) - prev_data_length
-            total_datapoints += len(price_data)
+            end_time = (
+                price_data["startTime"]
+                .map(lambda x: datetime.timestamp(parse_datetime(x)))
+                .max()
+            )
 
-            data_file = os.path.join(coin_dir, symbol + ".csv")
-            price_data.to_csv(data_file)
+            datapoints_added += len(price_data)
+            data_length = prev_data_length + len(price_data)
 
-    print(f"Saved {datapoints_added} price data points (total {total_datapoints})")
+            if data_length > max_data_length:
+                max_data_length = data_length
+                max_symbol = symbol
+
+            prev_data_file = os.path.join(
+                coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
+            )
+            new_data_file = os.path.join(
+                coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
+            )
+            data_file_exists = os.path.exists(prev_data_file)
+            price_data.to_csv(
+                prev_data_file if data_file_exists else new_data_file,
+                mode="a" if data_file_exists else "w",
+                header=not data_file_exists,
+            )
+            if data_file_exists:
+                os.rename(prev_data_file, new_data_file)
+
+    print(f"Saved {datapoints_added} price data points")
+    print(f"Max. data length: {max_data_length} (symbol {max_symbol})")
     print()
 
 
 def experiments():
-    pass
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    X = get_price_data(client, "PERP/USD", limit=None, prev_end_time=None, verbose=True)
+
+    print(X)
+    print(len(X))
+    X["t"] = X["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
+    print(np.unique(np.diff(X["t"])) / 60)
 
 
+# change each price data file name to include its end time and its length
 def clean(data_dir):
-    pass
+    for filename in tqdm(glob.glob(data_dir + "/*/*.csv")):
+        if "_" not in filename:
+            fname_split = filename.split("/")
+            symbol = fname_split[-1].split(".")[0]
+            market = symbol + "/USD"
+
+            _, prev_end_time, data_length = load_price_data(
+                data_dir, market, return_price_data=True
+            )
+
+            os.rename(
+                filename,
+                filename.replace(".csv", f"_{int(prev_end_time)}_{data_length}.csv"),
+            )
+        else:
+            fname_split = filename.split("/")
+            symbol = fname_split[-1].split("_")[0]
+            market = symbol + "/USD"
+
+            prev_end_time, data_length = load_price_data(
+                data_dir, market, return_price_data=False
+            )
+
+            os.rename(
+                filename,
+                filename.replace(
+                    f"_{int(prev_end_time)}.0_{data_length}.csv",
+                    f"_{int(prev_end_time)}_{data_length}.csv",
+                ),
+            )
 
 
 def main():
-    # TODO: change this to cwd?
-    FILE_ROOT = os.path.dirname(os.path.realpath(__file__))
-    PROJECT_ROOT = os.path.abspath(os.path.join(FILE_ROOT, "../../data"))
-    data_dir = os.getcwd()
-    if Path(PROJECT_ROOT) in Path(data_dir).parents:
-        raise ValueError(
-            "Current working directory must not be inside any subdirectory of the project."
-        )
-    data_dir = os.path.abspath(os.path.join(data_dir, "data"))
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
 
     if not os.path.exists(data_dir):
         os.mkdir(data_dir)
 
     save_price_data(data_dir)
     save_spread_distributions(data_dir)
+    save_trade_history(data_dir)
+    save_total_balance(data_dir)
+    clean(data_dir)
 
     # get_and_save_all(data_dir)
     # save_orderbook_data(data_dir)
-    save_trade_history(data_dir)
-    save_total_balance(data_dir)
 
 
 # TODO: save deposits/withdrawals?

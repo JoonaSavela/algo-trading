@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from ciso8601 import parse_datetime
 from hypothesis.extra.numpy import arrays, floating_dtypes, from_dtype
+import glob
 
 
 def test_get_filtered_markets():
@@ -29,26 +30,21 @@ def test_get_filtered_markets():
 
 
 class Test_get_price_data:
-    def test_timestamps(self):
+    @given(minutes=st.integers(1, 1000))
+    @settings(max_examples=2, deadline=None)
+    def test_timestamps(self, minutes):
         client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
 
-        prev_end_time = time.time()
+        prev_end_time = time.time() - 60 * minutes
 
         price_data = data.get_price_data(client, "ETH/USD", prev_end_time=prev_end_time)
+        price_data["startTimestamp"] = price_data["startTime"].map(
+            lambda x: datetime.timestamp(parse_datetime(x))
+        )
 
-        assert (
-            time.time()
-            - price_data["startTime"]
-            .map(lambda x: datetime.timestamp(parse_datetime(x).now()))
-            .max()
-            < 60
-        )
-        assert (
-            price_data["startTime"]
-            .map(lambda x: datetime.timestamp(parse_datetime(x).now()))
-            .min()
-            > prev_end_time
-        )
+        assert time.time() - price_data["startTimestamp"].max() < 60
+        assert price_data["startTimestamp"].min() > prev_end_time
+        assert price_data["startTimestamp"].min() - prev_end_time < 60
 
     @settings(max_examples=2, deadline=None)
     @given(limit=st.integers(1, 10000))
@@ -60,21 +56,72 @@ class Test_get_price_data:
         assert len(price_data) == limit
 
 
-@given(symbol=st.text(min_size=1))
-@example(symbol="ETH")
-@example(symbol="BULL")
-def test_load_price_data(symbol):
-    assume("\\" not in symbol)
-    assume("\x00" not in symbol)
-    assume("/" not in symbol)
-    file_location = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.abspath(os.path.join(file_location, "../data"))
-    market = symbol + "/USD"
-    coin = utils.get_coin(symbol)
+def test_glob_paths():
+    for x in glob.glob(
+        constants.DATA_STORAGE_LOCATION + "/" + constants.LOCAL_DATA_DIR + "/*/*.csv"
+    ):
+        path_end = x.split(
+            constants.DATA_STORAGE_LOCATION + "/" + constants.LOCAL_DATA_DIR
+        )[1]
 
-    assert (
-        data.load_price_data(data_dir, market, return_price_data=False) is None
-    ) == (not os.path.exists(os.path.join(data_dir, coin)))
+        assert "spreads" not in path_end
+        assert "balances" not in path_end
+        assert "trades" not in path_end
+        assert "conditional_trades" not in path_end
+
+
+class Test_load_price_data:
+    @given(
+        fname=st.sampled_from(
+            glob.glob(
+                constants.DATA_STORAGE_LOCATION
+                + "/"
+                + constants.LOCAL_DATA_DIR
+                + "/*/*.csv"
+            )
+        )
+    )
+    @settings(max_examples=2, deadline=None)
+    def test_return_price_data_False(self, fname):
+        fname_split = fname.split("/")
+        symbol = fname_split[-1].split("_")[0]
+        market = symbol + "/USD"
+        coin = utils.get_coin(symbol)
+
+        data_dir = fname.split(coin)[0]
+
+        price_data, prev_end_time1, data_length1 = data.load_price_data(
+            data_dir, market, return_price_data=True
+        )
+        prev_end_time2, data_length2 = data.load_price_data(
+            data_dir, market, return_price_data=False
+        )
+
+        assert price_data["startTimestamp"].max() == prev_end_time1
+        assert prev_end_time1 == prev_end_time2
+        assert data_length1 == data_length2
+
+    @given(symbol=st.text(min_size=1))
+    @example(symbol="ETH")
+    @example(symbol="BULL")
+    @settings(max_examples=2, deadline=None)
+    def test_existance_and_nonexistance(self, symbol):
+        assume("\\" not in symbol)
+        assume("\x00" not in symbol)
+        assume("/" not in symbol)
+        data_dir = os.path.abspath(
+            os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+        )
+        market = symbol + "/USD"
+        coin = utils.get_coin(symbol)
+
+        prev_end_time, _ = data.load_price_data(
+            data_dir, market, return_price_data=False
+        )
+
+        assert (prev_end_time is None) == (
+            not os.path.exists(os.path.join(data_dir, coin))
+        )
 
 
 def test_get_spread_distributions():
@@ -91,12 +138,14 @@ def test_get_spread_distributions():
 @given(symbol=st.text(min_size=1))
 @example(symbol="ETH")
 @example(symbol="BULL")
+@settings(deadline=timedelta(milliseconds=1000))
 def test_load_spread_distributions(symbol):
     assume("\\" not in symbol)
     assume("\x00" not in symbol)
     assume("/" not in symbol)
-    file_location = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.abspath(os.path.join(file_location, "../data"))
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
     coin = utils.get_coin(symbol)
 
     distributions = data.load_spread_distributions(data_dir, symbol)
