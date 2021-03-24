@@ -25,254 +25,183 @@ from loguru import logger
 import matplotlib.pyplot as plt
 
 
-def _get_recent_data(coin, TimeTo, size, type, aggregate):
-    if type == "m":
-        url = "https://min-api.cryptocompare.com/data/histominute"
-    elif type == "h":
-        url = "https://min-api.cryptocompare.com/data/histohour"
-    else:
-        raise ValueError('type must be "m" or "h"')
-    url += (
-        "?fsym="
-        + coin
-        + "&tsym=USD&limit="
-        + str(size - 1)
-        + ("&toTs={}".format(TimeTo) if TimeTo is not None else "")
-        + "&aggregate="
-        + str(aggregate)
-        + "&api_key="
-        + keys.cryptocompare_key
-    )
+# TODO: remove HALF symbols
+def get_filtered_markets(client, filter_volume=False):
+    markets = pd.DataFrame(client.list_markets())
+    time.sleep(0.05)
 
-    request = requests.get(url)
-    content = request.json()
+    markets = markets[markets["name"].str.contains("/USD")]
+    markets = markets[markets["quoteCurrency"] == "USD"]
+    markets = markets[~markets["name"].str.contains("USDT")]
+    for curr in constants.NON_USD_FIAT_CURRENCIES:
+        markets = markets[~markets["name"].str.contains(curr)]
+    markets = markets[markets["tokenizedEquity"].isna()]
+    if filter_volume:
+        markets = markets[markets["volumeUsd24h"] > 0]
 
-    data = content["Data"]
-    data_keys = ["close", "high", "low", "open", "volumefrom", "volumeto"]
+    markets["coin"] = markets["baseCurrency"].map(lambda x: utils.get_coin(x))
+    markets = markets.sort_values("volumeUsd24h", ascending=False)
 
-    X = np.zeros(shape=(len(data), 6))
-    for i in range(len(data)):
-        item = data[i]
-        tmp = []
-        for key in data_keys:
-            tmp.append(item[key])
-        X[i, :] = tmp
-
-    if content["Response"] == "Error":
-        print(content)
-
-    return X, content["TimeTo"], content["TimeFrom"]
+    return markets
 
 
-def get_recent_data(coin, size=3 * 14, type="m", aggregate=1):
-    res = np.zeros(shape=(size, 6))
-
-    s = size
-    timeFrom = None
-
-    while s > 0:
-        if s == size:
-            X, timeTo, timeFrom = _get_recent_data(
-                coin, timeFrom, min(2000, s), type, aggregate
-            )
-        else:
-            X, _, timeFrom = _get_recent_data(
-                coin, timeFrom, min(2000, s), type, aggregate
-            )
-
-        s -= X.shape[0]
-
-        res[s : s + X.shape[0], :] = X
-
-    return res, timeTo
-
-
-def get_and_save(data_dir, coin, t):
-    if t > time.time():
-        return False
-    time_str = str(t)
-    url = (
-        "https://min-api.cryptocompare.com/data/histominute?fsym="
-        + coin
-        + "&tsym=USD&limit=2000&toTs="
-        + time_str
-        + "&api_key="
-        + keys.cryptocompare_key
-    )
-    request = requests.get(url)
-    content = json.loads(request._content)
-
-    is_same_time = content["TimeTo"] == int(time_str)
-
-    if (
-        content["Response"] == "Success"
-        and len(content["Data"]) > 2000
-        and is_same_time
-    ):
-        with open(data_dir + "/" + coin + "/" + time_str + ".json", "w") as file:
-            json.dump(content, file)
-    elif not is_same_time:
-        # print('The "To" time was different than expected')
-        pass
-    elif len(content["Data"]) <= 2000:
-        print("Data length is under 2001")
-    else:
-        print("An error occurred")
-        for key, item in content.items():
-            print(key, item)
-        print()
-
-    return is_same_time
-
-
-# TODO: move this somewhere more sensible
-coins = ["BTC", "ETH", "XRP", "BCH", "LTC"]
-
-
-def get_and_save_all(data_dir):
-    for coin in coins:
-        if not os.path.exists(data_dir + "/" + coin):
-            os.mkdir(data_dir + "/" + coin)
-        t_max = -1
-        for filename in glob.glob(data_dir + "/" + coin + "/*.json"):
-            split1 = filename.split("/")
-            split2 = split1[-1].split(".")
-            if int(split2[0]) > t_max:
-                t_max = int(split2[0])
-
-        if t_max != -1:
-            t = t_max + 2000 * 60
-        else:
-            url = (
-                "https://min-api.cryptocompare.com/data/histominute?fsym="
-                + coin
-                + "&tsym=USD&limit=2000&api_key="
-                + keys.cryptocompare_key
-            )
-            request = requests.get(url)
-            content = json.loads(request._content)
-            t = content["TimeTo"] - 7 * 24 * 60 * 60 + 2000 * 60
-            print(coin + ": No previous files found")
-
-        count = 0
-
-        while get_and_save(data_dir, coin, t):
-            t += 2000 * 60
-            count += 1
-
-        print("Coin", coin, "processed,", count, "interval(s) added")
-    print()
-
-
-# TODO: use pandas
-def load_data(filename, sequence_length):
-    obj = {}
-
-    with open(filename, "r") as file:
-        obj = json.load(file)
-
-    data = obj["Data"][:sequence_length]
-
-    data_keys = ["close", "high", "low", "open", "volumefrom", "volumeto"]
-
-    X = np.zeros(shape=(len(data), 6))
-    for i in range(len(data)):
-        item = data[i]
-        tmp = []
-        for key in data_keys:
-            tmp.append(item[key])
-        X[i, :] = tmp
-
-    return X
-
-
-def load_all_data(filenames, index=0, return_time=False):
-    filenames = sorted(filenames, key=utils.get_time)
-
-    idx = np.arange(1, len(filenames))
-    li = np.diff(np.array(list(map(lambda x: utils.get_time(x), filenames)))) != 120000
-
-    points = [0]
-    for p in idx[li]:
-        points.append(p)
-    points.append(len(filenames))
-
-    points = list(zip(points[:-1], points[1:]))
-
-    if isinstance(index, int):
-        # TODO: change this into an assertion
-        index = min(index, len(points) - 1)
-        idx = [index]
-    elif not isinstance(index, list):
-        raise ValueError("index must be either int or list")
-    else:
-        idx = index
-
+# TODO: intead of limit=5000, calculate the optimal limit based on prev_end_time
+# TODO: add option for hourly data
+def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False):
     res = []
 
-    for start, end in map(lambda x: points[x], idx):
-        fnames = filenames[start:end]
+    X = client.get_historical_prices(
+        market=market,
+        resolution=60,
+        limit=5000 if limit is None else min(limit, 5000),
+    )
+    time.sleep(0.05)
+    if limit is not None:
+        limit -= len(X)
+    res.extend(X)
+    count = 1
 
-        Xs = []
+    start_time = min(parse_datetime(x["startTime"]) for x in X)
+    if verbose:
+        print(count, len(X), start_time)
+    start_time = start_time.timestamp()
 
-        for filename in fnames:
-            X = load_data(filename, 2001)
-            Xs.append(X[:2000, :])  # remove duplicates
-
-        X = np.concatenate(Xs)
-        res.append(X)
-
-    if len(res) == 1:
-        if return_time:
-            return res[0], utils.get_time(filenames[points[idx[0]][1] - 1])
-        return res[0]
-
-    if return_time:
-        return res, list(
-            map(lambda x: utils.get_time(filenames[points[x][1] - 1]), idx)
+    while (
+        # count <= 10 and
+        len(X) > 1
+        and (limit is None or limit > 0)
+        and (prev_end_time is None or prev_end_time < start_time)
+    ):
+        X = client.get_historical_prices(
+            market=market,
+            resolution=60,
+            limit=5000 if limit is None else min(limit, 5000),
+            end_time=start_time,
         )
+        time.sleep(0.05)
+        if limit is not None:
+            limit -= len(X)
+        res.extend(X)
+        count += 1
+
+        start_time = min(parse_datetime(x["startTime"]) for x in X)
+        if verbose:
+            print(count, len(X), start_time)
+        start_time = start_time.timestamp()
+
+    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
+    if prev_end_time is not None:
+        res = res[
+            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
+            > prev_end_time
+        ]
+
     return res
 
 
-def save_orderbook_data_old(data_dir):
-    source_symbol = "USD"
-    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-    for coin in coins:
-        if not os.path.exists(data_dir + "/" + "orderbooks/" + coin):
-            os.mkdir(data_dir + "/" + "orderbooks/" + coin)
+def load_price_data(
+    data_dir, market, return_price_data=True, return_price_data_only=False
+):
+    symbol = market.split("/")[0]
+    coin = utils.get_coin(symbol)
 
-        symbols = [
-            coin,
-            "BULL" if coin == "BTC" else coin + "BULL",
-            "BEAR" if coin == "BTC" else coin + "BEAR",
-            "HEDGE" if coin == "BTC" else coin + "HEDGE",
-        ]
+    data_files = glob.glob(os.path.join(data_dir, coin, symbol + "_*_*.csv"))
+    assert len(data_files) <= 1
+    # data_file = os.path.join(data_dir, coin, symbol + ".csv")
+    price_data = None
+    prev_end_time = None
+    data_length = 0
 
-        for symbol in symbols:
-            if not os.path.exists(data_dir + "/" + "orderbooks/" + coin + "/" + symbol):
-                os.mkdir(data_dir + "/" + "orderbooks/" + coin + "/" + symbol)
-            orderbook = client.get_orderbook(symbol + "/" + source_symbol, 100)
-            time.sleep(0.05)
+    if len(data_files) == 1:
+        data_file = data_files[0]
+        if return_price_data:
+            price_data = pd.read_csv(data_file, index_col=0).reset_index()
+            data_length = len(price_data)
 
-            filename = (
-                data_dir
-                + "/"
-                + "orderbooks/"
-                + coin
-                + "/"
-                + symbol
-                + "/"
-                + str(round(time.time()))
-                + ".json"
+            price_data["startTimestamp"] = price_data["startTime"].map(
+                lambda x: datetime.timestamp(parse_datetime(x))
             )
-            with open(filename, "w") as fp:
-                json.dump(orderbook, fp)
+            prev_end_time = price_data["startTimestamp"].max()
+        else:
+            data_file_split = data_file.split("_")
+            prev_end_time = int(data_file_split[1])
+            data_length = int(data_file_split[-1].split(".csv")[0])
 
-        print(coin, "orderbook data saved")
+    if return_price_data:
+        if return_price_data_only:
+            return price_data
+
+        return price_data, prev_end_time, data_length
+
+    return prev_end_time, data_length
+
+
+def save_price_data(data_dir):
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+
+    markets = get_filtered_markets(client)
+
+    datapoints_added = 0
+
+    max_data_length = 0
+    max_symbol = None
+
+    print("Saving price data...")
+
+    for coin, markets_group in tqdm(markets.groupby("coin")):
+        coin_dir = os.path.join(data_dir, coin)
+        if not os.path.exists(coin_dir):
+            os.mkdir(coin_dir)
+
+        for market in markets_group["name"]:
+            prev_end_time, prev_data_length = load_price_data(
+                data_dir, market, return_price_data=False
+            )
+
+            new_price_data = get_price_data(
+                client,
+                market,
+                limit=None,
+                prev_end_time=prev_end_time,
+                verbose=False,
+            )
+
+            symbol = market.split("/")[0]
+
+            price_data = new_price_data.drop_duplicates("startTime").sort_values(
+                "startTime"
+            )
+            end_time = (
+                price_data["startTime"]
+                .map(lambda x: datetime.timestamp(parse_datetime(x)))
+                .max()
+            )
+
+            datapoints_added += len(price_data)
+            data_length = prev_data_length + len(price_data)
+
+            if data_length > max_data_length:
+                max_data_length = data_length
+                max_symbol = symbol
+
+            prev_data_file = os.path.join(
+                coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
+            )
+            new_data_file = os.path.join(
+                coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
+            )
+            data_file_exists = os.path.exists(prev_data_file)
+            price_data.to_csv(
+                prev_data_file if data_file_exists else new_data_file,
+                mode="a" if data_file_exists else "w",
+                header=not data_file_exists,
+            )
+            if data_file_exists:
+                os.rename(prev_data_file, new_data_file)
+
+    print(f"Saved {datapoints_added} price data points")
+    print(f"Max. data length: {max_data_length} (symbol {max_symbol})")
     print()
-
-
-# TODO: remove all functions above ^, once legacy/old data is no longer used
 
 
 def get_spread_distributions(client, market):
@@ -570,184 +499,6 @@ def save_total_balance(data_dir):
     print()
 
 
-def get_filtered_markets(client, filter_volume=False):
-    markets = pd.DataFrame(client.list_markets())
-    time.sleep(0.05)
-
-    markets = markets[markets["name"].str.contains("/USD")]
-    markets = markets[markets["quoteCurrency"] == "USD"]
-    markets = markets[~markets["name"].str.contains("USDT")]
-    for curr in constants.NON_USD_FIAT_CURRENCIES:
-        markets = markets[~markets["name"].str.contains(curr)]
-    markets = markets[markets["tokenizedEquity"].isna()]
-    if filter_volume:
-        markets = markets[markets["volumeUsd24h"] > 0]
-
-    markets["coin"] = markets["baseCurrency"].map(lambda x: utils.get_coin(x))
-    markets = markets.sort_values("volumeUsd24h", ascending=False)
-
-    return markets
-
-
-# TODO: intead of limit=5000, calculate the optimal limit based on prev_end_time
-# TODO: add option for hourly data
-def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False):
-    res = []
-
-    X = client.get_historical_prices(
-        market=market,
-        resolution=60,
-        limit=5000 if limit is None else min(limit, 5000),
-    )
-    time.sleep(0.05)
-    if limit is not None:
-        limit -= len(X)
-    res.extend(X)
-    count = 1
-
-    start_time = min(parse_datetime(x["startTime"]) for x in X)
-    if verbose:
-        print(count, len(X), start_time)
-    start_time = start_time.timestamp()
-
-    while (
-        # count <= 10 and
-        len(X) > 1
-        and (limit is None or limit > 0)
-        and (prev_end_time is None or prev_end_time < start_time)
-    ):
-        X = client.get_historical_prices(
-            market=market,
-            resolution=60,
-            limit=5000 if limit is None else min(limit, 5000),
-            end_time=start_time,
-        )
-        time.sleep(0.05)
-        if limit is not None:
-            limit -= len(X)
-        res.extend(X)
-        count += 1
-
-        start_time = min(parse_datetime(x["startTime"]) for x in X)
-        if verbose:
-            print(count, len(X), start_time)
-        start_time = start_time.timestamp()
-
-    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
-    if prev_end_time is not None:
-        res = res[
-            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
-            > prev_end_time
-        ]
-
-    return res
-
-
-def load_price_data(
-    data_dir, market, return_price_data=True, return_price_data_only=False
-):
-    symbol = market.split("/")[0]
-    coin = utils.get_coin(symbol)
-
-    data_files = glob.glob(os.path.join(data_dir, coin, symbol + "_*_*.csv"))
-    assert len(data_files) <= 1
-    # data_file = os.path.join(data_dir, coin, symbol + ".csv")
-    price_data = None
-    prev_end_time = None
-    data_length = 0
-
-    if len(data_files) == 1:
-        data_file = data_files[0]
-        if return_price_data:
-            price_data = pd.read_csv(data_file, index_col=0).reset_index()
-            data_length = len(price_data)
-
-            price_data["startTimestamp"] = price_data["startTime"].map(
-                lambda x: datetime.timestamp(parse_datetime(x))
-            )
-            prev_end_time = price_data["startTimestamp"].max()
-        else:
-            data_file_split = data_file.split("_")
-            prev_end_time = int(data_file_split[1])
-            data_length = int(data_file_split[-1].split(".csv")[0])
-
-    if return_price_data:
-        if return_price_data_only:
-            return price_data
-
-        return price_data, prev_end_time, data_length
-
-    return prev_end_time, data_length
-
-
-def save_price_data(data_dir):
-    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-
-    markets = get_filtered_markets(client)
-
-    datapoints_added = 0
-
-    max_data_length = 0
-    max_symbol = None
-
-    print("Saving price data...")
-
-    for coin, markets_group in tqdm(markets.groupby("coin")):
-        coin_dir = os.path.join(data_dir, coin)
-        if not os.path.exists(coin_dir):
-            os.mkdir(coin_dir)
-
-        for market in markets_group["name"]:
-            prev_end_time, prev_data_length = load_price_data(
-                data_dir, market, return_price_data=False
-            )
-
-            new_price_data = get_price_data(
-                client,
-                market,
-                limit=None,
-                prev_end_time=prev_end_time,
-                verbose=False,
-            )
-
-            symbol = market.split("/")[0]
-
-            price_data = new_price_data.drop_duplicates("startTime").sort_values(
-                "startTime"
-            )
-            end_time = (
-                price_data["startTime"]
-                .map(lambda x: datetime.timestamp(parse_datetime(x)))
-                .max()
-            )
-
-            datapoints_added += len(price_data)
-            data_length = prev_data_length + len(price_data)
-
-            if data_length > max_data_length:
-                max_data_length = data_length
-                max_symbol = symbol
-
-            prev_data_file = os.path.join(
-                coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
-            )
-            new_data_file = os.path.join(
-                coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
-            )
-            data_file_exists = os.path.exists(prev_data_file)
-            price_data.to_csv(
-                prev_data_file if data_file_exists else new_data_file,
-                mode="a" if data_file_exists else "w",
-                header=not data_file_exists,
-            )
-            if data_file_exists:
-                os.rename(prev_data_file, new_data_file)
-
-    print(f"Saved {datapoints_added} price data points")
-    print(f"Max. data length: {max_data_length} (symbol {max_symbol})")
-    print()
-
-
 def experiments():
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     X = get_price_data(client, "PERP/USD", limit=None, prev_end_time=None, verbose=True)
@@ -758,38 +509,9 @@ def experiments():
     print(np.unique(np.diff(X["t"])) / 60)
 
 
-# change each price data file name to include its end time and its length
+# TODO: remove HALF symbols
 def clean(data_dir):
-    for filename in tqdm(glob.glob(data_dir + "/*/*.csv")):
-        if "_" not in filename:
-            fname_split = filename.split("/")
-            symbol = fname_split[-1].split(".")[0]
-            market = symbol + "/USD"
-
-            _, prev_end_time, data_length = load_price_data(
-                data_dir, market, return_price_data=True
-            )
-
-            os.rename(
-                filename,
-                filename.replace(".csv", f"_{int(prev_end_time)}_{data_length}.csv"),
-            )
-        else:
-            fname_split = filename.split("/")
-            symbol = fname_split[-1].split("_")[0]
-            market = symbol + "/USD"
-
-            prev_end_time, data_length = load_price_data(
-                data_dir, market, return_price_data=False
-            )
-
-            os.rename(
-                filename,
-                filename.replace(
-                    f"_{int(prev_end_time)}.0_{data_length}.csv",
-                    f"_{int(prev_end_time)}_{data_length}.csv",
-                ),
-            )
+    pass
 
 
 def main():
