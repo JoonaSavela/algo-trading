@@ -10,6 +10,9 @@ format:
 test: format
 	pytest tests
 
+performance: format
+	pytest performance -rP
+
 collect:
 	python3 algtra/collect/data.py
 
@@ -24,4 +27,4 @@ tax:
 
 
 
-.PHONY: all init format test collect optimize run tax
+.PHONY: all init format test performance collect optimize run tax

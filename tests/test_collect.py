@@ -38,13 +38,15 @@ class Test_get_price_data:
         prev_end_time = time.time() - 60 * minutes
 
         price_data = data.get_price_data(client, "ETH/USD", prev_end_time=prev_end_time)
-        price_data["startTimestamp"] = price_data["startTime"].map(
-            lambda x: datetime.timestamp(parse_datetime(x))
-        )
 
-        assert time.time() - price_data["startTimestamp"].max() < 60
-        assert price_data["startTimestamp"].min() > prev_end_time
-        assert price_data["startTimestamp"].min() - prev_end_time < 60
+        if len(price_data) > 0:
+            price_data["startTimestamp"] = price_data["startTime"].map(
+                lambda x: datetime.timestamp(parse_datetime(x))
+            )
+
+            assert time.time() - price_data["startTimestamp"].max() < 60
+            assert price_data["startTimestamp"].min() > prev_end_time
+            assert price_data["startTimestamp"].min() - prev_end_time < 60
 
     @settings(max_examples=2, deadline=None)
     @given(limit=st.integers(1, 10000))
@@ -158,6 +160,12 @@ def test_load_spread_distributions(symbol):
             not os.path.exists(os.path.join(data_dir, "spreads", coin))
         )
 
+    distributions = data.load_spread_distributions(data_dir, symbol, stack=True)
+
+    if os.path.exists(os.path.join(data_dir, coin)):
+        assert isinstance(distributions, np.ndarray)
+        assert distributions.shape[1] == 2
+
 
 @given(
     prev_N=st.integers(1, 1e4),
@@ -214,3 +222,60 @@ def test_combine_spread_distributions(
                 weights=np.array([prev_N, new_N]),
             ),
         )
+
+
+class Test_calculate_max_average_spread:
+    @given(
+        distribution=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e7, width=64),
+        ),
+        total_balance=st.floats(0, 1e6, width=64),
+    )
+    @settings(deadline=timedelta(seconds=2.5))
+    def test_against_naive(self, distribution, total_balance):
+        assume(np.sum(distribution) > 0)
+
+        distributions1 = {
+            "asks": distribution,
+            "bids": distribution,
+        }
+
+        max_avg_spread1 = data.calculate_max_average_spread_naive(
+            distributions1, total_balance
+        )
+
+        distributions2 = np.stack([distribution, distribution], axis=1)
+
+        max_avg_spread2 = data.calculate_max_average_spread(
+            distributions2, total_balance
+        )
+
+        np.testing.assert_allclose(max_avg_spread1, max_avg_spread2)
+
+    @given(
+        distribution=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e7, width=64),
+        ),
+        total_balances=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e6, width=64),
+        ),
+    )
+    @settings(deadline=timedelta(seconds=2.5))
+    def test_is_increasing(self, distribution, total_balances):
+        assume(np.sum(distribution) > 0)
+
+        total_balances = np.sort(total_balances)
+
+        distributions = np.stack([distribution, distribution], axis=1)
+
+        spreads = np.zeros(len(total_balances))
+        for i, balance in enumerate(total_balances):
+            spreads[i] = data.calculate_max_average_spread(distributions, balance)
+
+        assert np.all(np.diff(spreads) >= 0)

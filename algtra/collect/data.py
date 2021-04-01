@@ -23,6 +23,7 @@ from tqdm import tqdm
 from pathlib import Path
 from loguru import logger
 import matplotlib.pyplot as plt
+from numba import njit
 
 
 # TODO: remove HALF symbols
@@ -184,13 +185,16 @@ def save_price_data(data_dir):
                 max_data_length = data_length
                 max_symbol = symbol
 
-            prev_data_file = os.path.join(
-                coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
-            )
+            data_file_exists = prev_end_time is not None
+            if data_file_exists:
+                prev_data_file = os.path.join(
+                    coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
+                )
+                assert os.path.exists(prev_data_file)
+
             new_data_file = os.path.join(
                 coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
             )
-            data_file_exists = os.path.exists(prev_data_file)
             price_data.to_csv(
                 prev_data_file if data_file_exists else new_data_file,
                 mode="a" if data_file_exists else "w",
@@ -240,7 +244,7 @@ def get_spread_distributions(client, market):
     return distributions
 
 
-def load_spread_distributions(data_dir, symbol):
+def load_spread_distributions(data_dir, symbol, stack=False):
     coin = utils.get_coin(symbol)
     coin_dir = os.path.join(data_dir, "spreads", coin)
 
@@ -257,6 +261,17 @@ def load_spread_distributions(data_dir, symbol):
 
         for side in constants.ASKS_AND_BIDS:
             distributions[side] = np.array(distributions[side])
+
+    if stack:
+        max_N = np.max([len(distributions[side]) for side in constants.ASKS_AND_BIDS])
+
+        res = np.zeros((max_N, 2))
+
+        for i in range(2):
+            distr = distributions[constants.ASKS_AND_BIDS[i]]
+            res[: len(distr), i] = distr
+
+        distributions = res
 
     return distributions
 
@@ -341,7 +356,7 @@ def save_spread_distributions(data_dir, debug=False):
     print()
 
 
-def calculate_max_average_spread(distributions, total_balance):
+def calculate_max_average_spread_naive(distributions, total_balance):
     res = []
 
     for side in constants.ASKS_AND_BIDS:
@@ -353,18 +368,46 @@ def calculate_max_average_spread(distributions, total_balance):
         else:
             weights[-1] += 1 - np.sum(weights)
 
-        log_percentage = (
-            np.arange(len(distributions[side])) * constants.ORDERBOOK_STEP_SIZE
-        )
+        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
 
-        average_spread = np.dot(log_percentage[: len(weights)], weights)
+        average_spread = np.dot(log_percentage, weights)
         res.append(average_spread)
 
     return np.exp(np.max(res)) - 1
 
 
+@njit(fastmath=True)
+def calculate_max_average_spread(distributions, total_balance):
+    res = np.zeros(2)  # .astype(np.float32)
+
+    for i in range(2):
+        N_max = 0
+        cumsum = 0.0
+        N = len(distributions[:, i])
+
+        while N_max < N and cumsum + distributions[N_max, i] < total_balance:
+            cumsum += distributions[N_max, i]
+            N_max += 1
+
+        idx = np.arange(N_max)
+
+        weights = distributions[idx, i] / total_balance
+
+        if len(weights) < N:
+            weights = np.append(weights, 1.0 - np.sum(weights))
+        else:
+            weights[-1] += 1.0 - np.sum(weights)
+
+        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
+
+        average_spread = np.dot(log_percentage, weights)
+        res[i] = average_spread
+
+    return np.exp(np.max(res)) - 1
+
+
 def visualize_spreads(data_dir, symbol):
-    distributions = load_spread_distributions(data_dir, symbol)
+    distributions = load_spread_distributions(data_dir, symbol, stack=True)
 
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     total_balance = utils.get_total_balance(client, False)

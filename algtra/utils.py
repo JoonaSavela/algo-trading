@@ -19,6 +19,41 @@ except ImportError as e:
     print(e)
 
 
+def seconds_to_milliseconds(t, units):
+    if t < 1:
+        t *= 1000
+        units = "milliseconds"
+
+    return t, units
+
+
+def milliseconds_to_microseconds(t, units):
+    if t < 1:
+        t *= 1000
+        units = "microseconds"
+
+    return t, units
+
+
+def print_times(title, subtitles, times):
+    assert len(subtitles) == len(times)
+
+    max_subtitle_length = max(len(subtitle) for subtitle in subtitles)
+
+    print(f"{title}:")
+
+    for i, t in enumerate(times):
+        units = "seconds"
+        t, units = seconds_to_milliseconds(t, units)
+        t, units = milliseconds_to_microseconds(t, units)
+        t = round_to_n(t)
+
+        n_tabs = (max_subtitle_length - len(subtitles[i])) // 4 + 1
+        print(f"\t{subtitles[i]}:" + "\t" * n_tabs, f"{t} {units}")
+
+    print()
+
+
 def append_to_dict_of_collections(d, k, v, collection_type="list"):
     if k not in d:
         if collection_type == "list":
@@ -420,7 +455,7 @@ def heikin_ashi(X):
     return res
 
 
-def round_to_n(x, n=2):
+def round_to_n(x, n=3):
     if x == 0:
         return x
     res = round(x, -int(floor(log10(abs(x)))) + (n - 1)) if x != 0 else 0
@@ -428,7 +463,7 @@ def round_to_n(x, n=2):
     return res
 
 
-def floor_to_n(x, n=2):
+def floor_to_n(x, n=3):
     if x == 0:
         return x
     p = -int(floor(log10(abs(x)))) + (n - 1)
@@ -437,7 +472,7 @@ def floor_to_n(x, n=2):
     return res
 
 
-def ceil_to_n(x, n=2):
+def ceil_to_n(x, n=3):
     if x == 0:
         return x
     p = -int(floor(log10(abs(x)))) + (n - 1)
