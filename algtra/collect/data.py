@@ -26,7 +26,6 @@ import matplotlib.pyplot as plt
 from numba import njit
 
 
-# TODO: remove HALF symbols
 def get_filtered_markets(client, filter_volume=False):
     markets = pd.DataFrame(client.list_markets())
     time.sleep(0.05)
@@ -620,7 +619,34 @@ def save_total_balance(data_dir):
     print()
 
 
+def save_average_volumes(data_dir):
+    print("Saving average volumes...")
 
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    markets = get_filtered_markets(client)
+
+    volumes = {}
+
+    max_volume = -1
+    max_symbol = None
+
+    for market in tqdm(markets["name"]):
+        price_data = load_price_data(data_dir, market, return_price_data_only=True)
+        symbol = market.split("/")[0]
+
+        volumes[symbol] = price_data["volume"].mean()
+
+        if volumes[symbol] > max_volume:
+            max_volume = volumes[symbol]
+            max_symbol = symbol
+
+    volumes_fname = os.path.abspath(os.path.join(data_dir, "volumes.json"))
+
+    with open(volumes_fname, "w") as file:
+        json.dump(volumes, file, cls=utils.NpEncoder)
+
+    print(f"Largest average volume: {max_volume} (symbol: {max_symbol})")
+    print()
 
 
 def experiments():
@@ -651,6 +677,7 @@ def main():
     save_spread_distributions(data_dir)
     save_trade_history(data_dir)
     save_total_balance(data_dir)
+    save_average_volumes(data_dir)
     clean(data_dir)
 
     # get_and_save_all(data_dir)
