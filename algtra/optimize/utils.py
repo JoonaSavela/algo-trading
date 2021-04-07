@@ -1,15 +1,543 @@
-from data import load_all_data
+# if __name__ == "__main__":
+# raise ValueError("algtra/optimize/utils.py should not be run as main.")
+
+import os
+import sys
+
+if __name__ == "__main__":
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+
+from algtra.collect import data
 import numpy as np
 import pandas as pd
 import glob
 import matplotlib.pyplot as plt
 import time
-from utils import *
-import os
+from algtra import utils
 from tqdm import tqdm
 import copy
-from trade import get_total_balance
-from parameters import commissions
+from algtra import constants
+import keys
+from ftx.rest.client import FtxClient
+from datetime import date, timedelta, datetime
+from ciso8601 import parse_datetime
+from functools import reduce
+import glob
+from numba import njit
+
+
+def choose_coins_to_optimize(k=10, verbose=False):
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    markets = data.get_filtered_markets(client)
+
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+
+    markets["dataLength"] = markets["name"].map(
+        lambda x: data.load_price_data(data_dir, x, return_price_data=False)[1]
+    )
+
+    markets = markets.groupby("coin").filter(
+        lambda x: x["dataLength"].mean() > constants.MINUTES_IN_A_YEAR
+    )
+
+    volumes = markets.groupby("coin")["volumeUsd24h"].mean()
+    volumes = volumes.sort_values(ascending=False)
+
+    if verbose:
+        print(volumes.head(k))
+        print()
+
+    return volumes.head(k).index.values
+
+
+def get_N_iter_and_init_args(fname, n_params, max_N_iter=50):
+    if os.path.exists(fname):
+        with open(fname, "r") as file:
+            params_dict = json.load(file)
+            init_args = params_dict["params"]
+
+        modification_time = os.path.getmtime(fname)
+
+        N_iter = (time.time() - modification_time) // (60 * 60 * 24)
+        N_iter = min(N_iter, max_N_iter)
+    else:
+        init_args = None
+        N_iter = max_N_iter
+
+    # Scale N_iter by dimensionality
+    if len(bounds) > 2:
+        N_iter *= 2 ** (n_params - 2)
+
+    N_iter = max(N_iter, 1)
+
+    return N_iter, init_args
+
+
+def get_rounded_args(args, resolutions, parameter_names):
+    res = ()
+    for i in range(len(args)):
+        arg = args[i]
+
+        if type(resolutions[parameter_names[i]]) == int:
+            arg = int(round(arg))
+
+        res += (arg,)
+
+    return res
+
+
+def get_suitable_objective_function_for_bayes_opt(
+    objective_dict, strategy_type, resolutions, parameter_names
+):
+    if strategy_type == "ma":
+
+        def objective_fn(aggregate_N, w):
+            args = (aggregate_N, w)
+            args = get_rounded_args(args, resolutions, parameter_names)
+
+            if args not in objective_dict:
+                objective_dict[args] = get_single_strategy_objective_function(
+                    args,
+                    strategy_type,
+                    frequency,
+                    coin,
+                    m,
+                    m_bear,
+                    N_repeat_inp,
+                    sides,
+                    X_origs,
+                    Xs,
+                    X_bears,
+                    short,
+                    step,
+                    stop_loss_take_profit_types,
+                    total_balance,
+                    potential_balances,
+                    potential_spreads,
+                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+                    trail_value_recalc_period=trail_value_recalc_period,
+                    workers=None,
+                    debug=False,
+                    taxes=taxes,
+                )
+
+            return objective_dict[args]["objective"]
+
+    elif strategy_type == "stoch":
+
+        def objective_fn(aggregate_N, w, th):
+            args = (aggregate_N, w, th)
+            args = get_rounded_args(args, resolutions, parameter_names)
+
+            if args not in objective_dict:
+                objective_dict[args] = get_single_strategy_objective_function(
+                    args,
+                    strategy_type,
+                    frequency,
+                    coin,
+                    m,
+                    m_bear,
+                    N_repeat_inp,
+                    sides,
+                    X_origs,
+                    Xs,
+                    X_bears,
+                    short,
+                    step,
+                    stop_loss_take_profit_types,
+                    total_balance,
+                    potential_balances,
+                    potential_spreads,
+                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+                    trail_value_recalc_period=trail_value_recalc_period,
+                    workers=None,
+                    debug=False,
+                    taxes=taxes,
+                )
+
+            return objective_dict[args]["objective"]
+
+    elif strategy_type == "macross":
+
+        def objective_fn(aggregate_N, w, w2):
+            args = (aggregate_N, w, w2)
+            args = get_rounded_args(args, resolutions, parameter_names)
+
+            if args not in objective_dict:
+                objective_dict[args] = get_single_strategy_objective_function(
+                    args,
+                    strategy_type,
+                    frequency,
+                    coin,
+                    m,
+                    m_bear,
+                    N_repeat_inp,
+                    sides,
+                    X_origs,
+                    Xs,
+                    X_bears,
+                    short,
+                    step,
+                    stop_loss_take_profit_types,
+                    total_balance,
+                    potential_balances,
+                    potential_spreads,
+                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+                    trail_value_recalc_period=trail_value_recalc_period,
+                    workers=None,
+                    debug=False,
+                    taxes=taxes,
+                )
+
+            return objective_dict[args]["objective"]
+
+    return objective_fn
+
+
+def get_single_strategy_objective_function(args, strategy_type):
+
+    sltp_results_dir = "optim_results/sltp_results/"
+    if not os.path.exists(sltp_results_dir):
+        os.mkdir(sltp_results_dir)
+
+    joined_str_args = "_".join(str(arg) for arg in args)
+
+    get_buys_and_sells_fn = utils.choose_get_buys_and_sells_fn(strategy_type)
+
+    params_dict = {}
+
+    aggregate_N, w = args[:2]
+
+    skip_cond, conflict_value = skip_condition(strategy_type, frequency, args)
+    if skip_cond:
+        return {"objective": conflict_value}
+
+    # TODO: get buys and sells
+
+    for side in ["long", "short"]:
+        (
+            optimal_side_params,
+            optimal_side_objective,
+        ) = get_single_strategy_side_objective_function()
+
+    # TODO: combine sides
+
+    return params_dict
+
+
+def get_single_strategy_side_objective_function():
+    leverage_options = get_leverage_options()
+
+    best_optimized_params = None
+    best_leverage = None
+    best_objective = -np.Inf
+
+    for leverage in leverage_options:
+        trade_chunks = get_trade_chunks()
+
+        optimized_params, objective = optimize_sltp_and_balancing_params()
+
+        if objective > best_objective:
+            best_objective = objective
+            best_optimized_params = optimized_params
+            best_leverage = leverage
+
+    best_optimized_params["leverage"] = best_leverage
+
+    return optimized_params, best_objective
+
+
+def get_leverage_options():
+    pass
+
+
+def get_trade_chunks():
+    pass
+
+
+def transform_trade_chunk(closes, lows, highs, displacements, stop_loss, take_profit, aggregate_N, usd_percentage, balancing_period):
+    stop_loss_indices = get_stop_loss_indices(closes, lows, stop_loss, aggregate_N)
+    take_profit_indices = get_take_profit_indices(closes, highs, take_profit, aggregate_N)
+
+    assert len(stop_loss_indices) == len(take_profit_indices)
+
+    res = np.zeros(len(stop_loss_indices), len(closes))
+
+    for i in range(len(stop_loss_indices)):
+        normalized_closes = closes[i:] / closes[i - 1] if i > 0 else closes
+
+        balanced_trade = get_balanced_trade_chunk(
+            normalized_closes, stop_loss_indices[i], take_profit_indices[i]
+        )
+
+        res[i, :len(balanced_trade)] = balanced_trade
+
+    return res
+
+def get_balanced_trade_chunk_naive(closes, stop_loss_index, take_profit_index, aggregate_N, usd_percentage, balancing_period):
+    pass
+
+def get_balanced_trade_chunk():
+    pass
+
+
+def get_sltp_and_balancing_objective_function():
+    for trade_chunk in trade_chunks:
+        balanced_trade_chunk = transform_trade_chunk(trade_chunk)
+
+        obective = ...
+
+    return objective
+
+
+def get_stop_loss_index_naive(lows, stop_loss: float):
+    idx = np.argwhere(lows <= stop_loss)
+
+    return idx[0].item() if len(idx) > 0 else len(lows)
+
+
+@njit
+def get_stop_loss_index(lows, stop_loss: float):
+    for i in range(len(lows)):
+        if lows[i] <= stop_loss:
+            return i
+
+    return len(lows)
+
+
+def get_take_profit_index_naive(highs, take_profit: float):
+    idx = np.argwhere(highs >= take_profit)
+
+    return idx[0].item() if len(idx) > 0 else len(highs)
+
+
+@njit
+def get_take_profit_index(highs, take_profit: float):
+    for i in range(len(highs)):
+        if highs[i] >= take_profit:
+            return i
+
+    return len(highs)
+
+
+# assumes trade chunk is normalized to start from 1
+def get_stop_loss_indices_naive(closes, lows, stop_loss: float, aggregate_N: int):
+    assert len(closes) == len(lows)
+
+    aggregate_N *= 60
+    aggregate_N = min(aggregate_N, len(closes))
+
+    stop_loss_indices = np.zeros(aggregate_N)
+
+    for i in range(aggregate_N):
+        # renormalize lows
+        normalized_lows = lows[i:] / closes[i - 1] if i > 0 else lows
+        stop_loss_indices[i] = get_stop_loss_index_naive(normalized_lows, stop_loss) + i
+
+    return stop_loss_indices
+
+
+# assumes trade chunk is normalized to start from 1
+@njit
+def get_stop_loss_indices(closes, lows, stop_loss: float, aggregate_N: int):
+    assert len(closes) == len(lows)
+
+    aggregate_N *= 60
+    aggregate_N = min(aggregate_N, len(closes))
+
+    stop_loss_indices = np.zeros(aggregate_N)
+    current_close = 1.0
+
+    for i in range(aggregate_N):
+        prev_close = current_close
+        if i > 0:
+            prev_stop_loss_index = stop_loss_indices[i - 1]
+            current_close = closes[i - 1]
+        else:
+            prev_stop_loss_index = 0
+            current_close = 1.0
+
+        # renormalize lows
+        if current_close > prev_close and prev_stop_loss_index > i:
+            # if current close is larger than previous close, then it suffices to check
+            # only up to the previous stop loss index
+            # exception: when previous stop loss was triggered before current close
+            normalized_lows = lows[i:prev_stop_loss_index] / current_close
+            stop_loss_indices[i] = get_stop_loss_index(normalized_lows, stop_loss) + i
+
+        else:
+            # if the current close is less than the previous close, then it suffices to
+            # check only after the the previous stop loss index
+            i_start = max(i, prev_stop_loss_index)
+            normalized_lows = lows[i_start:] / current_close
+            stop_loss_indices[i] = (
+                get_stop_loss_index(normalized_lows, stop_loss) + i_start
+            )
+
+    return stop_loss_indices
+
+
+# assumes trade chunk is normalized to start from 1
+def get_take_profit_indices_naive(closes, highs, take_profit: float, aggregate_N: int):
+    assert len(closes) == len(highs)
+
+    aggregate_N *= 60
+    aggregate_N = min(aggregate_N, len(closes))
+
+    take_profit_indices = np.zeros(aggregate_N)
+
+    for i in range(aggregate_N):
+        # renormalize highs
+        normalized_highs = highs[i:] / closes[i - 1] if i > 0 else highs
+        take_profit_indices[i] = (
+            get_take_profit_index_naive(normalized_highs, take_profit) + i
+        )
+
+    return take_profit_indices
+
+
+# assumes trade chunk is normalized to start from 1
+@njit
+def get_take_profit_indices(closes, highs, take_profit: float, aggregate_N: int):
+    assert len(closes) == len(highs)
+
+    aggregate_N *= 60
+    aggregate_N = min(aggregate_N, len(closes))
+
+    take_profit_indices = np.zeros(aggregate_N)
+    current_close = 1.0
+
+    for i in range(aggregate_N):
+        prev_close = current_close
+        if i > 0:
+            prev_take_profit_index = take_profit_indices[i - 1]
+            current_close = closes[i - 1]
+        else:
+            prev_take_profit_index = 0
+            current_close = 1.0
+
+        # renormalize highs
+        if current_close < prev_close and prev_take_profit_index > i:
+            # if current close is smaller than previous close, then it suffices to check
+            # only up to the previous take profit index
+            # exception: when previous take profit was triggered before current close
+            normalized_highs = highs[i:prev_take_profit_index] / current_close
+            take_profit_indices[i] = (
+                get_take_profit_index(normalized_highs, take_profit) + i
+            )
+
+        else:
+            # if the current close is more than the previous close, then it suffices to
+            # check only after the the previous take profit index
+            i_start = max(i, prev_take_profit_index)
+            normalized_highs = highs[i_start:] / current_close
+            take_profit_indices[i] = (
+                get_take_profit_index(normalized_highs, take_profit) + i_start
+            )
+
+    return take_profit_indices
+
+
+def optimize_sltp_and_balancing_params():
+    pbounds = {
+        "take_profit": take_profit_limits,
+        "stop_loss": stop_loss_limits,
+        "usd_percentage": (0, 1),
+        "balancing_period": (1, 7 * 24),
+    }
+
+    def sltp_and_balancing_objective_function(
+        take_profit, stop_loss, usd_percentage, balancing_period
+    ):
+        balancing_period = int(round(balancing_period))
+
+        return get_sltp_and_balancing_objective_function()
+
+    optimizer = BayesianOptimization(
+        f=sltp_objective_function, pbounds=pbounds, verbose=1 if debug else 0
+    )
+
+    filename = (
+        sltp_results_dir
+        + f'{coin}_{frequency}_{strategy_type}_{m}_{m_bear}_{joined_str_args}_{"_".join(stop_loss_types)}_{side}.json'
+    )
+
+    if os.path.exists(filename):
+        with open(filename, "r") as file:
+            prev_best_sltp_args = json.load(file)
+
+        optimizer.probe(params=prev_best_sltp_args, lazy=True)
+
+        init_points = 50
+    else:
+        init_points = 100
+
+    optimizer.maximize(
+        init_points=init_points,
+        n_iter=5,
+    )
+
+    take_profit = optimizer.max["params"]["take_profit"]
+    stop_loss = optimizer.max["params"]["stop_loss"]
+    stop_loss_type = stop_loss_types[
+        int(round(optimizer.max["params"]["stop_loss_type"]))
+    ]
+    wealth = optimizer.max["target"]
+
+    with open(filename, "w") as file:
+        json.dump(optimizer.max["params"], file)
+
+    return optimized_params, objective
+
+
+def combine_trade_chunks():
+    pass
+
+
+def combine_time_series_by_common_time(timeseries):
+    return reduce(lambda x, y: pd.merge(x, y, on=["startTime"]).dropna(), timeseries)
+
+
+def calculate_corr_matrix(data_dir, coins):
+    timeseries = []
+
+    for coin in coins:
+        data_file = os.path.join(data_dir, coin, coin + ".csv")
+        if os.path.exists(data_file):
+            symbol = coin
+        else:
+            symbol = utils.get_symbol(coin, m=3)
+
+        symbol_price_data = data.load_price_data(
+            data_dir,
+            symbol + "/USD",
+            return_price_data=True,
+            return_price_data_only=True,
+        )
+
+        # TODO: rename close
+        timeseries.append(symbol_price_data[["startTime", "close"]])
+
+        print(len(symbol_price_data))
+
+    combined_series = combine_time_series_by_common_time(timeseries)
+    common_time = combined_series["startTime"]
+
+    print(combined_series)
+
+
+if __name__ == "__main__":
+    res = choose_coins_to_optimize(k=10, verbose=True)
+
+    print(res)
+
+    # data_dir = os.path.join(os.getcwd(), "data")
+    # calculate_corr_matrix(data_dir, res.index.values)
 
 
 def get_trade_wealths_dicts(
@@ -162,16 +690,9 @@ def get_stop_loss_take_profit_wealth(
     return np.array([1.0])
 
 
-def skip_condition(strategy_type, frequency, args):
-    aggregate_N, w = args[:2]
-    test_value = (w + 1) * 60 * aggregate_N / 10000 - 1
-    if frequency == "high" and test_value >= 0:
-        return True, -test_value
-    elif frequency == "low" and test_value < 0:
-        return True, test_value
-
+def skip_condition(strategy_type, args):
     if strategy_type == "macross":
-        aggregate_N, w, w2 = args
+        _, w, w2 = args
 
         test_value = w / w2 - 1
         if test_value <= 0:

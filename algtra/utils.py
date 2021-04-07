@@ -80,6 +80,7 @@ def get_coin(symbol):
     return coin
 
 
+# TODO: change "m" to "leverage"
 def get_symbol(coin, m, bear=False):
     res = coin
     if m > 1 or bear:
@@ -89,6 +90,20 @@ def get_symbol(coin, m, bear=False):
             res += "BEAR" if m > 1 else "HEDGE"
         else:
             res += "BULL"
+
+    return res
+
+
+def get_leverage_from_symbol(symbol):
+    res = 1
+    if "BULL" in symbol:
+        res = 3
+    elif "BEAR" in symbol:
+        res = -3
+    elif "HEDGE" in symbol:
+        res = -1
+    elif "HALF" in symbol:
+        res = 0.5
 
     return res
 

@@ -1,16 +1,31 @@
+import os
+import sys
+
+if __name__ == "__main__":
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+
+import algtra.optimize.utils as opt
+from algtra import utils
 import numpy as np
 import pandas as pd
 import glob
-from utils import *
-from data import *
-from data_utils import get_average_spread
+
+# from utils import *
+# from data import load_all_data
+# from data_utils import get_average_spread
 import time
 import os
 from tqdm import tqdm
-from optimize_utils import *
+
+# from optimize_utils import *
 from itertools import product
-from parameters import commissions, minutes_in_a_year
-from keys import ftx_api_key, ftx_secret_key
+
+# from parameters import commissions, minutes_in_a_year
+# from keys import ftx_api_key, ftx_secret_key
+import keys
 from ftx.rest.client import FtxClient
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt import risk_models, expected_returns, black_litterman, objective_functions
@@ -18,11 +33,180 @@ from pypfopt import BlackLittermanModel
 import concurrent.futures
 from bayes_opt import BayesianOptimization
 import warnings
-from utils import (
-    choose_get_buys_and_sells_fn,
-    get_filtered_strategies_and_weights,
-    get_parameter_names,
-)
+
+# from utils import (
+#     choose_get_buys_and_sells_fn,
+#     get_filtered_strategies_and_weights,
+#     get_parameter_names,
+# )
+
+
+def optimize_single_strategies(
+    client,
+    all_bounds,
+    all_resolutions,
+    k=10,
+    strategy_type="macross",
+    N_iter=None,
+    verbose=False,
+):
+    coins = opt.choose_coins_to_optimize(k)
+
+    total_balance = utils.get_total_balance(client, False)
+    total_balance = max(total_balance, 1)
+
+    parameter_names = utils.get_parameter_names(strategy_type)
+    bounds = dict([(k, all_bounds[k]) for k in parameter_names])
+    resolutions = dict([(k, all_resolutions[k]) for k in parameter_names])
+
+    for coin in coins:
+        fname = f"optim_results/{coin}.json"
+        N_iter1, init_args = opt.get_N_iter_and_init_args(fname, len(bounds))
+
+        if N_iter is None:
+            N_iter = N_iter1
+
+        params_dict = optimize_single_strategy()
+
+        with open(fname, "w") as file:
+            json.dump(params_dict, file)
+
+
+def optimize_single_strategy(
+    coin, bounds, resolutions, strategy_type, search_method, N_iter, init_args
+):
+    parameter_names = utils.get_parameter_names(strategy_type)
+
+    price_data, spread_data = data.load_data_for_coin(data_dir, coin)
+
+    if verbose:
+        print("Bayesian Optimization...")
+
+    args, objective_dict = bayesian_optimization()
+    args, objective_dict = pseudo_gradient_descent()
+
+    return objective_dict[args]
+
+
+def bayesian_optimization():
+    if verbose:
+        print(
+            "Total N_iter:",
+            N_iter + np.sqrt(N_iter).astype(int) + (1 if init_args is not None else 0),
+        )
+        if init_args is not None:
+            print("Init args:", init_args)
+        print()
+
+    objective_dict = {}
+
+    objective_fn = opt.get_suitable_objective_function_for_bayes_opt()
+
+    optimizer = BayesianOptimization(f=objective_fn, pbounds=bounds, verbose=2)
+
+    if init_args is not None:
+        optimizer.probe(
+            params=dict(zip(parameter_names, init_args)),
+            lazy=True,
+        )
+
+    optimizer.maximize(
+        init_points=N_iter,
+        n_iter=np.sqrt(N_iter).astype(int),
+    )
+
+    args = tuple(v for v in optimizer.max["params"].values())
+    args = get_rounded_args(args, resolutions, parameter_names)
+
+    return args, objective_dict
+
+
+def pseudo_gradient_descent(init_args, parameter_names, bounds, resolutions):
+    prev_args = None
+    if init_args is None:
+        init_args = ()
+        for param_name in parameter_names:
+            search_space = np.arange(
+                bounds[param_name][0],
+                bounds[param_name][1] + resolutions[param_name],
+                resolutions[param_name],
+            )
+            init_args += (np.random.choice(search_space),)
+
+        if verbose:
+            print("Init args:", init_args)
+            print()
+
+    resolution_values = np.array([v for v in resolutions.values()]).reshape(1, -1)
+    args = np.array(init_args)
+
+    if objective_dict is None:
+        objective_dict = {}
+
+    while np.any(args != prev_args):
+        ds = np.array(list(product([-1, 0, 1], repeat=len(bounds))))
+        candidate_args = ds * resolution_values + args.reshape(1, -1)
+
+        for i in range(len(bounds)):
+            candidate_args[:, i] = np.clip(
+                candidate_args[:, i], *bounds[parameter_names[i]]
+            )
+
+        candidate_args = np.unique(candidate_args, axis=0)
+
+        best_objective = -np.Inf
+        best_args = None
+
+        t0 = time.time()
+
+        for c_args in candidate_args:
+            c_args = tuple(c_args)
+            if c_args not in objective_dict:
+                objective_dict[c_args] = get_single_strategy_objective_function(
+                    c_args,
+                    strategy_type,
+                    frequency,
+                    coin,
+                    m,
+                    m_bear,
+                    N_repeat_inp,
+                    sides,
+                    X_origs,
+                    Xs,
+                    X_bears,
+                    short,
+                    step,
+                    stop_loss_take_profit_types,
+                    total_balance,
+                    potential_balances,
+                    potential_spreads,
+                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+                    trail_value_recalc_period=trail_value_recalc_period,
+                    workers=None,
+                    debug=False,
+                    taxes=taxes,
+                )
+
+            if objective_dict[c_args]["objective"] > best_objective:
+                best_objective = objective_dict[c_args]["objective"]
+                best_args = c_args
+
+        prev_args = np.array(args)
+        args = best_args
+
+        t1 = time.time()
+
+        if verbose:
+            print(args)
+            print(objective_dict[args])
+            print(round_to_n(t1 - t0, 4))
+            print()
+
+        args = np.array(args)
+
+    args = tuple(args)
+
+    return args, objective_dict
 
 
 def get_objective_function(
@@ -1984,7 +2168,7 @@ def save_displacements_and_last_signal_change_time(
         json.dump(displacements_and_last_signal_change_time, file, cls=NpEncoder)
 
 
-if __name__ == "__main__":
+def main():
     all_bounds = {
         "aggregate_N": (2, 12),
         "w": (1, 60),
@@ -1995,145 +2179,160 @@ if __name__ == "__main__":
         "w": 1,
         "w2": 1,
     }
-    coins = ["ETH", "BTC"]
-    frequencies = ["low", "high"]
-    strategy_types = ["ma", "macross"]
-    stop_loss_take_profit_types = ["stop_loss", "take_profit", "trailing"]
-    N_iter = None
-    m = 3
-    m_bear = 3
-    N_repeat_inp = 10
-    step = 0.01
-    place_take_profit_and_stop_loss_simultaneously = True
-    trail_value_recalc_period = 200
-    skip_existing = False
-    verbose = True
-    disable = False
-    short = True
-    Xs_index = [0, 1]
-    debug = False
-    active_balancing = True
-    taxes = False
 
+    optimize_single_strategies(
+        all_bounds,
+        all_resolutions,
+        k=10,
+        strategy_type="macross",
+        N_iter=None,
+        verbose=True,
+    )
+
+    # coins = ["ETH", "BTC"]
+    # frequencies = ["low", "high"]
+    # strategy_types = ["ma", "macross"]
+    # stop_loss_take_profit_types = ["stop_loss", "take_profit", "trailing"]
+    # N_iter = None
+    # m = 3
+    # m_bear = 3
+    # N_repeat_inp = 10
+    # step = 0.01
+    # place_take_profit_and_stop_loss_simultaneously = True
+    # trail_value_recalc_period = 200
+    # skip_existing = False
+    # verbose = True
+    # disable = False
+    # short = True
+    # Xs_index = [0, 1]
+    # debug = False
+    # active_balancing = True
+    # taxes = False
+    #
+    # # save_optimal_parameters(
+    # #     all_bounds = all_bounds,
+    # #     all_resolutions = all_resolutions,
+    # #     coins = coins,
+    # #     frequencies = frequencies,
+    # #     strategy_types = strategy_types,
+    # #     stop_loss_take_profit_types = stop_loss_take_profit_types,
+    # #     N_iter = N_iter,
+    # #     m = m,
+    # #     m_bear = m_bear,
+    # #     N_repeat_inp = N_repeat_inp,
+    # #     step = step,
+    # #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
+    # #     trail_value_recalc_period = trail_value_recalc_period,
+    # #     skip_existing = skip_existing,
+    # #     verbose = verbose,
+    # #     disable = disable,
+    # #     short = short,
+    # #     Xs_index = Xs_index,
+    # #     debug = debug,
+    # #     taxes = taxes
+    # # )
+    #
     # save_optimal_parameters(
-    #     all_bounds = all_bounds,
-    #     all_resolutions = all_resolutions,
-    #     coins = coins,
-    #     frequencies = frequencies,
-    #     strategy_types = strategy_types,
-    #     stop_loss_take_profit_types = stop_loss_take_profit_types,
-    #     N_iter = N_iter,
-    #     m = m,
-    #     m_bear = m_bear,
-    #     N_repeat_inp = N_repeat_inp,
-    #     step = step,
-    #     place_take_profit_and_stop_loss_simultaneously = place_take_profit_and_stop_loss_simultaneously,
-    #     trail_value_recalc_period = trail_value_recalc_period,
-    #     skip_existing = skip_existing,
-    #     verbose = verbose,
-    #     disable = disable,
-    #     short = short,
-    #     Xs_index = Xs_index,
-    #     debug = debug,
-    #     taxes = taxes
+    #     all_bounds=all_bounds,
+    #     all_resolutions=all_resolutions,
+    #     coins=coins,
+    #     frequencies=frequencies,  # ['low'],
+    #     strategy_types=strategy_types,
+    #     stop_loss_take_profit_types=stop_loss_take_profit_types,
+    #     N_iter=N_iter,
+    #     m=1,
+    #     m_bear=0,
+    #     N_repeat_inp=N_repeat_inp,
+    #     step=step,
+    #     place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period=trail_value_recalc_period,
+    #     skip_existing=skip_existing,
+    #     verbose=verbose,
+    #     disable=disable,
+    #     short=False,
+    #     Xs_index=Xs_index,
+    #     debug=debug,
+    #     taxes=taxes,
+    # )
+    #
+    # n_iter = 10
+    # compress = 1440
+    # ms = [1]
+    # m_bears = [0]
+    # # ms = [1, 3]
+    # # m_bears = [0, 1, 3]
+    #
+    # optimize_weights_iterative(
+    #     coins=coins,
+    #     freqs=frequencies,
+    #     strategy_types=strategy_types,
+    #     ms=ms,
+    #     m_bears=m_bears,
+    #     n_iter=n_iter,
+    #     compress=compress,
+    #     place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+    #     init_trail_value_recalc_period=trail_value_recalc_period,
+    #     taxes=taxes,
+    # )
+    #
+    # sep = 2
+    # plot = True
+    #
+    # save_displacements_and_last_signal_change_time(
+    #     coins=coins,
+    #     strategy_types=strategy_types,
+    #     ms=ms,
+    #     m_bears=m_bears,
+    #     sep=sep,
+    #     place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period=trail_value_recalc_period,
+    #     Xs_index=Xs_index,
+    #     plot=plot,
+    #     verbose=verbose,
+    #     disable=disable,
+    #     taxes=taxes,
+    # )
+    #
+    # randomize = True
+    # N_repeat = 5
+    # w = 11
+    #
+    # balancing_period = get_optimal_balancing_period(
+    #     coins=coins,
+    #     freqs=frequencies,
+    #     strategy_types=strategy_types,
+    #     ms=ms,
+    #     m_bears=m_bears,
+    #     N_repeat=N_repeat,
+    #     w=w,
+    #     place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period=trail_value_recalc_period,
+    #     randomize=randomize,
+    #     Xs_index=Xs_index,
+    #     plot=True,
+    #     taxes=taxes,
+    # )
+    #
+    # N_repeat = 3
+    #
+    # plot_weighted_adaptive_wealths(
+    #     coins=coins,
+    #     freqs=frequencies,
+    #     strategy_types=strategy_types,
+    #     ms=ms,
+    #     m_bears=m_bears,
+    #     N_repeat=N_repeat,
+    #     compress=60 * balancing_period,
+    #     place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
+    #     trail_value_recalc_period=60 * balancing_period,
+    #     randomize=randomize,
+    #     Xs_index=Xs_index,
+    #     active_balancing=active_balancing,
+    #     balancing_period=1,
+    #     taxes=taxes,
     # )
 
-    save_optimal_parameters(
-        all_bounds=all_bounds,
-        all_resolutions=all_resolutions,
-        coins=coins,
-        frequencies=frequencies,  # ['low'],
-        strategy_types=strategy_types,
-        stop_loss_take_profit_types=stop_loss_take_profit_types,
-        N_iter=N_iter,
-        m=1,
-        m_bear=0,
-        N_repeat_inp=N_repeat_inp,
-        step=step,
-        place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period=trail_value_recalc_period,
-        skip_existing=skip_existing,
-        verbose=verbose,
-        disable=disable,
-        short=False,
-        Xs_index=Xs_index,
-        debug=debug,
-        taxes=taxes,
-    )
 
-    n_iter = 10
-    compress = 1440
-    ms = [1]
-    m_bears = [0]
-    # ms = [1, 3]
-    # m_bears = [0, 1, 3]
-
-    optimize_weights_iterative(
-        coins=coins,
-        freqs=frequencies,
-        strategy_types=strategy_types,
-        ms=ms,
-        m_bears=m_bears,
-        n_iter=n_iter,
-        compress=compress,
-        place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-        init_trail_value_recalc_period=trail_value_recalc_period,
-        taxes=taxes,
-    )
-
-    sep = 2
-    plot = True
-
-    save_displacements_and_last_signal_change_time(
-        coins=coins,
-        strategy_types=strategy_types,
-        ms=ms,
-        m_bears=m_bears,
-        sep=sep,
-        place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period=trail_value_recalc_period,
-        Xs_index=Xs_index,
-        plot=plot,
-        verbose=verbose,
-        disable=disable,
-        taxes=taxes,
-    )
-
-    randomize = True
-    N_repeat = 5
-    w = 11
-
-    balancing_period = get_optimal_balancing_period(
-        coins=coins,
-        freqs=frequencies,
-        strategy_types=strategy_types,
-        ms=ms,
-        m_bears=m_bears,
-        N_repeat=N_repeat,
-        w=w,
-        place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period=trail_value_recalc_period,
-        randomize=randomize,
-        Xs_index=Xs_index,
-        plot=True,
-        taxes=taxes,
-    )
-
-    N_repeat = 3
-
-    plot_weighted_adaptive_wealths(
-        coins=coins,
-        freqs=frequencies,
-        strategy_types=strategy_types,
-        ms=ms,
-        m_bears=m_bears,
-        N_repeat=N_repeat,
-        compress=60 * balancing_period,
-        place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-        trail_value_recalc_period=60 * balancing_period,
-        randomize=randomize,
-        Xs_index=Xs_index,
-        active_balancing=active_balancing,
-        balancing_period=1,
-        taxes=taxes,
-    )
+if __name__ == "__main__":
+    main()
+    # print("Success")
