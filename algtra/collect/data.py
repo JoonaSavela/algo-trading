@@ -107,8 +107,8 @@ def load_price_data(
     coin = utils.get_coin(symbol)
 
     data_files = glob.glob(os.path.join(data_dir, coin, symbol + "_*_*.csv"))
-    assert len(data_files) <= 1
-    # data_file = os.path.join(data_dir, coin, symbol + ".csv")
+    assert len(data_files) <= 1, "Multiple possible data files found."
+
     price_data = None
     prev_end_time = None
     data_length = 0
@@ -135,6 +135,54 @@ def load_price_data(
         return price_data, prev_end_time, data_length
 
     return prev_end_time, data_length
+
+
+def split_price_data(price_data):
+    price_data_splits = []
+
+    time_diffs = np.diff(price_data["startTimestamp"].values) // 60
+
+    idx = np.argwhere(time_diffs > constants.PRICE_DATA_MAX_GAP).reshape((-1,)) + 1
+    idx = np.concatenate([np.array([0]), idx, np.array([len(price_data)])])
+
+    for start, end in zip(idx[:-1], idx[1:]):
+        if end - start > constants.MIN_AGGREGATE_N * constants.MIN_W * 60:
+            sub_idx = price_data.index[start:end]
+            price_data_splits.append(price_data.loc[sub_idx])
+
+    return price_data_splits
+
+
+def load_data_for_coin(data_dir, coin, discard_half_leverage=True):
+    coin_dir = os.path.abspath(os.path.join(data_dir, coin))
+    coin_spread_dir = os.path.abspath(os.path.join(data_dir, "spreads", coin))
+
+    price_data = {}
+    spread_data = {}
+
+    for filename in glob.glob(coin_dir + "/*.csv"):
+        symbol = filename.replace(coin_dir + "/", "").split("_")[0]
+        leverage = utils.get_leverage_from_symbol(symbol)
+
+        if discard_half_leverage and leverage == 0.5:
+            continue
+
+        spread_file = os.path.abspath(os.path.join(coin_spread_dir, f"{symbol}.json"))
+        assert os.path.exists(
+            spread_file
+        ), f"A corresponding spread file should exist for {symbol}."
+
+        market = symbol + "/USD"
+        symbol_price_data = load_price_data(
+            data_dir, market, return_price_data_only=True
+        )
+        symbol_price_data_splits = split_price_data(symbol_price_data)
+        price_data[leverage] = symbol_price_data_splits
+
+        symbol_spread_data = load_spread_distributions(data_dir, symbol, stack=True)
+        spread_data[leverage] = symbol_spread_data
+
+    return price_data, spread_data
 
 
 def save_price_data(data_dir):
@@ -208,8 +256,37 @@ def save_price_data(data_dir):
     print()
 
 
+def clean_orderbook(orderbook, debug=False):
+    flag = debug
+
+    while (
+        orderbook["asks"]
+        and orderbook["bids"]
+        and (orderbook["asks"][0][0] < orderbook["bids"][0][0] or flag)
+    ):
+        size = min(orderbook["asks"][0][1], orderbook["bids"][0][1])
+
+        for side in constants.ASKS_AND_BIDS:
+            orderbook[side][0][1] -= size
+
+            if orderbook[side][0][1] == 0.0:
+                orderbook[side] = orderbook[side][1:]
+
+        flag = False
+
+    return orderbook
+
+
+def orderbook_size_diff(orderbook):
+    total_ask_size = sum(ask[1] for ask in orderbook["asks"])
+    total_bid_size = sum(bid[1] for bid in orderbook["bids"])
+
+    return total_ask_size - total_bid_size
+
+
 def get_spread_distributions(client, market):
     orderbook = client.get_orderbook(market, 100)
+    orderbook = clean_orderbook(orderbook)
     time.sleep(0.05)
 
     asks = np.array(orderbook["asks"])
@@ -226,7 +303,8 @@ def get_spread_distributions(client, market):
         try:
             assert np.all(np.diff(np.abs(log_percentages)) >= 0)
         except AssertionError:
-            logger.error(log_percentages.tostring())
+            logger.error(market)
+            logger.error(log_percentages)
             raise
 
         distribution = np.zeros(
@@ -542,6 +620,9 @@ def save_total_balance(data_dir):
     print()
 
 
+
+
+
 def experiments():
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     X = get_price_data(client, "PERP/USD", limit=None, prev_end_time=None, verbose=True)
@@ -553,6 +634,7 @@ def experiments():
 
 
 # TODO: remove HALF symbols
+# TODO: remove "startTimestamp" and "index" columns
 def clean(data_dir):
     pass
 

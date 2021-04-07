@@ -44,7 +44,7 @@ class Test_get_price_data:
                 lambda x: datetime.timestamp(parse_datetime(x))
             )
 
-            assert time.time() - price_data["startTimestamp"].max() < 60
+            assert time.time() - price_data["startTimestamp"].max() < 60 + 40
             assert price_data["startTimestamp"].min() > prev_end_time
             assert price_data["startTimestamp"].min() - prev_end_time < 60
 
@@ -124,6 +124,65 @@ class Test_load_price_data:
         assert (prev_end_time is None) == (
             not os.path.exists(os.path.join(data_dir, coin))
         )
+
+
+@given(
+    prices=arrays(
+        np.float64,
+        st.integers(2, 200),
+        elements=st.floats(0.001, 1e7, width=64),
+    ),
+    sizes=arrays(
+        np.float64,
+        st.integers(2, 200),
+        elements=st.floats(0.001, 1e6, width=64),
+    ),
+)
+def test_clean_orderbook(prices, sizes):
+    assume(len(prices) <= len(sizes))
+    sizes = sizes[: len(prices)]
+
+    N = len(prices) // 2
+
+    prices1, prices2 = list(prices[:N]), list(prices[N:])
+    sizes1, sizes2 = sizes[:N], sizes[N:]
+
+    prices1 = sorted(prices1, reverse=True)
+    prices2 = sorted(prices2)
+
+    orderbook = {
+        "bids": [[price, size] for price, size in zip(prices1, sizes1)],
+        "asks": [[price, size] for price, size in zip(prices2, sizes2)],
+    }
+
+    assert all(
+        orderbook["bids"][i][0] >= orderbook["bids"][i + 1][0]
+        for i in range(len(orderbook["bids"]) - 1)
+    )
+    assert all(
+        orderbook["asks"][i][0] <= orderbook["asks"][i + 1][0]
+        for i in range(len(orderbook["asks"]) - 1)
+    )
+
+    orderbook_size_diff1 = data.orderbook_size_diff(orderbook)
+    cleaned_orderbook = data.clean_orderbook(orderbook)
+    orderbook_size_diff2 = data.orderbook_size_diff(orderbook)
+
+    np.testing.assert_almost_equal(orderbook_size_diff1, orderbook_size_diff2)
+
+    orderbook = cleaned_orderbook
+
+    assert all(
+        orderbook["bids"][i][0] >= orderbook["bids"][i + 1][0]
+        for i in range(len(orderbook["bids"]) - 1)
+    )
+    assert all(
+        orderbook["asks"][i][0] <= orderbook["asks"][i + 1][0]
+        for i in range(len(orderbook["asks"]) - 1)
+    )
+
+    if orderbook["bids"] and orderbook["asks"]:
+        assert orderbook["bids"][0][0] <= orderbook["asks"][0][0]
 
 
 def test_get_spread_distributions():
@@ -279,3 +338,21 @@ class Test_calculate_max_average_spread:
             spreads[i] = data.calculate_max_average_spread(distributions, balance)
 
         assert np.all(np.diff(spreads) >= 0)
+
+
+def test_split_price_data():
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+
+    market = "FTT/USD"
+
+    price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
+    price_data_splits = data.split_price_data(price_data)
+
+    for price_data in price_data_splits:
+        assert len(price_data) > constants.MIN_AGGREGATE_N * constants.MIN_W * 60
+
+        time_diffs = np.diff(price_data["startTimestamp"].values) // 60
+
+        assert np.all(time_diffs <= constants.PRICE_DATA_MAX_GAP)

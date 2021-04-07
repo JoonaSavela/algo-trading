@@ -43,7 +43,10 @@ def test_calculate_max_average_spread_performance():
     elapsed = end - start
 
     utils.print_times(
-        "max_average_spread",
+        f"max_average_spread ({max_avg_spread1})",
         ["Benchmark", "Compilation", "Target"],
         [elapsed_naive, elapsed_compilation, elapsed],
     )
+
+    np.testing.assert_almost_equal(max_avg_spread1, max_avg_spread2)
+    assert elapsed <= elapsed_naive
