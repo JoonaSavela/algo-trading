@@ -433,56 +433,6 @@ def save_spread_distributions(data_dir, debug=False):
     print()
 
 
-def calculate_max_average_spread_naive(distributions, total_balance):
-    res = []
-
-    for side in constants.ASKS_AND_BIDS:
-        li = np.cumsum(distributions[side]) < total_balance
-        weights = distributions[side][li] / total_balance
-
-        if len(weights) < len(distributions[side]):
-            weights = np.concatenate([weights, [1 - np.sum(weights)]])
-        else:
-            weights[-1] += 1 - np.sum(weights)
-
-        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
-
-        average_spread = np.dot(log_percentage, weights)
-        res.append(average_spread)
-
-    return np.exp(np.max(res)) - 1
-
-
-@njit(fastmath=True)
-def calculate_max_average_spread(distributions, total_balance):
-    res = np.zeros(2)  # .astype(np.float32)
-
-    for i in range(2):
-        N_max = 0
-        cumsum = 0.0
-        N = len(distributions[:, i])
-
-        while N_max < N and cumsum + distributions[N_max, i] < total_balance:
-            cumsum += distributions[N_max, i]
-            N_max += 1
-
-        idx = np.arange(N_max)
-
-        weights = distributions[idx, i] / total_balance
-
-        if len(weights) < N:
-            weights = np.append(weights, 1.0 - np.sum(weights))
-        else:
-            weights[-1] += 1.0 - np.sum(weights)
-
-        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
-
-        average_spread = np.dot(log_percentage, weights)
-        res[i] = average_spread
-
-    return np.exp(np.max(res)) - 1
-
-
 def visualize_spreads(data_dir, symbol):
     distributions = load_spread_distributions(data_dir, symbol, stack=True)
 

@@ -10,13 +10,140 @@ from itertools import product
 import os
 import sys
 import time
-from algtra.constants import TAX_RATE, PARTIAL_LEVERAGED_SYMBOLS
+from algtra import constants
+from algtra.collect import data
+from numba import njit
 
 # matplotlib is not installed in cloud since it is not needed
 try:
     import matplotlib.pyplot as plt
 except ImportError as e:
     print(e)
+
+
+def calculate_max_average_spread_naive(distributions, balance):
+    res = []
+
+    for side in constants.ASKS_AND_BIDS:
+        li = np.cumsum(distributions[side]) < balance
+        weights = distributions[side][li] / balance
+
+        if len(weights) < len(distributions[side]):
+            weights = np.concatenate([weights, [1 - np.sum(weights)]])
+        else:
+            weights[-1] += 1 - np.sum(weights)
+
+        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
+
+        average_spread = np.dot(log_percentage, weights)
+        res.append(average_spread)
+
+    return np.exp(np.max(res)) - 1
+
+
+@njit(fastmath=True)
+def calculate_max_average_spread(distributions, balance):
+    res = np.zeros(2)  # .astype(np.float32)
+
+    for i in range(2):
+        N_max = 0
+        cumsum = 0.0
+        N = len(distributions[:, i])
+
+        while N_max < N and cumsum + distributions[N_max, i] < balance:
+            cumsum += distributions[N_max, i]
+            N_max += 1
+
+        idx = np.arange(N_max)
+
+        weights = distributions[idx, i] / balance
+
+        if len(weights) < N:
+            weights = np.append(weights, 1.0 - np.sum(weights))
+        else:
+            weights[-1] += 1.0 - np.sum(weights)
+
+        log_percentage = np.arange(len(weights)) * constants.ORDERBOOK_STEP_SIZE
+
+        average_spread = np.dot(log_percentage, weights)
+        res[i] = average_spread
+
+    return np.exp(np.max(res)) - 1
+
+
+def get_balanced_usd_and_asset_values_naive(
+    usd_value,
+    asset_value,
+    target_usd_percentage,
+    orderbook_distributions=None,
+    balance=None,
+    taxes=True,
+    tax_exemption=True,
+):
+    total_value = usd_value + asset_value
+    new_usd_percentage = usd_value / total_value
+
+    percentage_change = target_usd_percentage - new_usd_percentage
+    value_change = percentage_change * total_value
+
+    if taxes and (percentage_change > 0.0 or tax_exemption):
+        value_change *= 1.0 / (
+            1.0 - constants.TAX_RATE + target_usd_percentage * constants.TAX_RATE
+        )
+        taxes = value_change * constants.TAX_RATE
+    else:
+        taxes = 0.0
+
+    usd_value += value_change - taxes
+    asset_value -= value_change
+
+    if orderbook_distributions is not None and balance is not None:
+        spread = calculate_max_average_spread(
+            orderbook_distributions, balance * asset_value
+        )
+
+        usd_value -= spread * np.abs(value_change) * target_usd_percentage
+        asset_value -= spread * np.abs(value_change) * (1.0 - target_usd_percentage)
+
+    return usd_value, asset_value
+
+
+@njit
+def get_balanced_usd_and_asset_values(
+    usd_value,
+    asset_value,
+    target_usd_percentage,
+    orderbook_distributions=None,
+    balance=None,
+    taxes=True,
+    tax_exemption=True,
+):
+    total_value = usd_value + asset_value
+    new_usd_percentage = usd_value / total_value
+
+    percentage_change = target_usd_percentage - new_usd_percentage
+    value_change = percentage_change * total_value
+
+    if taxes and (percentage_change > 0.0 or tax_exemption):
+        value_change *= 1.0 / (
+            1.0 - constants.TAX_RATE + target_usd_percentage * constants.TAX_RATE
+        )
+        taxes = value_change * constants.TAX_RATE
+    else:
+        taxes = 0.0
+
+    usd_value += value_change - taxes
+    asset_value -= value_change
+
+    if orderbook_distributions is not None and balance is not None:
+        spread = calculate_max_average_spread(
+            orderbook_distributions, balance * asset_value
+        )
+
+        usd_value -= spread * np.abs(value_change) * target_usd_percentage
+        asset_value -= spread * np.abs(value_change) * (1.0 - target_usd_percentage)
+
+    return usd_value, asset_value
 
 
 def seconds_to_milliseconds(t, units):
@@ -69,7 +196,7 @@ def append_to_dict_of_collections(d, k, v, collection_type="list"):
 
 
 def get_coin(symbol):
-    for partial_leveraged_symbol in PARTIAL_LEVERAGED_SYMBOLS:
+    for partial_leveraged_symbol in constants.PARTIAL_LEVERAGED_SYMBOLS:
         symbol = symbol.replace(partial_leveraged_symbol, "")
 
     if not symbol:
@@ -111,12 +238,12 @@ def get_leverage_from_symbol(symbol):
 def apply_taxes(trade_wealths, copy=False):
     if isinstance(trade_wealths, float):
         if trade_wealths > 1:
-            trade_wealths = (trade_wealths - 1) * (1 - TAX_RATE) + 1
+            trade_wealths = (trade_wealths - 1) * (1 - constants.TAX_RATE) + 1
     else:
         if copy:
             trade_wealths = np.copy(trade_wealths)
         li = trade_wealths > 1
-        trade_wealths[li] = (trade_wealths[li] - 1) * (1 - TAX_RATE) + 1
+        trade_wealths[li] = (trade_wealths[li] - 1) * (1 - constants.TAX_RATE) + 1
 
     return trade_wealths
 

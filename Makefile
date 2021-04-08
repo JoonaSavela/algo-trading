@@ -10,6 +10,9 @@ format:
 test: format
 	pytest tests
 
+test_fast: format
+	pytest -m "not slow" tests
+
 performance: format
 	pytest performance -rP
 
@@ -27,4 +30,4 @@ tax:
 
 
 
-.PHONY: all init format test performance collect optimize run tax
+.PHONY: all init format test test_fast performance collect optimize run tax
