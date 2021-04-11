@@ -209,6 +209,7 @@ def test_load_spread_distributions(symbol):
     assume("\\" not in symbol)
     assume("\x00" not in symbol)
     assume("/" not in symbol)
+    assume("." not in symbol)
     data_dir = os.path.abspath(
         os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
     )

@@ -27,32 +27,38 @@ from ciso8601 import parse_datetime
 from functools import reduce
 import glob
 from numba import njit
+import json
 
 
-def choose_coins_to_optimize(k=10, verbose=False):
-    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-    markets = data.get_filtered_markets(client)
-
+def get_symbols_for_optimization(k=None, min_length=None, verbose=False):
     data_dir = os.path.abspath(
         os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
     )
 
-    markets["dataLength"] = markets["name"].map(
-        lambda x: data.load_price_data(data_dir, x, return_price_data=False)[1]
-    )
+    volumes_fname = os.path.abspath(os.path.join(data_dir, "volumes.json"))
 
-    markets = markets.groupby("coin").filter(
-        lambda x: x["dataLength"].mean() > constants.MINUTES_IN_A_YEAR
-    )
+    with open(volumes_fname, "r") as file:
+        volumes = pd.Series(json.load(file))
 
-    volumes = markets.groupby("coin")["volumeUsd24h"].mean()
+    if min_length is not None:
+        data_lengths = volumes.index.map(
+            lambda x: data.load_price_data(
+                data_dir, x + "/USD", return_price_data=False
+            )[1]
+        )
+
+        volumes = volumes[data_lengths >= min_length]
+
     volumes = volumes.sort_values(ascending=False)
 
+    if k is not None:
+        volumes = volumes.head(k)
+
     if verbose:
-        print(volumes.head(k))
+        print(volumes)
         print()
 
-    return volumes.head(k).index.values
+    return volumes.index.values
 
 
 def get_N_iter_and_init_args(fname, n_params, max_N_iter=50):
@@ -256,13 +262,27 @@ def get_leverage_options():
     pass
 
 
-def get_trade_chunks():
+def get_trades():
     pass
 
 
-def transform_trade_chunk(closes, lows, highs, displacements, stop_loss, take_profit, aggregate_N, usd_percentage, balancing_period):
+def transform_trade(
+    closes,
+    lows,
+    highs,
+    stop_loss,
+    take_profit,
+    aggregate_N,
+    usd_percentage,
+    balancing_period,
+    orderbook_distributions,
+    balance,
+    tax_exemption=True,
+):
     stop_loss_indices = get_stop_loss_indices(closes, lows, stop_loss, aggregate_N)
-    take_profit_indices = get_take_profit_indices(closes, highs, take_profit, aggregate_N)
+    take_profit_indices = get_take_profit_indices(
+        closes, highs, take_profit, aggregate_N
+    )
 
     assert len(stop_loss_indices) == len(take_profit_indices)
 
@@ -271,28 +291,13 @@ def transform_trade_chunk(closes, lows, highs, displacements, stop_loss, take_pr
     for i in range(len(stop_loss_indices)):
         normalized_closes = closes[i:] / closes[i - 1] if i > 0 else closes
 
-        balanced_trade = get_balanced_trade_chunk(
+        balanced_trade = get_balanced_trade(
             normalized_closes, stop_loss_indices[i], take_profit_indices[i]
         )
 
-        res[i, :len(balanced_trade)] = balanced_trade
+        res[i, : len(balanced_trade)] = balanced_trade
 
     return res
-
-def get_balanced_trade_chunk_naive(closes, stop_loss_index, take_profit_index, aggregate_N, usd_percentage, balancing_period):
-    pass
-
-def get_balanced_trade_chunk():
-    pass
-
-
-def get_sltp_and_balancing_objective_function():
-    for trade_chunk in trade_chunks:
-        balanced_trade_chunk = transform_trade_chunk(trade_chunk)
-
-        obective = ...
-
-    return objective
 
 
 def get_stop_loss_index_naive(lows, stop_loss: float):
@@ -325,7 +330,7 @@ def get_take_profit_index(highs, take_profit: float):
     return len(highs)
 
 
-# assumes trade chunk is normalized to start from 1
+# assumes trade is normalized to start from 1
 def get_stop_loss_indices_naive(closes, lows, stop_loss: float, aggregate_N: int):
     assert len(closes) == len(lows)
 
@@ -342,7 +347,7 @@ def get_stop_loss_indices_naive(closes, lows, stop_loss: float, aggregate_N: int
     return stop_loss_indices
 
 
-# assumes trade chunk is normalized to start from 1
+# assumes trade is normalized to start from 1
 @njit
 def get_stop_loss_indices(closes, lows, stop_loss: float, aggregate_N: int):
     assert len(closes) == len(lows)
@@ -443,6 +448,148 @@ def get_take_profit_indices(closes, highs, take_profit: float, aggregate_N: int)
     return take_profit_indices
 
 
+def get_balanced_trade_naive(
+    closes,
+    stop_loss_index,
+    take_profit_index,
+    stop_loss,
+    take_profit,
+    target_usd_percentage,
+    balancing_period,
+    orderbook_distributions,
+    balance,
+    taxes=True,
+    tax_exemption=True,
+):
+    N = len(closes)
+    balancing_period *= 60
+
+    usd_values = np.zeros(N + 1)
+    usd_values[0] = target_usd_percentage
+    asset_values = np.zeros(N + 1)
+    asset_values[0] = 1.0 - target_usd_percentage
+
+    if balance > 0.0:
+        spread = utils.calculate_max_average_spread(
+            orderbook_distributions,
+            balance * asset_values[0],
+            include_commissions=False,
+        )
+        usd_values[0] -= spread * asset_values[0] * target_usd_percentage
+        asset_values[0] -= spread * asset_values[0] * (1.0 - target_usd_percentage)
+
+    trigger_i = min(stop_loss_index, take_profit_index)
+    triggered = trigger_i < N
+    if not triggered:
+        trigger_i = N - 1
+
+    N_balancings = trigger_i // balancing_period
+    prices = np.ones(N_balancings + 2)
+    # prices[0] = 1.0
+    buy_sizes = np.zeros(N_balancings + 2)
+    buy_sizes[0] = asset_values[0]
+
+    for i in range(balancing_period, trigger_i + 1, balancing_period):
+        buy_sizes_index = i // balancing_period
+        prices[buy_sizes_index] = closes[i - 1]
+
+        norm_closes = (
+            closes[i - balancing_period : i] / closes[i - balancing_period - 1]
+            if i > balancing_period
+            else closes[i - balancing_period : i]
+        )
+        asset_values[i - balancing_period + 1 : i + 1] = (
+            asset_values[i - balancing_period] * norm_closes
+        )
+
+        usd_values[i - balancing_period + 1 : i + 1] = usd_values[i - balancing_period]
+
+        (
+            usd_values[i],
+            asset_values[i],
+            new_buy_size,
+            buy_size_diffs,
+        ) = utils.get_balanced_usd_and_asset_values(
+            usd_values[i],
+            asset_values[i],
+            target_usd_percentage,
+            orderbook_distributions=orderbook_distributions,
+            balance=balance,
+            prices=prices,
+            buy_sizes=buy_sizes,
+            buy_sizes_index=buy_sizes_index,
+            taxes=taxes,
+            tax_exemption=tax_exemption,
+        )
+
+        buy_sizes[buy_sizes_index] = new_buy_size
+        buy_sizes[:buy_sizes_index] -= buy_size_diffs
+
+    if trigger_i // balancing_period > 0:
+        assert i == (trigger_i // balancing_period) * balancing_period
+        norm_closes = closes[i : trigger_i + 1] / closes[i - 1]
+    else:
+        i = 0
+        norm_closes = closes[i : trigger_i + 1]
+
+    asset_values[i + 1 : trigger_i + 2] = asset_values[i] * norm_closes
+    usd_values[i + 1 : trigger_i + 2] = usd_values[i]
+
+    usd_values = usd_values[1:]
+    asset_values = asset_values[1:]
+
+    stop_loss_is_before_take_profit = stop_loss_index <= take_profit_index
+
+    assert prices[-1] == 1.0
+    buy_sizes_index = i // balancing_period + 1
+    assert buy_sizes_index == len(buy_sizes) - 1
+
+    if triggered:
+        trigger_value = stop_loss if stop_loss_is_before_take_profit else take_profit
+        asset_values[trigger_i] *= trigger_value / closes[trigger_i]
+
+        prices[buy_sizes_index] = trigger_value
+    else:
+        prices[buy_sizes_index] = closes[-1]
+
+    (
+        usd_values[trigger_i],
+        asset_values[trigger_i],
+        new_buy_size,
+        buy_size_diffs,
+    ) = utils.get_balanced_usd_and_asset_values(
+        usd_values[trigger_i],
+        asset_values[trigger_i],
+        1.0,
+        orderbook_distributions=orderbook_distributions,
+        balance=balance,
+        prices=prices,
+        buy_sizes=buy_sizes,
+        buy_sizes_index=buy_sizes_index,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+    buy_sizes[buy_sizes_index] = new_buy_size
+    buy_sizes[:buy_sizes_index] -= buy_size_diffs
+
+    usd_values[trigger_i:] = usd_values[trigger_i]
+    asset_values[trigger_i:] = asset_values[trigger_i]
+
+    return usd_values, asset_values, buy_sizes
+
+
+get_balanced_trade = njit()(get_balanced_trade_naive)
+
+
+def get_sltp_and_balancing_objective_function():
+    for trade_chunk in trade_chunks:
+        balanced_trade_chunk = transform_trade_chunk(trade_chunk)
+
+        obective = ...
+
+    return objective
+
+
 def optimize_sltp_and_balancing_params():
     pbounds = {
         "take_profit": take_profit_limits,
@@ -532,7 +679,7 @@ def calculate_corr_matrix(data_dir, coins):
 
 
 if __name__ == "__main__":
-    res = choose_coins_to_optimize(k=10, verbose=True)
+    res = get_symbols_for_optimization(k=10, verbose=True)
 
     print(res)
 

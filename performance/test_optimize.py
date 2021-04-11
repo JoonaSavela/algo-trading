@@ -157,3 +157,100 @@ def test_get_take_profit_indices_performance():
 
     np.testing.assert_array_equal(take_profit_indices1, take_profit_indices2)
     assert elapsed <= elapsed_naive
+
+
+def test_get_balanced_trade_performance():
+    closes = np.random.lognormal(size=10000)
+
+    stop_loss = np.random.rand(1).item()
+    take_profit = np.random.rand(1).item()
+    target_usd_percentage = np.random.rand(1).item()
+
+    balancing_period = np.random.randint(1, 24, 1).item()
+
+    distribution = np.random.normal(size=int(1e5))
+    distribution = np.exp(distribution)
+    orderbook_distributions = np.stack([distribution, distribution], axis=1)
+    balance = 2e3
+
+    taxes = bool(np.random.rand(1) < 0.5)
+    tax_exemption = bool(np.random.rand(1) < 0.5)
+
+    stop_loss_index = opt.get_stop_loss_index(closes, stop_loss)
+    take_profit_index = opt.get_take_profit_index(closes, take_profit)
+
+    usd_values1, asset_values1, buy_sizes1 = opt.get_balanced_trade_naive(
+        closes,
+        stop_loss_index,
+        take_profit_index,
+        stop_loss,
+        take_profit,
+        target_usd_percentage,
+        balancing_period,
+        orderbook_distributions,
+        balance,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+
+    start = time.perf_counter()
+    usd_values1, asset_values1, buy_sizes1 = opt.get_balanced_trade_naive(
+        closes,
+        stop_loss_index,
+        take_profit_index,
+        stop_loss,
+        take_profit,
+        target_usd_percentage,
+        balancing_period,
+        orderbook_distributions,
+        balance,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+    end = time.perf_counter()
+    elapsed_naive = end - start
+
+    start = time.perf_counter()
+    usd_values2, asset_values2, buy_sizes2 = opt.get_balanced_trade(
+        closes,
+        stop_loss_index,
+        take_profit_index,
+        stop_loss,
+        take_profit,
+        target_usd_percentage,
+        balancing_period,
+        orderbook_distributions,
+        balance,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+    end = time.perf_counter()
+    elapsed_compilation = end - start
+
+    start = time.perf_counter()
+    usd_values2, asset_values2, buy_sizes2 = opt.get_balanced_trade(
+        closes,
+        stop_loss_index,
+        take_profit_index,
+        stop_loss,
+        take_profit,
+        target_usd_percentage,
+        balancing_period,
+        orderbook_distributions,
+        balance,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+    end = time.perf_counter()
+    elapsed = end - start
+
+    utils.print_times(
+        "get_take_profit_indices",
+        ["Benchmark", "Compilation", "Target"],
+        [elapsed_naive, elapsed_compilation, elapsed],
+    )
+
+    np.testing.assert_allclose(usd_values1, usd_values2)
+    np.testing.assert_allclose(asset_values1, asset_values2)
+    np.testing.assert_almost_equal(buy_sizes1, buy_sizes2)
+    assert elapsed <= elapsed_naive
