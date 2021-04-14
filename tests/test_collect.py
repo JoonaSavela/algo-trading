@@ -42,13 +42,13 @@ class Test_get_price_data:
         price_data = data.get_price_data(client, "ETH/USD", prev_end_time=prev_end_time)
 
         if len(price_data) > 0:
-            price_data["startTimestamp"] = price_data["startTime"].map(
+            price_data["time"] = price_data["startTime"].map(
                 lambda x: datetime.timestamp(parse_datetime(x))
             )
 
-            assert time.time() - price_data["startTimestamp"].max() < 60 + 40
-            assert price_data["startTimestamp"].min() > prev_end_time
-            assert price_data["startTimestamp"].min() - prev_end_time < 60
+            assert time.time() - price_data["time"].max() < 60 + 40
+            assert price_data["time"].min() > prev_end_time
+            assert price_data["time"].min() - prev_end_time < 60
 
     @pytest.mark.slow
     @settings(max_examples=2, deadline=None)
@@ -103,7 +103,7 @@ class Test_load_price_data:
             data_dir, market, return_price_data=False
         )
 
-        assert price_data["startTimestamp"].max() == prev_end_time1
+        assert price_data["time"].max() == prev_end_time1
         assert prev_end_time1 == prev_end_time2
         assert data_length1 == data_length2
 
@@ -302,6 +302,6 @@ def test_split_price_data():
     for price_data in price_data_splits:
         assert len(price_data) > constants.MIN_AGGREGATE_N * constants.MIN_W * 60
 
-        time_diffs = np.diff(price_data["startTimestamp"].values) // 60
+        time_diffs = np.diff(price_data["time"].values) // 60
 
         assert np.all(time_diffs <= constants.PRICE_DATA_MAX_GAP)

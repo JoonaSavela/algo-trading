@@ -7,15 +7,15 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import numpy as np
-from algtra import utils
+from algtra import utils, constants
 from algtra.collect import data
-from algtra.constants import PARTIAL_LEVERAGED_SYMBOLS
 from ftx.rest.client import FtxClient
 import keys
 from hypothesis import given, assume, example, strategies as st, settings
 from hypothesis.extra.numpy import arrays, floating_dtypes, from_dtype
 from datetime import timedelta
 import pytest
+import glob
 
 
 class Test_calculate_max_average_spread:
@@ -241,6 +241,7 @@ class Test_apply_taxes_to_value_change:
 
 
 class Test_get_balanced_usd_and_asset_values:
+    @pytest.mark.slow
     @given(
         usd_value=st.floats(0, 1.0),
         asset_value=st.floats(0, 1.0),
@@ -376,6 +377,7 @@ class Test_get_balanced_usd_and_asset_values:
                 <= usd_value_with_spread + asset_value_with_spread
             )
 
+    @pytest.mark.slow
     @given(
         usd_value=st.floats(0, 1.0),
         asset_value=st.floats(0, 1.0),
@@ -475,11 +477,11 @@ class Test_get_balanced_usd_and_asset_values:
         np.testing.assert_allclose(buy_size_diffs1, buy_size_diffs2)
 
 
-@given(logit=st.floats(-20, 20))
-def test_roundtrip_logit_to_p_p_to_logit(logit):
-    value0 = utils.logit_to_p(logit=logit)
-    value1 = utils.p_to_logit(p=value0)
-    np.testing.assert_allclose(logit, value1)
+# @given(logit=st.floats(-20, 20))
+# def test_roundtrip_logit_to_p_p_to_logit(logit):
+#     value0 = utils.logit_to_p(logit=logit)
+#     value1 = utils.p_to_logit(p=value0)
+#     np.testing.assert_allclose(logit, value1)
 
 
 class Test_get_symbol_and_get_coin:
@@ -489,7 +491,7 @@ class Test_get_symbol_and_get_coin:
 
         for curr in markets["baseCurrency"]:
             coin = utils.get_coin(curr)
-            for partial_leveraged_symbol in PARTIAL_LEVERAGED_SYMBOLS:
+            for partial_leveraged_symbol in constants.PARTIAL_LEVERAGED_SYMBOLS:
                 assert partial_leveraged_symbol not in coin
 
     @given(s=st.text(min_size=1))
@@ -513,3 +515,178 @@ class Test_get_symbol_and_get_coin:
         assert s0 != s or m == 1
         s1 = utils.get_coin(s0)
         assert s1 == s
+
+
+@pytest.mark.slow
+@given(
+    fname=st.sampled_from(
+        glob.glob(
+            constants.DATA_STORAGE_LOCATION
+            + "/"
+            + constants.LOCAL_DATA_DIR
+            + "/*/*.csv"
+        )
+    )
+)
+@settings(max_examples=1, deadline=None)
+def test_get_displacements(fname):
+    fname_split = fname.split("/")
+    symbol = fname_split[-1].split("_")[0]
+    market = symbol + "/USD"
+    coin = utils.get_coin(symbol)
+
+    data_dir = fname.split(coin)[0]
+
+    price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
+
+    displacements = utils.get_displacements(price_data)
+
+    assert np.issubdtype(displacements[0].dtype, np.integer)
+    assert np.all(0 <= displacements) and np.all(displacements < 60)
+
+
+class Test_get_next_displacement_index:
+    @given(
+        displacements=arrays(
+            np.int32,
+            st.integers(1, 1000),
+            elements=st.integers(0, 10000),
+        ),
+        start=st.integers(0, 1000),
+        displacement=st.integers(0, 10000),
+    )
+    def test_naive(self, displacements, start, displacement):
+        start = min(start, len(displacements) - 1)
+
+        i = utils.get_next_displacement_index_naive(displacements, start, displacement)
+
+        assert (
+            i == len(displacements)
+            or i == np.argwhere(displacements[start:] == displacement)[0] + start
+        )
+
+    @given(
+        displacements=arrays(
+            np.int32,
+            st.integers(1, 1000),
+            elements=st.integers(0, 10000),
+        ),
+        start=st.integers(0, 1000),
+        displacement=st.integers(0, 10000),
+    )
+    def test_against_naive(self, displacements, start, displacement):
+        start = min(start, len(displacements) - 1)
+
+        i1 = utils.get_next_displacement_index_naive(displacements, start, displacement)
+        i2 = utils.get_next_displacement_index(displacements, start, displacement)
+
+        assert i1 == i2
+
+
+class Test_aggregate_from_displacement:
+    @given(
+        fname=st.sampled_from(
+            glob.glob(
+                constants.DATA_STORAGE_LOCATION
+                + "/"
+                + constants.LOCAL_DATA_DIR
+                + "/*/*.csv"
+            )
+        ),
+        displacement=st.integers(0, 59),
+    )
+    @settings(max_examples=1, deadline=None)
+    def test_naive(self, fname, displacement):
+        fname_split = fname.split("/")
+        symbol = fname_split[-1].split("_")[0]
+        market = symbol + "/USD"
+        coin = utils.get_coin(symbol)
+
+        data_dir = fname.split(coin)[0]
+
+        price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
+
+        closes = price_data["close"].values
+        lows = price_data["low"].values
+        highs = price_data["high"].values
+        times = price_data["time"].values
+        displacements = utils.get_displacements(price_data)
+
+        (
+            aggregated_closes,
+            aggregated_lows,
+            aggregated_highs,
+            split_indices,
+            aggregate_indices,
+        ) = utils.aggregate_from_displacement_naive(
+            closes, lows, highs, times, displacements, displacement
+        )
+
+        assert len(aggregated_closes) == len(aggregated_lows)
+        assert len(aggregated_closes) == len(aggregated_highs)
+        assert len(aggregated_closes) == len(aggregate_indices)
+
+        assert (
+            abs(len(closes) // 60 - len(aggregated_closes)) / len(aggregated_closes)
+            < 1e-2
+        )
+
+        for i in range(len(aggregated_closes)):
+            start, end = aggregate_indices[i, :]
+
+            np.testing.assert_allclose(closes[end - 1], aggregated_closes[i])
+            np.testing.assert_allclose(np.min(lows[start:end]), aggregated_lows[i])
+            np.testing.assert_allclose(np.max(highs[start:end]), aggregated_highs[i])
+            np.testing.assert_allclose(times[end - 1] - times[start], 59.0 * 60.0)
+            assert displacements[start] == displacement
+
+        for i in range(len(split_indices) - 1):
+            start = aggregate_indices[split_indices[i], 0]
+            end = aggregate_indices[split_indices[i + 1] - 1, 1]
+
+            time_diffs = np.diff(times[start:end])
+            assert np.all(time_diffs <= 59.0 * 60.0)
+
+            if split_indices[i + 1] < len(aggregated_closes):
+                next_start = aggregate_indices[split_indices[i + 1], 0]
+                assert next_start > end
+
+    @given(
+        fname=st.sampled_from(
+            glob.glob(
+                constants.DATA_STORAGE_LOCATION
+                + "/"
+                + constants.LOCAL_DATA_DIR
+                + "/*/*.csv"
+            )
+        ),
+        displacement=st.integers(0, 59),
+    )
+    @settings(max_examples=1, deadline=None)
+    def test_against_naive(self, fname, displacement):
+        fname_split = fname.split("/")
+        symbol = fname_split[-1].split("_")[0]
+        market = symbol + "/USD"
+        coin = utils.get_coin(symbol)
+
+        data_dir = fname.split(coin)[0]
+
+        price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
+
+        closes = price_data["close"].values
+        lows = price_data["low"].values
+        highs = price_data["high"].values
+        times = price_data["time"].values
+        displacements = utils.get_displacements(price_data)
+
+        return_tuple1 = utils.aggregate_from_displacement_naive(
+            closes, lows, highs, times, displacements, displacement
+        )
+        return_tuple2 = utils.aggregate_from_displacement(
+            closes, lows, highs, times, displacements, displacement
+        )
+
+        assert len(return_tuple1) == len(return_tuple2)
+
+        for i in range(len(return_tuple1)):
+            np.testing.assert_allclose(return_tuple1[i], return_tuple2[i])

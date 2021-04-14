@@ -7,6 +7,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from algtra import utils
+from algtra.collect import data
 from algtra import constants
 import time
 import numpy as np
@@ -262,4 +263,83 @@ def test_get_balanced_usd_and_asset_values_performance():
     assert asset_value1 == asset_value2
     assert new_buy_size1 == new_buy_size2
     np.testing.assert_allclose(buy_size_diffs1, buy_size_diffs2)
+    assert elapsed <= elapsed_naive
+
+
+def test_get_next_displacement_index_performance():
+    N = 10000
+    displacements = np.random.randint(0, 1000000, size=N)
+    start_i = np.random.randint(0, N)
+    displacement = np.random.randint(0, 1000000)
+
+    start = time.perf_counter()
+    i1 = utils.get_next_displacement_index_naive(displacements, start_i, displacement)
+    end = time.perf_counter()
+    elapsed_naive = end - start
+
+    start = time.perf_counter()
+    i2 = utils.get_next_displacement_index(displacements, start_i, displacement)
+    end = time.perf_counter()
+    elapsed_compilation = end - start
+
+    start = time.perf_counter()
+    i2 = utils.get_next_displacement_index(displacements, start_i, displacement)
+    end = time.perf_counter()
+    elapsed = end - start
+
+    utils.print_times(
+        f"get_next_displacement_index ({i1})",
+        ["Benchmark", "Compilation", "Target"],
+        [elapsed_naive, elapsed_compilation, elapsed],
+    )
+
+    assert i1 == i2
+    assert elapsed <= elapsed_naive
+
+
+def test_aggregate_from_displacement_performance():
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+
+    price_data = data.load_price_data(data_dir, "BTC/USD", return_price_data_only=True)
+
+    closes = price_data["close"].values
+    lows = price_data["low"].values
+    highs = price_data["high"].values
+    times = price_data["time"].values
+    displacements = utils.get_displacements(price_data)
+    displacement = 55
+
+    start = time.perf_counter()
+    return_tuple1 = utils.aggregate_from_displacement_naive(
+        closes, lows, highs, times, displacements, displacement
+    )
+    end = time.perf_counter()
+    elapsed_naive = end - start
+
+    start = time.perf_counter()
+    return_tuple2 = utils.aggregate_from_displacement(
+        closes, lows, highs, times, displacements, displacement
+    )
+    end = time.perf_counter()
+    elapsed_compilation = end - start
+
+    start = time.perf_counter()
+    return_tuple2 = utils.aggregate_from_displacement(
+        closes, lows, highs, times, displacements, displacement
+    )
+    end = time.perf_counter()
+    elapsed = end - start
+
+    utils.print_times(
+        f"aggregate_from_displacement",
+        ["Benchmark", "Compilation", "Target"],
+        [elapsed_naive, elapsed_compilation, elapsed],
+    )
+
+    assert len(return_tuple1) == len(return_tuple2)
+
+    for i in range(len(return_tuple1)):
+        np.testing.assert_allclose(return_tuple1[i], return_tuple2[i])
     assert elapsed <= elapsed_naive

@@ -118,10 +118,10 @@ def load_price_data(
             price_data = pd.read_csv(data_file, index_col=0).reset_index()
             data_length = len(price_data)
 
-            price_data["startTimestamp"] = price_data["startTime"].map(
+            price_data["time"] = price_data["startTime"].map(
                 lambda x: datetime.timestamp(parse_datetime(x))
             )
-            prev_end_time = price_data["startTimestamp"].max()
+            prev_end_time = price_data["time"].max()
         else:
             data_file_split = data_file.split("_")
             prev_end_time = int(data_file_split[1])
@@ -139,7 +139,7 @@ def load_price_data(
 def split_price_data(price_data):
     price_data_splits = []
 
-    time_diffs = np.diff(price_data["startTimestamp"].values) // 60
+    time_diffs = np.diff(price_data["time"].values) // 60
 
     idx = np.argwhere(time_diffs > constants.PRICE_DATA_MAX_GAP).reshape((-1,)) + 1
     idx = np.concatenate([np.array([0]), idx, np.array([len(price_data)])])
@@ -443,9 +443,9 @@ def visualize_spreads(data_dir, symbol):
     )
     spreads = np.zeros(len(total_balances))
     for i, balance in enumerate(total_balances):
-        spreads[i] = calculate_max_average_spread(distributions, balance)
+        spreads[i] = utils.calculate_max_average_spread(distributions, balance)
 
-    spread = calculate_max_average_spread(distributions, total_balance)
+    spread = utils.calculate_max_average_spread(distributions, total_balance)
     print(spread)
     plt.style.use("seaborn")
     plt.plot(total_balances, spreads)

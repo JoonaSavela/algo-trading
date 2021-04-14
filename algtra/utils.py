@@ -13,6 +13,7 @@ import time
 from algtra import constants
 from algtra.collect import data
 from numba import njit
+from ciso8601 import parse_datetime
 
 # matplotlib is not installed in cloud since it is not needed
 try:
@@ -515,65 +516,141 @@ def rolling_min(X, w):
     return pd.Series(X[:, 0]).rolling(w).min().dropna().values
 
 
-def p_to_logit(p):
-    return np.log(p / (1 - p))
+# def p_to_logit(p):
+#     return np.log(p / (1 - p))
+#
+#
+# def logit_to_p(logit):
+#     return 1 / (1 + np.exp(-logit))
+#
+#
+# def rolling_quantile(X, w):
+#     if len(X.shape) == 1:
+#         X = X.reshape(-1, 1)
+#     return (
+#         pd.Series(X[:, 0])
+#         .rolling(w)
+#         .apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True)
+#         .dropna()
+#         .values
+#         * 0.01
+#     )
 
 
-def logit_to_p(logit):
-    return 1 / (1 + np.exp(-logit))
+# def apply_trend(x, limits, trend, strength):
+#     min_x = limits[0]
+#     range_x = limits[1] - limits[0]
+#     p = (x - min_x) / range_x
+#
+#     logit = p_to_logit(p) + trend * strength
+#     p = logit_to_p(logit)
+#
+#     x = p * range_x + min_x
+#     return x
 
 
-def rolling_quantile(X, w):
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
+# def get_ad(X, w, cumulative=True):
+#     lows = pd.Series(X[:, 0]).rolling(w).min().dropna().values
+#     highs = pd.Series(X[:, 0]).rolling(w).max().dropna().values
+#
+#     N = lows.shape[0]
+#
+#     cmfv = ((X[-N:, 0] - lows) - (highs - X[-N:, 0])) / (highs - lows) * X[-N:, 5]
+#
+#     if cumulative:
+#         return np.cumsum(cmfv)
+#
+#     return cmfv
+
+
+# def get_obv(X, cumulative=True, use_sign=True):
+#     log_returns = np.log(X[1:, 0] / X[:-1, 0])
+#
+#     if use_sign:
+#         log_returns = np.sign(log_returns)
+#
+#     signed_volumes = X[1:, 5] * log_returns
+#
+#     if cumulative:
+#         return np.cumsum(signed_volumes)
+#
+#     return signed_volumes
+
+
+def get_displacements(price_data):
+    return price_data["startTime"].map(lambda x: parse_datetime(x).minute).values
+
+
+def get_next_displacement_index_naive(displacements, start, displacement):
+    end = start
+
+    while end < len(displacements) and displacements[end] != displacement:
+        end += 1
+
+    return end
+
+
+get_next_displacement_index = njit()(get_next_displacement_index_naive)
+
+
+def aggregate_from_displacement_naive(
+    closes, lows, highs, times, displacements, displacement
+):
+    assert len(closes) == len(lows)
+    assert len(closes) == len(highs)
+    assert len(closes) == len(times)
+    assert len(closes) == len(displacements)
+
+    # aggregate_N *= 60
+    new_N = int(times[-1] - times[0]) // 3600  # times should be in seconds
+
+    aggregated_closes = np.zeros(new_N)
+    aggregated_lows = np.zeros(new_N)
+    aggregated_highs = np.zeros(new_N)
+    aggregate_indices = np.zeros((new_N, 2), dtype=np.int32)
+    split_indices = np.zeros(new_N, dtype=np.int32)
+
+    aggregate_i = 0
+    split_i = 1
+    start = get_next_displacement_index(displacements, 0, displacement)
+    split_start = start
+    end = get_next_displacement_index(displacements, start + 1, displacement)
+
+    # find next displacement index, (split if necessary) and aggregate
+    while end < len(closes):
+        if np.abs(times[end - 1] - times[start] - 59.0 * 60.0) > 1e-4:
+            split_indices[split_i] = aggregate_i
+            split_i += 1
+
+        else:
+            aggregated_closes[aggregate_i] = closes[end - 1]
+            aggregated_lows[aggregate_i] = np.min(lows[start:end])
+            aggregated_highs[aggregate_i] = np.max(highs[start:end])
+            aggregate_indices[aggregate_i, :] = (start, end)
+            aggregate_i += 1
+
+        start = end
+        end = get_next_displacement_index(displacements, start + 1, displacement)
+
+    split_indices[split_i] = aggregate_i
+    split_i += 1
+
+    aggregated_closes = aggregated_closes[:aggregate_i]
+    aggregated_lows = aggregated_lows[:aggregate_i]
+    aggregated_highs = aggregated_highs[:aggregate_i]
+    split_indices = split_indices[:split_i]
+    aggregate_indices = aggregate_indices[:aggregate_i, :]
+
     return (
-        pd.Series(X[:, 0])
-        .rolling(w)
-        .apply(lambda x: stats.percentileofscore(x, x[-1]), raw=True)
-        .dropna()
-        .values
-        * 0.01
+        aggregated_closes,
+        aggregated_lows,
+        aggregated_highs,
+        split_indices,
+        aggregate_indices,
     )
 
 
-def apply_trend(x, limits, trend, strength):
-    min_x = limits[0]
-    range_x = limits[1] - limits[0]
-    p = (x - min_x) / range_x
-
-    logit = p_to_logit(p) + trend * strength
-    p = logit_to_p(logit)
-
-    x = p * range_x + min_x
-    return x
-
-
-def get_ad(X, w, cumulative=True):
-    lows = pd.Series(X[:, 0]).rolling(w).min().dropna().values
-    highs = pd.Series(X[:, 0]).rolling(w).max().dropna().values
-
-    N = lows.shape[0]
-
-    cmfv = ((X[-N:, 0] - lows) - (highs - X[-N:, 0])) / (highs - lows) * X[-N:, 5]
-
-    if cumulative:
-        return np.cumsum(cmfv)
-
-    return cmfv
-
-
-def get_obv(X, cumulative=True, use_sign=True):
-    log_returns = np.log(X[1:, 0] / X[:-1, 0])
-
-    if use_sign:
-        log_returns = np.sign(log_returns)
-
-    signed_volumes = X[1:, 5] * log_returns
-
-    if cumulative:
-        return np.cumsum(signed_volumes)
-
-    return signed_volumes
+aggregate_from_displacement = njit()(aggregate_from_displacement_naive)
 
 
 def aggregate(X, n=5, from_minute=True):
@@ -615,51 +692,51 @@ def aggregate(X, n=5, from_minute=True):
     return aggregated_X
 
 
-def ema(X, alpha, mu_prior=0.0):
-    alpha_is_not_float = not (type(alpha) is float or type(alpha) is np.float64)
-    if alpha_is_not_float:
-        alphas = alpha
+# def ema(X, alpha, mu_prior=0.0):
+#     alpha_is_not_float = not (type(alpha) is float or type(alpha) is np.float64)
+#     if alpha_is_not_float:
+#         alphas = alpha
+#
+#     if len(X.shape) > 1:
+#         X = X[:, 0]
+#
+#     mus = []
+#
+#     for i in range(X.shape[0]):
+#         if i > 0:
+#             mu_prior = mu_posterior
+#
+#         if alpha_is_not_float:
+#             alpha = alphas[i]
+#         mu_posterior = alpha * mu_prior + (1 - alpha) * X[i]
+#
+#         mus.append(mu_posterior)
+#
+#     mus = np.array(mus)
+#
+#     return mus
 
-    if len(X.shape) > 1:
-        X = X[:, 0]
-
-    mus = []
-
-    for i in range(X.shape[0]):
-        if i > 0:
-            mu_prior = mu_posterior
-
-        if alpha_is_not_float:
-            alpha = alphas[i]
-        mu_posterior = alpha * mu_prior + (1 - alpha) * X[i]
-
-        mus.append(mu_posterior)
-
-    mus = np.array(mus)
-
-    return mus
-
-
-def smoothed_returns(X, alpha=0.75, n=1):
-    # returns = X[1:, 0] / X[:-1, 0] - 1
-    returns = np.log(X[1:, 0] / X[:-1, 0])
-
-    for i in range(n):
-        returns = ema(returns, alpha=alpha)
-
-    return returns
-
-
-def std(X, window_size):
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
-    return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
+#
+# def smoothed_returns(X, alpha=0.75, n=1):
+#     # returns = X[1:, 0] / X[:-1, 0] - 1
+#     returns = np.log(X[1:, 0] / X[:-1, 0])
+#
+#     for i in range(n):
+#         returns = ema(returns, alpha=alpha)
+#
+#     return returns
 
 
-def sma_old(X, window_size):
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
-    return np.convolve(X[:, 0], np.ones((window_size,)) / window_size, mode="valid")
+# def std(X, window_size):
+#     if len(X.shape) == 1:
+#         X = X.reshape(-1, 1)
+#     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
+
+
+# def sma_old(X, window_size):
+#     if len(X.shape) == 1:
+#         X = X.reshape(-1, 1)
+#     return np.convolve(X[:, 0], np.ones((window_size,)) / window_size, mode="valid")
 
 
 # TODO: write this with numba
