@@ -90,179 +90,119 @@ def test_get_average_buy_price_performance():
     assert elapsed <= elapsed_naive
 
 
-def test_apply_taxes_to_value_change_performance():
+def test_apply_spread_commissions_and_taxes_to_value_change_performance():
     N = 1000
     buy_prices = np.random.lognormal(size=N)
     buy_sizes = np.random.lognormal(size=N)
-    target_usd_percentage = np.random.rand(1).item()
     sell_price = np.random.rand(1).item()
 
+    value_change_multiplier = np.random.rand(1).item() * 2.0 - 1.0
+
     usd_value = np.random.rand(1).item()
-    asset_value = np.random.rand(1).item()
+    asset_value = np.sum(buy_sizes).item() * sell_price
 
-    total_value = usd_value + asset_value
-    new_usd_percentage = usd_value / total_value
-
-    percentage_change = target_usd_percentage - new_usd_percentage
-    value_change = percentage_change * total_value
-
-    while value_change <= 0.0:
-        usd_value = np.random.rand(1).item()
-        asset_value = np.random.rand(1).item()
-
-        total_value = usd_value + asset_value
-        new_usd_percentage = usd_value / total_value
-
-        percentage_change = target_usd_percentage - new_usd_percentage
-        value_change = percentage_change * total_value
-
-    start = time.perf_counter()
-    value_change1, _ = utils.apply_taxes_to_value_change_naive(
-        value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-    )
-    end = time.perf_counter()
-    elapsed_naive = end - start
-
-    start = time.perf_counter()
-    value_change2, _ = utils.apply_taxes_to_value_change(
-        value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-    )
-    end = time.perf_counter()
-    elapsed_compilation = end - start
-
-    start = time.perf_counter()
-    value_change2, _ = utils.apply_taxes_to_value_change(
-        value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-    )
-    end = time.perf_counter()
-    elapsed = end - start
-
-    utils.print_times(
-        f"apply_taxes_to_value_change ({value_change1})",
-        ["Benchmark", "Compilation", "Target"],
-        [elapsed_naive, elapsed_compilation, elapsed],
-    )
-
-    np.testing.assert_almost_equal(value_change1, value_change2)
-    assert elapsed <= elapsed_naive
-
-
-def test_get_balanced_usd_and_asset_values_performance():
-    usd_value = np.random.rand(1).item()
-    asset_value = np.random.rand(1).item()
-    target_usd_percentage = np.random.rand(1).item()
-
-    distribution = np.random.normal(size=int(1e5))
-    distribution = np.exp(distribution)
-    distributions = np.stack([distribution, distribution], axis=1)
+    distribution = np.random.lognormal(size=N)
     balance = 2e3
+    taxes = True
+    tax_exemption = True
 
-    price = np.random.rand(1).item()
-    prices = np.array([price, price])
+    if value_change_multiplier >= 0.0:
+        value_change = value_change_multiplier * asset_value
+    else:
+        value_change = value_change_multiplier * usd_value
 
-    total_value = usd_value + asset_value
-    new_usd_percentage = usd_value / total_value
+    orderbook_distributions = np.stack([distribution, distribution], axis=1)
 
-    percentage_change = target_usd_percentage - new_usd_percentage
-    value_change = percentage_change * total_value
-
-    buy_size = max(np.random.rand(1).item(), value_change / price)
-    buy_sizes = np.array([buy_size])
-    buy_sizes_index = 1
-
-    taxes = bool(np.random.rand(1) < 0.5)
-    tax_exemption = bool(np.random.rand(1) < 0.5)
-
-    utils.get_balanced_usd_and_asset_values_naive(
-        usd_value,
-        asset_value,
-        target_usd_percentage,
-        orderbook_distributions=distributions,
-        balance=balance,
-        prices=prices,
-        buy_sizes=buy_sizes,
-        buy_sizes_index=buy_sizes_index,
-        taxes=taxes,
-        tax_exemption=tax_exemption,
-    )
-
-    start = time.perf_counter()
     (
-        usd_value1,
-        asset_value1,
+        new_usd_value1,
+        new_asset_value1,
         new_buy_size1,
         buy_size_diffs1,
-    ) = utils.get_balanced_usd_and_asset_values_naive(
+    ) = utils.apply_spread_commissions_and_taxes_to_value_change_naive(
+        value_change,
         usd_value,
         asset_value,
-        target_usd_percentage,
-        orderbook_distributions=distributions,
-        balance=balance,
-        prices=prices,
-        buy_sizes=buy_sizes,
-        buy_sizes_index=buy_sizes_index,
-        taxes=taxes,
-        tax_exemption=tax_exemption,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
+    start = time.perf_counter()
+    (
+        new_usd_value1,
+        new_asset_value1,
+        new_buy_size1,
+        buy_size_diffs1,
+    ) = utils.apply_spread_commissions_and_taxes_to_value_change_naive(
+        value_change,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
     )
     end = time.perf_counter()
     elapsed_naive = end - start
 
-    buy_sizes = np.array([buy_size])
-
     start = time.perf_counter()
     (
-        usd_value2,
-        asset_value2,
+        new_usd_value2,
+        new_asset_value2,
         new_buy_size2,
         buy_size_diffs2,
-    ) = utils.get_balanced_usd_and_asset_values(
+    ) = utils.apply_spread_commissions_and_taxes_to_value_change(
+        value_change,
         usd_value,
         asset_value,
-        target_usd_percentage,
-        orderbook_distributions=distributions,
-        balance=balance,
-        prices=prices,
-        buy_sizes=buy_sizes,
-        buy_sizes_index=buy_sizes_index,
-        taxes=taxes,
-        tax_exemption=tax_exemption,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
     )
     end = time.perf_counter()
     elapsed_compilation = end - start
 
-    buy_sizes = np.array([buy_size])
-
     start = time.perf_counter()
     (
-        usd_value2,
-        asset_value2,
+        new_usd_value2,
+        new_asset_value2,
         new_buy_size2,
         buy_size_diffs2,
-    ) = utils.get_balanced_usd_and_asset_values(
+    ) = utils.apply_spread_commissions_and_taxes_to_value_change(
+        value_change,
         usd_value,
         asset_value,
-        target_usd_percentage,
-        orderbook_distributions=distributions,
-        balance=balance,
-        prices=prices,
-        buy_sizes=buy_sizes,
-        buy_sizes_index=buy_sizes_index,
-        taxes=taxes,
-        tax_exemption=tax_exemption,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
     )
     end = time.perf_counter()
     elapsed = end - start
 
     utils.print_times(
-        f"get_balanced_usd_and_asset_values ({usd_value1}, {asset_value1}, {target_usd_percentage})",
+        f"apply_spread_commissions_and_taxes_to_value_change",
         ["Benchmark", "Compilation", "Target"],
         [elapsed_naive, elapsed_compilation, elapsed],
     )
 
-    assert usd_value1 == usd_value2
-    assert asset_value1 == asset_value2
-    assert new_buy_size1 == new_buy_size2
-    np.testing.assert_allclose(buy_size_diffs1, buy_size_diffs2)
+    np.testing.assert_almost_equal(new_usd_value1, new_usd_value2)
+    np.testing.assert_almost_equal(new_asset_value1, new_asset_value2)
+    np.testing.assert_almost_equal(new_buy_size1, new_buy_size2)
+    np.testing.assert_almost_equal(buy_size_diffs1, buy_size_diffs2)
     assert elapsed <= elapsed_naive
 
 

@@ -255,7 +255,7 @@ class Test_get_balanced_trade:
         ),
         target_usd_percentage=st.floats(0.0, 1.0),
     )
-    @settings(deadline=timedelta(milliseconds=3500))
+    @settings(deadline=None)
     def test_naive_base_case(
         self,
         closes,
@@ -331,11 +331,11 @@ class Test_get_balanced_trade:
                 trigger_value * (1.0 - target_usd_percentage) + target_usd_percentage,
             )
 
-    @pytest.mark.slow
+    # @pytest.mark.slow
     @given(
         closes=arrays(
             np.float64,
-            st.integers(1, 1000),
+            st.integers(1, 100),
             elements=st.floats(0.001, 1e3, width=64),
         ),
         target_usd_percentage=st.floats(0.0, 1.0),
@@ -545,7 +545,7 @@ class Test_get_balanced_trade:
     @given(
         closes=arrays(
             np.float64,
-            st.integers(1, 1000),
+            st.integers(1, 100),
             elements=st.floats(0.001, 1e3, width=64),
         ),
         stop_loss=st.floats(0.0, 0.99),

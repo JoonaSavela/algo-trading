@@ -1,14 +1,8 @@
-# if __name__ == "__main__":
-# raise ValueError("algtra/optimize/utils.py should not be run as main.")
+if __name__ == "__main__":
+    raise ValueError("algtra/optimize/utils.py should not be run as main.")
 
 import os
 import sys
-
-if __name__ == "__main__":
-    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
-    if PROJECT_ROOT not in sys.path:
-        sys.path.insert(0, PROJECT_ROOT)
 
 from algtra.collect import data
 import numpy as np
@@ -75,7 +69,7 @@ def get_N_iter_and_init_args(fname, n_params, max_N_iter=50):
         init_args = None
         N_iter = max_N_iter
 
-    # Scale N_iter by dimensionality
+    # Scale N_iter exponentially by dimensionality
     if len(bounds) > 2:
         N_iter *= 2 ** (n_params - 2)
 
@@ -97,9 +91,7 @@ def get_rounded_args(args, resolutions, parameter_names):
     return res
 
 
-def get_suitable_objective_function_for_bayes_opt(
-    objective_dict, strategy_type, resolutions, parameter_names
-):
+def get_suitable_objective_function_for_bayes_opt():
     if strategy_type == "ma":
 
         def objective_fn(aggregate_N, w):
@@ -107,30 +99,7 @@ def get_suitable_objective_function_for_bayes_opt(
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_single_strategy_objective_function(
-                    args,
-                    strategy_type,
-                    frequency,
-                    coin,
-                    m,
-                    m_bear,
-                    N_repeat_inp,
-                    sides,
-                    X_origs,
-                    Xs,
-                    X_bears,
-                    short,
-                    step,
-                    stop_loss_take_profit_types,
-                    total_balance,
-                    potential_balances,
-                    potential_spreads,
-                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-                    trail_value_recalc_period=trail_value_recalc_period,
-                    workers=None,
-                    debug=False,
-                    taxes=taxes,
-                )
+                objective_dict[args] = get_objective_function()
 
             return objective_dict[args]["objective"]
 
@@ -141,30 +110,7 @@ def get_suitable_objective_function_for_bayes_opt(
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_single_strategy_objective_function(
-                    args,
-                    strategy_type,
-                    frequency,
-                    coin,
-                    m,
-                    m_bear,
-                    N_repeat_inp,
-                    sides,
-                    X_origs,
-                    Xs,
-                    X_bears,
-                    short,
-                    step,
-                    stop_loss_take_profit_types,
-                    total_balance,
-                    potential_balances,
-                    potential_spreads,
-                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-                    trail_value_recalc_period=trail_value_recalc_period,
-                    workers=None,
-                    debug=False,
-                    taxes=taxes,
-                )
+                objective_dict[args] = get_objective_function()
 
             return objective_dict[args]["objective"]
 
@@ -175,91 +121,112 @@ def get_suitable_objective_function_for_bayes_opt(
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_single_strategy_objective_function(
-                    args,
-                    strategy_type,
-                    frequency,
-                    coin,
-                    m,
-                    m_bear,
-                    N_repeat_inp,
-                    sides,
-                    X_origs,
-                    Xs,
-                    X_bears,
-                    short,
-                    step,
-                    stop_loss_take_profit_types,
-                    total_balance,
-                    potential_balances,
-                    potential_spreads,
-                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-                    trail_value_recalc_period=trail_value_recalc_period,
-                    workers=None,
-                    debug=False,
-                    taxes=taxes,
-                )
+                objective_dict[args] = get_objective_function()
 
             return objective_dict[args]["objective"]
 
     return objective_fn
 
 
-def get_single_strategy_objective_function(args, strategy_type):
-
-    sltp_results_dir = "optim_results/sltp_results/"
-    if not os.path.exists(sltp_results_dir):
-        os.mkdir(sltp_results_dir)
-
-    joined_str_args = "_".join(str(arg) for arg in args)
+def get_objective_function(args, strategy_type):
+    skip_cond, conflict_value = skip_condition(strategy_type, args)
+    if skip_cond:
+        return {"objective": conflict_value}
 
     get_buys_and_sells_fn = utils.choose_get_buys_and_sells_fn(strategy_type)
-
     params_dict = {}
 
     aggregate_N, w = args[:2]
 
-    skip_cond, conflict_value = skip_condition(strategy_type, frequency, args)
-    if skip_cond:
-        return {"objective": conflict_value}
+    sub_optim_results_dir = "optim_results/sub_optim_results/"
+    if not os.path.exists(sub_optim_results_dir):
+        os.mkdir(sub_optim_results_dir)
 
-    # TODO: get buys and sells
+    joined_str_args = "_".join(str(arg) for arg in args)
 
-    for side in ["long", "short"]:
-        (
-            optimal_side_params,
-            optimal_side_objective,
-        ) = get_single_strategy_side_objective_function()
+    filename = sltp_results_dir + f"{strategy_type}_{joined_str_args}.json"
 
-    # TODO: combine sides
+    if os.path.exists(filename):
+        with open(filename, "r") as file:
+            init_sub_args = json.load(file)
+
+        init_points = 50
+    else:
+        init_sub_args = None
+        init_points = 100
+
+    optimized_params, objective = optimize_sltp_and_balancing_params()
+
+    with open(filename, "w") as file:
+        json.dump(optimized_params, file)
 
     return params_dict
 
 
-def get_single_strategy_side_objective_function():
-    leverage_options = get_leverage_options()
+def optimize_sltp_and_balancing_params(init_sub_args):
+    pbounds = {
+        "take_profit": (1.01, 100),
+        "stop_loss": (0.0, 0.99),
+        "usd_percentage": (0.0, 0.99),
+        "balancing_period": (1, 7 * 24),
+        "displacement": (0, 59),
+    }
 
-    best_optimized_params = None
-    best_leverage = None
-    best_objective = -np.Inf
+    def sltp_and_balancing_objective_function(
+        take_profit, stop_loss, usd_percentage, balancing_period
+    ):
+        balancing_period = int(round(balancing_period))
+        displacement = int(round(displacement))
 
-    for leverage in leverage_options:
-        trade_chunks = get_trade_chunks()
+        return get_sltp_and_balancing_objective_function()
 
-        optimized_params, objective = optimize_sltp_and_balancing_params()
+    optimizer = BayesianOptimization(
+        f=sltp_objective_function, pbounds=pbounds, verbose=1 if debug else 0
+    )
 
-        if objective > best_objective:
-            best_objective = objective
-            best_optimized_params = optimized_params
-            best_leverage = leverage
+    if init_sub_args is not None:
+        optimizer.probe(params=prev_best_sltp_args, lazy=True)
 
-    best_optimized_params["leverage"] = best_leverage
+    optimizer.maximize(
+        init_points=init_points,
+        n_iter=5,
+    )
 
-    return optimized_params, best_objective
+    # take_profit = optimizer.max["params"]["take_profit"]
+    # stop_loss = optimizer.max["params"]["stop_loss"]
+    # stop_loss_type = stop_loss_types[
+    #     int(round(optimizer.max["params"]["stop_loss_type"]))
+    # ]
+
+    optimized_params = optimizer.max["params"]
+    optimized_params["balancing_period"] = int(
+        round(optimized_params["balancing_period"])
+    )
+    optimized_params["displacement"] = int(round(optimized_params["displacement"]))
+    objective = optimizer.max["target"]
+
+    return optimized_params, objective
 
 
-def get_leverage_options():
-    pass
+def get_sltp_and_balancing_objective_function():
+    for symbol in price_data.keys():
+        closes = price_data[symbol]["close"].values
+        lows = price_data[symbol]["low"].values
+        highs = price_data[symbol]["high"].values
+        times = price_data[symbol]["time"].values
+        displacements = utils.get_displacements(price_data[symbol])
+
+        (
+            aggregated_closes,
+            aggregated_lows,
+            aggregated_highs,
+            split_indices,
+            aggregate_indices,
+        ) = utils.aggregate_from_displacement(
+            closes, lows, highs, times, displacements, displacement
+        )
+
+    return objective
 
 
 def get_trades():
@@ -331,10 +298,13 @@ def get_take_profit_index(highs, take_profit: float):
 
 
 # assumes trade is normalized to start from 1
-def get_stop_loss_indices_naive(closes, lows, stop_loss: float, aggregate_N: int):
+def get_stop_loss_indices_naive(
+    closes, lows, stop_loss: float, aggregate_N: int, from_minute=False
+):
     assert len(closes) == len(lows)
 
-    aggregate_N *= 60
+    if from_minute:
+        aggregate_N *= 60
     aggregate_N = min(aggregate_N, len(closes))
 
     stop_loss_indices = np.zeros(aggregate_N)
@@ -349,10 +319,13 @@ def get_stop_loss_indices_naive(closes, lows, stop_loss: float, aggregate_N: int
 
 # assumes trade is normalized to start from 1
 @njit
-def get_stop_loss_indices(closes, lows, stop_loss: float, aggregate_N: int):
+def get_stop_loss_indices(
+    closes, lows, stop_loss: float, aggregate_N: int, from_minute=False
+):
     assert len(closes) == len(lows)
 
-    aggregate_N *= 60
+    if from_minute:
+        aggregate_N *= 60
     aggregate_N = min(aggregate_N, len(closes))
 
     stop_loss_indices = np.zeros(aggregate_N)
@@ -388,10 +361,13 @@ def get_stop_loss_indices(closes, lows, stop_loss: float, aggregate_N: int):
 
 
 # assumes trade chunk is normalized to start from 1
-def get_take_profit_indices_naive(closes, highs, take_profit: float, aggregate_N: int):
+def get_take_profit_indices_naive(
+    closes, highs, take_profit: float, aggregate_N: int, from_minute=False
+):
     assert len(closes) == len(highs)
 
-    aggregate_N *= 60
+    if from_minute:
+        aggregate_N *= 60
     aggregate_N = min(aggregate_N, len(closes))
 
     take_profit_indices = np.zeros(aggregate_N)
@@ -408,10 +384,13 @@ def get_take_profit_indices_naive(closes, highs, take_profit: float, aggregate_N
 
 # assumes trade chunk is normalized to start from 1
 @njit
-def get_take_profit_indices(closes, highs, take_profit: float, aggregate_N: int):
+def get_take_profit_indices(
+    closes, highs, take_profit: float, aggregate_N: int, from_minute=False
+):
     assert len(closes) == len(highs)
 
-    aggregate_N *= 60
+    if from_minute:
+        aggregate_N *= 60
     aggregate_N = min(aggregate_N, len(closes))
 
     take_profit_indices = np.zeros(aggregate_N)
@@ -460,23 +439,15 @@ def get_balanced_trade_naive(
     balance,
     taxes=True,
     tax_exemption=True,
+    from_minute=False,
 ):
     N = len(closes)
-    balancing_period *= 60
+    if from_minute:
+        balancing_period *= 60
 
     usd_values = np.zeros(N + 1)
-    usd_values[0] = target_usd_percentage
+    usd_values[0] = 1.0
     asset_values = np.zeros(N + 1)
-    asset_values[0] = 1.0 - target_usd_percentage
-
-    if balance > 0.0:
-        spread = utils.calculate_max_average_spread(
-            orderbook_distributions,
-            balance * asset_values[0],
-            include_commissions=False,
-        )
-        usd_values[0] -= spread * asset_values[0] * target_usd_percentage
-        asset_values[0] -= spread * asset_values[0] * (1.0 - target_usd_percentage)
 
     trigger_i = min(stop_loss_index, take_profit_index)
     triggered = trigger_i < N
@@ -485,9 +456,27 @@ def get_balanced_trade_naive(
 
     N_balancings = trigger_i // balancing_period
     prices = np.ones(N_balancings + 2)
-    # prices[0] = 1.0
     buy_sizes = np.zeros(N_balancings + 2)
-    buy_sizes[0] = asset_values[0]
+    buy_sizes_index = 0
+
+    (
+        usd_values[0],
+        asset_values[0],
+        new_buy_size,
+        buy_size_diffs,
+    ) = utils.get_balanced_usd_and_asset_values(
+        usd_values[0],
+        asset_values[0],
+        target_usd_percentage,
+        buy_prices=prices[:buy_sizes_index],
+        buy_sizes=buy_sizes[:buy_sizes_index],
+        sell_price=prices[buy_sizes_index],
+        balance=balance,
+        orderbook_distributions=orderbook_distributions,
+        taxes=taxes,
+        tax_exemption=tax_exemption,
+    )
+    buy_sizes[buy_sizes_index] = new_buy_size
 
     for i in range(balancing_period, trigger_i + 1, balancing_period):
         buy_sizes_index = i // balancing_period
@@ -513,11 +502,11 @@ def get_balanced_trade_naive(
             usd_values[i],
             asset_values[i],
             target_usd_percentage,
-            orderbook_distributions=orderbook_distributions,
+            buy_prices=prices[:buy_sizes_index],
+            buy_sizes=buy_sizes[:buy_sizes_index],
+            sell_price=prices[buy_sizes_index],
             balance=balance,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
+            orderbook_distributions=orderbook_distributions,
             taxes=taxes,
             tax_exemption=tax_exemption,
         )
@@ -561,11 +550,11 @@ def get_balanced_trade_naive(
         usd_values[trigger_i],
         asset_values[trigger_i],
         1.0,
-        orderbook_distributions=orderbook_distributions,
+        buy_prices=prices[:buy_sizes_index],
+        buy_sizes=buy_sizes[:buy_sizes_index],
+        sell_price=prices[buy_sizes_index],
         balance=balance,
-        prices=prices,
-        buy_sizes=buy_sizes,
-        buy_sizes_index=buy_sizes_index,
+        orderbook_distributions=orderbook_distributions,
         taxes=taxes,
         tax_exemption=tax_exemption,
     )
@@ -579,67 +568,6 @@ def get_balanced_trade_naive(
 
 
 get_balanced_trade = njit()(get_balanced_trade_naive)
-
-
-def get_sltp_and_balancing_objective_function():
-    for trade_chunk in trade_chunks:
-        balanced_trade_chunk = transform_trade_chunk(trade_chunk)
-
-        obective = ...
-
-    return objective
-
-
-def optimize_sltp_and_balancing_params():
-    pbounds = {
-        "take_profit": take_profit_limits,
-        "stop_loss": stop_loss_limits,
-        "usd_percentage": (0, 1),
-        "balancing_period": (1, 7 * 24),
-    }
-
-    def sltp_and_balancing_objective_function(
-        take_profit, stop_loss, usd_percentage, balancing_period
-    ):
-        balancing_period = int(round(balancing_period))
-
-        return get_sltp_and_balancing_objective_function()
-
-    optimizer = BayesianOptimization(
-        f=sltp_objective_function, pbounds=pbounds, verbose=1 if debug else 0
-    )
-
-    filename = (
-        sltp_results_dir
-        + f'{coin}_{frequency}_{strategy_type}_{m}_{m_bear}_{joined_str_args}_{"_".join(stop_loss_types)}_{side}.json'
-    )
-
-    if os.path.exists(filename):
-        with open(filename, "r") as file:
-            prev_best_sltp_args = json.load(file)
-
-        optimizer.probe(params=prev_best_sltp_args, lazy=True)
-
-        init_points = 50
-    else:
-        init_points = 100
-
-    optimizer.maximize(
-        init_points=init_points,
-        n_iter=5,
-    )
-
-    take_profit = optimizer.max["params"]["take_profit"]
-    stop_loss = optimizer.max["params"]["stop_loss"]
-    stop_loss_type = stop_loss_types[
-        int(round(optimizer.max["params"]["stop_loss_type"]))
-    ]
-    wealth = optimizer.max["target"]
-
-    with open(filename, "w") as file:
-        json.dump(optimizer.max["params"], file)
-
-    return optimized_params, objective
 
 
 def combine_trade_chunks():

@@ -12,7 +12,7 @@ import sys
 import time
 from algtra import constants
 from algtra.collect import data
-from numba import njit
+from numba import njit, vectorize, float64
 from ciso8601 import parse_datetime
 
 # matplotlib is not installed in cloud since it is not needed
@@ -85,32 +85,17 @@ def calculate_max_average_spread(distributions, balance, include_commissions=Tru
 
 
 def get_average_buy_price_naive(buy_prices, buy_sizes, sell_size):
-    buy_size = np.sum(buy_sizes)
-    assert sell_size < buy_size or np.allclose(buy_size, sell_size)
-    i = 0
-    sizes = []
-    remaining_sell_size = sell_size
     buy_size_diffs = np.zeros_like(buy_sizes)
 
-    while remaining_sell_size > 0.0 and i < len(buy_sizes):
-        size_diff = min(remaining_sell_size, buy_sizes[i])
-        remaining_sell_size -= size_diff
-        buy_size_diffs[i] = size_diff
+    if sell_size < buy_sizes[0]:
+        buy_size_diffs[0] = sell_size
+        return buy_prices[0], buy_size_diffs
 
-        sizes.append(size_diff)
-        i += 1
-
-    return np.dot(buy_prices[: len(sizes)], sizes) / sell_size, buy_size_diffs
-
-
-@njit
-def get_average_buy_price(buy_prices, buy_sizes, sell_size):
     buy_size = np.sum(buy_sizes)
-    assert sell_size < buy_size or np.abs(buy_size - sell_size) < 1e-6
+    assert sell_size < buy_size or np.abs(buy_size - sell_size) / sell_size < 1e-6
     i = 0
     sizes = np.zeros(len(buy_prices))
     remaining_sell_size = sell_size
-    buy_size_diffs = np.zeros_like(buy_sizes)
 
     while remaining_sell_size > 0.0 and i < len(buy_sizes):
         size_diff = min(remaining_sell_size, buy_sizes[i])
@@ -123,141 +108,249 @@ def get_average_buy_price(buy_prices, buy_sizes, sell_size):
     return np.dot(buy_prices[:i], sizes[:i]) / sell_size, buy_size_diffs
 
 
-def apply_taxes_to_value_change_naive(
-    value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-):
-    buy_price, _ = get_average_buy_price(
-        buy_prices, buy_sizes, value_change / sell_price
-    )
-
-    modifier = (
-        constants.TAX_RATE
-        * (1.0 - buy_price / sell_price)
-        * (1.0 - target_usd_percentage)
-    )
-    value_change *= 1.0 / (1.0 - modifier)
-
-    new_buy_price, _ = get_average_buy_price(
-        buy_prices, buy_sizes, value_change / sell_price
-    )
-
-    count = 0
-
-    while np.abs(buy_price - new_buy_price) > 1e-6 and count < 250:
-        buy_price = new_buy_price
-
-        modifier = (
-            constants.TAX_RATE
-            * (1.0 - buy_price / sell_price)
-            * (1.0 - target_usd_percentage)
-        )
-        value_change *= 1.0 / (1.0 - modifier)
-
-        new_buy_price, _ = get_average_buy_price(
-            buy_prices, buy_sizes, value_change / sell_price
-        )
-        count += 1
-
-    return value_change, buy_price
+get_average_buy_price = njit()(get_average_buy_price_naive)
 
 
-apply_taxes_to_value_change = njit()(apply_taxes_to_value_change_naive)
-
-
-def get_balanced_usd_and_asset_values_naive(
+def apply_spread_commissions_and_taxes_to_value_change_naive(
+    value_change,
     usd_value,
     asset_value,
-    target_usd_percentage,
-    orderbook_distributions,
+    buy_prices,
+    buy_sizes,
+    sell_price,
     balance,
-    prices=None,
-    buy_sizes=None,
-    buy_sizes_index=None,
-    taxes=False,
-    tax_exemption=True,
+    orderbook_distributions,
+    taxes,
+    tax_exemption,
 ):
-    total_value = usd_value + asset_value
-    assert total_value > 0.0
-    new_usd_percentage = usd_value / total_value
-
-    percentage_change = target_usd_percentage - new_usd_percentage
-    value_change = percentage_change * total_value
-
     taxes_to_pay = 0.0
     new_buy_size = 0.0
-    buy_size_diffs = np.zeros(buy_sizes_index)
+    buy_size_diffs = np.zeros_like(buy_sizes)
 
-    if taxes:
+    if value_change == 0.0:
+        return usd_value, asset_value, new_buy_size, buy_size_diffs
+
+    if taxes and value_change > 0.0:
         # value_change > 0, then profit was made (with respect to previous usd and asset values)
         # and some of the asset needs to be sold
-        if value_change > 0.0:
-            sell_price = prices[buy_sizes_index]
-            average_buy_price, _ = get_average_buy_price(
-                prices[:buy_sizes_index],
-                buy_sizes[:buy_sizes_index],
-                value_change / sell_price,
+        buy_price, buy_size_diffs = get_average_buy_price(
+            buy_prices, buy_sizes, value_change / sell_price
+        )
+
+        if sell_price > buy_price or tax_exemption:
+            taxes_to_pay = (
+                value_change * constants.TAX_RATE * (1.0 - buy_price / sell_price)
             )
 
-            if sell_price > average_buy_price or tax_exemption:
-                # ensures that new usd_value percentage of new total value is equal to
-                # target_usd_percentage even after taxes
-                value_change, average_buy_price = apply_taxes_to_value_change(
-                    value_change,
-                    sell_price,
-                    prices[:buy_sizes_index],
-                    buy_sizes[:buy_sizes_index],
-                    target_usd_percentage,
-                )
-                taxes_to_pay = (
-                    value_change
-                    * constants.TAX_RATE
-                    * (1.0 - average_buy_price / sell_price)
-                )
+    spread_and_commission_to_usd_value = 0.0
+    spread_and_commission_to_asset_value = 0.0
 
-            _, buy_size_diffs = get_average_buy_price(
-                prices[:buy_sizes_index],
-                buy_sizes[:buy_sizes_index],
-                value_change / sell_price,
-            )
-        else:
-            new_buy_size = np.abs(value_change) / prices[buy_sizes_index]
-
-    usd_value += value_change - taxes_to_pay
-    asset_value -= value_change
-
-    asset_value_change_through_spread = 0.0
+    # even if balance == 0.0, then commissions must be paid; however, in parctice
+    # balance must be greater than 0.0, so this provides a way to disable spread
+    # and commissions calculations
     if balance > 0.0:
         spread = calculate_max_average_spread(
             orderbook_distributions,
             balance * np.abs(value_change),
-            include_commissions=False,
+            include_commissions=True,
         )
 
-        usd_value -= spread * np.abs(value_change) * target_usd_percentage
-        asset_value_change_through_spread = (
-            spread * np.abs(value_change) * (1.0 - target_usd_percentage)
-        )
-        asset_value -= asset_value_change_through_spread
-
-        if taxes and value_change > 0.0:
-            _, buy_size_diffs = get_average_buy_price(
-                prices[:buy_sizes_index],
-                buy_sizes[:buy_sizes_index],
-                (value_change + asset_value_change_through_spread)
-                / prices[buy_sizes_index],
-            )
+        if value_change > 0.0:
+            # balancing action is sell => commissions and spread is taken from
+            # usd value
+            spread_and_commission_to_usd_value = spread * np.abs(value_change)
         else:
-            if asset_value_change_through_spread / prices[buy_sizes_index] > 0.0:
-                _, buy_size_diffs = get_average_buy_price(
-                    prices[:buy_sizes_index],
-                    buy_sizes[:buy_sizes_index],
-                    asset_value_change_through_spread / prices[buy_sizes_index],
-                )
+            # balancing action is buy => commissions and spread is taken from
+            # asset value
+            spread_and_commission_to_asset_value = spread * np.abs(value_change)
+
+    if value_change < 0.0:
+        new_buy_size = (
+            np.abs(value_change) - spread_and_commission_to_asset_value
+        ) / sell_price
+
+    new_usd_value = (
+        usd_value + value_change - taxes_to_pay - spread_and_commission_to_usd_value
+    )
+    new_asset_value = asset_value - value_change - spread_and_commission_to_asset_value
+
+    return new_usd_value, new_asset_value, new_buy_size, buy_size_diffs
+
+
+apply_spread_commissions_and_taxes_to_value_change = njit()(
+    apply_spread_commissions_and_taxes_to_value_change_naive
+)
+
+
+@njit
+def get_usd_percentage_for_value_change(
+    value_change,
+    usd_value,
+    asset_value,
+    buy_prices,
+    buy_sizes,
+    sell_price,
+    balance,
+    orderbook_distributions,
+    taxes,
+    tax_exemption,
+):
+    (
+        new_usd_value,
+        new_asset_value,
+        _,
+        _,
+    ) = apply_spread_commissions_and_taxes_to_value_change(
+        value_change,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
+
+    new_usd_percentage = new_usd_value / (new_usd_value + new_asset_value)
+
+    return new_usd_percentage
+
+
+def find_value_change_naive(
+    usd_value,
+    asset_value,
+    target_usd_percentage,
+    buy_prices,
+    buy_sizes,
+    sell_price,
+    balance,
+    orderbook_distributions,
+    taxes,
+    tax_exemption,
+):
+    if target_usd_percentage == 1.0:
+        return min(np.sum(buy_sizes) * sell_price, asset_value)
+    elif target_usd_percentage == 0.0:
+        return -usd_value
+
+    current_usd_percentage = get_usd_percentage_for_value_change(
+        0.0,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
+
+    if current_usd_percentage == target_usd_percentage:
+        return 0.0
+
+    balancing_action_is_sell = target_usd_percentage > current_usd_percentage
+
+    start = 0.0 if balancing_action_is_sell else -usd_value
+    end = (
+        min(np.sum(buy_sizes) * sell_price, asset_value)
+        if balancing_action_is_sell
+        else 0.0
+    )
+
+    value_change = (start + end) / 2.0
+
+    new_usd_percentage = get_usd_percentage_for_value_change(
+        value_change,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
+
+    count = 0
+
+    # binary search
+    while np.abs(new_usd_percentage - target_usd_percentage) > 1e-9 and count < 250:
+        if new_usd_percentage > target_usd_percentage:
+            end = value_change
+        else:
+            start = value_change
+
+        value_change = (start + end) / 2.0
+
+        new_usd_percentage = get_usd_percentage_for_value_change(
+            value_change,
+            usd_value,
+            asset_value,
+            buy_prices,
+            buy_sizes,
+            sell_price,
+            balance,
+            orderbook_distributions,
+            taxes,
+            tax_exemption,
+        )
+        count += 1
+
+    return value_change
+
+
+find_value_change = njit()(find_value_change_naive)
+
+
+@njit
+def get_balanced_usd_and_asset_values(
+    usd_value,
+    asset_value,
+    target_usd_percentage,
+    buy_prices,
+    buy_sizes,
+    sell_price,
+    balance,
+    orderbook_distributions,
+    taxes=False,
+    tax_exemption=True,
+):
+    value_change = find_value_change(
+        usd_value,
+        asset_value,
+        target_usd_percentage,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
+
+    (
+        usd_value,
+        asset_value,
+        new_buy_size,
+        buy_size_diffs,
+    ) = apply_spread_commissions_and_taxes_to_value_change(
+        value_change,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes,
+        tax_exemption,
+    )
 
     return usd_value, asset_value, new_buy_size, buy_size_diffs
-
-
-get_balanced_usd_and_asset_values = njit()(get_balanced_usd_and_asset_values_naive)
 
 
 def seconds_to_milliseconds(t, units):

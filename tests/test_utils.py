@@ -141,340 +141,406 @@ class Test_get_average_buy_price:
         np.testing.assert_allclose(buy_size_diffs1, buy_size_diffs2)
 
 
-class Test_apply_taxes_to_value_change:
-    @given(
-        usd_value=st.floats(0, 1.0),
-        asset_value=st.floats(0, 1.0),
-        target_usd_percentage=st.floats(0, 1.0),
-        sell_price=st.floats(1e-3, 1e3),
-        buy_prices=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-    )
-    def test_naive(
-        self,
-        usd_value,
-        asset_value,
-        target_usd_percentage,
-        sell_price,
-        buy_prices,
-        buy_sizes,
-    ):
-        if len(buy_sizes) <= len(buy_prices):
-            buy_prices = buy_prices[: len(buy_sizes)]
-        else:
-            buy_sizes = buy_sizes[: len(buy_prices)]
-        assume(usd_value + asset_value > 1e-3)
-
-        total_value = usd_value + asset_value
-        new_usd_percentage = usd_value / total_value
-
-        percentage_change = target_usd_percentage - new_usd_percentage
-        value_change = percentage_change * total_value
-
-        assume(value_change > 0.0)
-        assume(np.dot(buy_sizes, buy_prices) >= total_value)
-
-        value_change, _ = utils.apply_taxes_to_value_change_naive(
-            value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-        )
-
-        assert 0 <= value_change <= asset_value
-
-    @given(
-        usd_value=st.floats(0, 1.0),
-        asset_value=st.floats(0, 1.0),
-        target_usd_percentage=st.floats(0, 1.0),
-        sell_price=st.floats(1e-3, 1e3),
-        buy_prices=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-    )
-    @settings(deadline=timedelta(milliseconds=500))
-    def test_against_naive(
-        self,
-        usd_value,
-        asset_value,
-        target_usd_percentage,
-        sell_price,
-        buy_prices,
-        buy_sizes,
-    ):
-        if len(buy_sizes) <= len(buy_prices):
-            buy_prices = buy_prices[: len(buy_sizes)]
-        else:
-            buy_sizes = buy_sizes[: len(buy_prices)]
-        assume(usd_value + asset_value > 1e-3)
-
-        total_value = usd_value + asset_value
-        new_usd_percentage = usd_value / total_value
-
-        percentage_change = target_usd_percentage - new_usd_percentage
-        value_change = percentage_change * total_value
-
-        assume(value_change > 0.0)
-        assume(np.dot(buy_sizes, buy_prices) > total_value)
-
-        value_change1, _ = utils.apply_taxes_to_value_change_naive(
-            value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-        )
-
-        value_change2, _ = utils.apply_taxes_to_value_change(
-            value_change, sell_price, buy_prices, buy_sizes, target_usd_percentage
-        )
-
-        np.testing.assert_allclose(value_change1, value_change2)
-
-
-class Test_get_balanced_usd_and_asset_values:
+class Test_apply_spread_commissions_and_taxes_to_value_change:
     @pytest.mark.slow
     @given(
+        value_change_multiplier=st.floats(-1.0, 1.0),
         usd_value=st.floats(0, 1.0),
         asset_value=st.floats(0, 1.0),
-        target_usd_percentage=st.floats(0, 1.0),
+        buy_prices=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0.001, 1e3, width=64),
+        ),
+        buy_sizes=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e3, width=64),
+        ),
+        sell_price=st.floats(1e-3, 1e3),
+        balance=st.floats(0, 1e6, width=64),
         distribution=arrays(
             np.float64,
             st.integers(1, 100),
-            elements=st.floats(0.001, 1e7, width=64),
+            elements=st.floats(0, 1e7, width=64),
         ),
-        balance=st.floats(0, 1e6),
-        prices=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes_index=st.integers(1, 9),
-        tax_exemption=st.booleans(),
-    )
-    @settings(deadline=timedelta(milliseconds=2000))
-    def test_naive(
-        self,
-        usd_value,
-        asset_value,
-        target_usd_percentage,
-        distribution,
-        balance,
-        prices,
-        buy_sizes,
-        buy_sizes_index,
-        tax_exemption,
-    ):
-        if len(buy_sizes) <= len(prices):
-            prices = prices[: len(buy_sizes)]
-        else:
-            buy_sizes = buy_sizes[: len(prices)]
-        buy_sizes_index = min(buy_sizes_index, len(prices) - 1)
-
-        total_value = usd_value + asset_value
-        assume(total_value > 1e-3)
-        assume(
-            np.dot(buy_sizes[:buy_sizes_index], prices[:buy_sizes_index]) >= total_value
-        )
-
-        new_usd_percentage = usd_value / total_value
-
-        percentage_change = target_usd_percentage - new_usd_percentage
-        value_change = percentage_change * total_value
-
-        distributions = np.stack([distribution, distribution], axis=1)
-
-        (
-            usd_value_base_case,
-            asset_value_base_case,
-            new_buy_size,
-            buy_size_diffs,
-        ) = utils.get_balanced_usd_and_asset_values_naive(
-            usd_value,
-            asset_value,
-            target_usd_percentage,
-            orderbook_distributions=None,
-            balance=0.0,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
-            taxes=False,
-        )
-
-        np.testing.assert_allclose(
-            usd_value_base_case + asset_value_base_case, usd_value + asset_value
-        )
-        np.testing.assert_almost_equal(
-            usd_value_base_case / (usd_value_base_case + asset_value_base_case),
-            target_usd_percentage,
-        )
-
-        (
-            usd_value_with_spread,
-            asset_value_with_spread,
-            new_buy_size,
-            buy_size_diffs,
-        ) = utils.get_balanced_usd_and_asset_values_naive(
-            usd_value,
-            asset_value,
-            target_usd_percentage,
-            orderbook_distributions=distributions,
-            balance=balance,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
-            taxes=False,
-        )
-
-        np.testing.assert_almost_equal(
-            usd_value_with_spread / (usd_value_with_spread + asset_value_with_spread),
-            target_usd_percentage,
-        )
-        assert (
-            usd_value_with_spread + asset_value_with_spread <= usd_value + asset_value
-        ) or np.allclose(
-            usd_value_with_spread + asset_value_with_spread, usd_value + asset_value
-        )
-
-        (
-            usd_value_full_case,
-            asset_value_full_case,
-            new_buy_size,
-            buy_size_diffs,
-        ) = utils.get_balanced_usd_and_asset_values_naive(
-            usd_value,
-            asset_value,
-            target_usd_percentage,
-            orderbook_distributions=distributions,
-            balance=balance,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
-            taxes=True,
-            tax_exemption=tax_exemption,
-        )
-
-        np.testing.assert_almost_equal(
-            usd_value_full_case / (usd_value_full_case + asset_value_full_case),
-            target_usd_percentage,
-        )
-        if not tax_exemption:
-            assert (
-                usd_value_full_case + asset_value_full_case
-                <= usd_value_with_spread + asset_value_with_spread
-            )
-
-    @pytest.mark.slow
-    @given(
-        usd_value=st.floats(0, 1.0),
-        asset_value=st.floats(0, 1.0),
-        target_usd_percentage=st.floats(0, 1.0),
-        distribution=arrays(
-            np.float64,
-            st.integers(1, 100),
-            elements=st.floats(0.001, 1e7, width=64),
-        ),
-        balance=st.floats(0, 1e6),
-        prices=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes=arrays(
-            np.float64,
-            st.integers(1, 10),
-            elements=st.floats(1e-3, 1e3, width=64),
-        ),
-        buy_sizes_index=st.integers(1, 9),
         taxes=st.booleans(),
         tax_exemption=st.booleans(),
     )
-    @settings(deadline=timedelta(milliseconds=2000))
-    def test_against_naive(
+    @settings(deadline=timedelta(milliseconds=1000))
+    def test_naive(
         self,
+        value_change_multiplier,
         usd_value,
         asset_value,
-        target_usd_percentage,
-        distribution,
-        balance,
-        prices,
+        buy_prices,
         buy_sizes,
-        buy_sizes_index,
+        sell_price,
+        balance,
+        distribution,
         taxes,
         tax_exemption,
     ):
-        if len(buy_sizes) <= len(prices):
-            prices = prices[: len(buy_sizes)]
+        if len(buy_sizes) <= len(buy_prices):
+            buy_prices = buy_prices[: len(buy_sizes)]
         else:
-            buy_sizes = buy_sizes[: len(prices)]
-        buy_sizes_index = min(buy_sizes_index, len(prices) - 1)
+            buy_sizes = buy_sizes[: len(buy_prices)]
+        assume(np.sum(buy_sizes) > 1e-3)
 
-        total_value = usd_value + asset_value
-        assume(total_value > 1e-3)
-        assume(
-            np.dot(buy_sizes[:buy_sizes_index], prices[:buy_sizes_index]) >= total_value
-        )
+        assume(usd_value + asset_value > 1e-3)
 
-        new_usd_percentage = usd_value / total_value
+        if value_change_multiplier >= 0.0:
+            value_change = value_change_multiplier * asset_value
+        else:
+            value_change = value_change_multiplier * usd_value
+        assume(value_change <= np.sum(buy_sizes) * sell_price)
+        assume(value_change >= -usd_value)
 
-        percentage_change = target_usd_percentage - new_usd_percentage
-        value_change = percentage_change * total_value
-
-        distributions = np.stack([distribution, distribution], axis=1)
+        orderbook_distributions = np.stack([distribution, distribution], axis=1)
 
         (
-            usd_value1,
-            asset_value1,
+            new_usd_value,
+            new_asset_value,
+            new_buy_size,
+            buy_size_diffs,
+        ) = utils.apply_spread_commissions_and_taxes_to_value_change_naive(
+            value_change,
+            usd_value,
+            asset_value,
+            buy_prices,
+            buy_sizes,
+            sell_price,
+            balance,
+            orderbook_distributions,
+            taxes,
+            tax_exemption,
+        )
+
+        assert new_usd_value >= 0.0
+        assert new_asset_value >= 0.0
+        assert new_buy_size == 0.0 or np.all(buy_size_diffs == 0.0)
+
+    @pytest.mark.slow
+    @given(
+        value_change_multiplier=st.floats(-1.0, 1.0),
+        usd_value=st.floats(0, 1.0),
+        asset_value=st.floats(0, 1.0),
+        buy_prices=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0.001, 1e3, width=64),
+        ),
+        buy_sizes=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e3, width=64),
+        ),
+        sell_price=st.floats(1e-3, 1e3),
+        balance=st.floats(0, 1e6, width=64),
+        distribution=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e7, width=64),
+        ),
+        taxes=st.booleans(),
+        tax_exemption=st.booleans(),
+    )
+    @settings(deadline=timedelta(milliseconds=1500))
+    def test_against_naive(
+        self,
+        value_change_multiplier,
+        usd_value,
+        asset_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        distribution,
+        taxes,
+        tax_exemption,
+    ):
+        if len(buy_sizes) <= len(buy_prices):
+            buy_prices = buy_prices[: len(buy_sizes)]
+        else:
+            buy_sizes = buy_sizes[: len(buy_prices)]
+        assume(np.sum(buy_sizes) > 1e-3)
+
+        assume(usd_value + asset_value > 1e-3)
+
+        if value_change_multiplier >= 0.0:
+            value_change = value_change_multiplier * asset_value
+        else:
+            value_change = value_change_multiplier * usd_value
+        assume(value_change <= np.sum(buy_sizes) * sell_price)
+        assume(value_change >= -usd_value)
+
+        orderbook_distributions = np.stack([distribution, distribution], axis=1)
+
+        (
+            new_usd_value1,
+            new_asset_value1,
             new_buy_size1,
             buy_size_diffs1,
-        ) = utils.get_balanced_usd_and_asset_values_naive(
+        ) = utils.apply_spread_commissions_and_taxes_to_value_change_naive(
+            value_change,
             usd_value,
             asset_value,
-            target_usd_percentage,
-            orderbook_distributions=distributions,
-            balance=balance,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
-            taxes=taxes,
-            tax_exemption=tax_exemption,
+            buy_prices,
+            buy_sizes,
+            sell_price,
+            balance,
+            orderbook_distributions,
+            taxes,
+            tax_exemption,
         )
 
         (
-            usd_value2,
-            asset_value2,
+            new_usd_value2,
+            new_asset_value2,
             new_buy_size2,
             buy_size_diffs2,
-        ) = utils.get_balanced_usd_and_asset_values(
+        ) = utils.apply_spread_commissions_and_taxes_to_value_change(
+            value_change,
             usd_value,
             asset_value,
-            target_usd_percentage,
-            orderbook_distributions=distributions,
-            balance=balance,
-            prices=prices,
-            buy_sizes=buy_sizes,
-            buy_sizes_index=buy_sizes_index,
-            taxes=taxes,
-            tax_exemption=tax_exemption,
+            buy_prices,
+            buy_sizes,
+            sell_price,
+            balance,
+            orderbook_distributions,
+            taxes,
+            tax_exemption,
         )
 
-        assert usd_value1 == usd_value2
-        assert asset_value1 == asset_value2
-        assert new_buy_size1 == new_buy_size2
-        np.testing.assert_allclose(buy_size_diffs1, buy_size_diffs2)
+        np.testing.assert_almost_equal(new_usd_value1, new_usd_value2)
+        np.testing.assert_almost_equal(new_asset_value1, new_asset_value2)
+        np.testing.assert_almost_equal(new_buy_size1, new_buy_size2)
+        np.testing.assert_almost_equal(buy_size_diffs1, buy_size_diffs2)
+
+    @pytest.mark.slow
+    @given(
+        usd_value=st.floats(0, 1.0),
+        buy_prices=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0.001, 1e3, width=64),
+        ),
+        buy_sizes=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e3, width=64),
+        ),
+        sell_price=st.floats(1e-3, 1e3),
+        balance=st.floats(0, 1e6, width=64),
+        distribution=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(0, 1e7, width=64),
+        ),
+        taxes=st.booleans(),
+        tax_exemption=st.booleans(),
+    )
+    @settings(max_examples=200, deadline=timedelta(milliseconds=1000))
+    def test_new_usd_percentage_is_increasing_as_a_function_of_value_change(
+        self,
+        usd_value,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        distribution,
+        taxes,
+        tax_exemption,
+    ):
+        if len(buy_sizes) <= len(buy_prices):
+            buy_prices = buy_prices[: len(buy_sizes)]
+        else:
+            buy_sizes = buy_sizes[: len(buy_prices)]
+        assume(np.sum(buy_sizes) > 1e-3)
+
+        orderbook_distributions = np.stack([distribution, distribution], axis=1)
+
+        sell_sizes = np.linspace(-usd_value / sell_price, np.sum(buy_sizes), 1000)
+        asset_value = sell_sizes[-1] * sell_price
+        assume(usd_value + asset_value > 1e-3)
+
+        value_changes = sell_sizes * sell_price
+        new_usd_percentages = np.zeros(len(sell_sizes))
+
+        for i in range(len(sell_sizes)):
+            new_usd_percentages[i] = utils.get_usd_percentage_for_value_change(
+                value_changes[i],
+                usd_value,
+                asset_value,
+                buy_prices,
+                buy_sizes,
+                sell_price,
+                balance,
+                orderbook_distributions,
+                taxes,
+                tax_exemption,
+            )
+
+        # TODO: calculate the new lower bound (taking spreads etc. into account)
+        # avg_buy_price_diffs = np.diff(avg_buy_prices) / np.diff(value_changes)
+        #
+        # asset_values = asset_values[:-1]
+        # taxes = taxes[:-1]
+        # value_changes = value_changes[:-1]
+        # total_values = total_values[:-1]
+        #
+        # np.testing.assert_array_less(0.0, value_changes)
+        # np.testing.assert_array_less(
+        #     0.0, asset_values * constants.TAX_RATE * value_changes
+        # )
+        #
+        # # obtained from calculating the derivative of new_usd_percentages
+        # # (w.r.t. value_changes) and solving when is it positive (w.r.t.
+        # # avg_buy_price_diffs as a function of value_changes)
+        # lower_bounds = (asset_values * taxes / value_changes - total_values) / (
+        #     asset_values * constants.TAX_RATE * value_changes / sell_price
+        # )
+        # # => new_usd_percentages is increasing as a function of value_changes
+        # # when this lower bound holds for avg_buy_price_diffs
+        #
+        # np.testing.assert_array_less(lower_bounds, avg_buy_price_diffs)
+        # print(new_usd_percentages)
+        np.testing.assert_array_less(0.0, np.diff(new_usd_percentages))
+
+
+@pytest.mark.slow
+@given(
+    usd_value=st.floats(0, 1.0),
+    asset_value=st.floats(0, 1.0),
+    target_usd_percentage=st.floats(0, 1.0),
+    buy_prices=arrays(
+        np.float64,
+        st.integers(1, 10),
+        elements=st.floats(1e-3, 1e3, width=64),
+    ),
+    buy_sizes=arrays(
+        np.float64,
+        st.integers(1, 10),
+        elements=st.floats(1e-3, 1e3, width=64),
+    ),
+    sell_price=st.floats(1e-3, 1e3),
+    balance=st.floats(0, 1e6),
+    distribution=arrays(
+        np.float64,
+        st.integers(1, 100),
+        elements=st.floats(0.001, 1e7, width=64),
+    ),
+    tax_exemption=st.booleans(),
+)
+@settings(deadline=None)
+def test_get_balanced_usd_and_asset_values(
+    usd_value,
+    asset_value,
+    target_usd_percentage,
+    buy_prices,
+    buy_sizes,
+    sell_price,
+    balance,
+    distribution,
+    tax_exemption,
+):
+    if len(buy_sizes) <= len(buy_prices):
+        buy_prices = buy_prices[: len(buy_sizes)]
+    else:
+        buy_sizes = buy_sizes[: len(buy_prices)]
+    assume(np.sum(buy_sizes) > 1e-3)
+
+    assume(usd_value + asset_value > 1e-3)
+
+    orderbook_distributions = np.stack([distribution, distribution], axis=1)
+
+    asset_value = min(asset_value, np.sum(buy_sizes) * sell_price)
+
+    (
+        usd_value_base_case,
+        asset_value_base_case,
+        new_buy_size,
+        buy_size_diffs,
+    ) = utils.get_balanced_usd_and_asset_values(
+        usd_value,
+        asset_value,
+        target_usd_percentage,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        0.0,
+        orderbook_distributions,
+        taxes=False,
+    )
+
+    assert usd_value_base_case >= 0.0
+    assert asset_value_base_case >= 0.0
+    np.testing.assert_allclose(
+        usd_value_base_case + asset_value_base_case, usd_value + asset_value
+    )
+    np.testing.assert_almost_equal(
+        usd_value_base_case / (usd_value_base_case + asset_value_base_case),
+        target_usd_percentage,
+    )
+
+    (
+        usd_value_with_spread,
+        asset_value_with_spread,
+        new_buy_size,
+        buy_size_diffs,
+    ) = utils.get_balanced_usd_and_asset_values(
+        usd_value,
+        asset_value,
+        target_usd_percentage,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes=False,
+    )
+
+    assert usd_value_with_spread >= 0.0
+    assert asset_value_with_spread >= 0.0
+    np.testing.assert_almost_equal(
+        usd_value_with_spread / (usd_value_with_spread + asset_value_with_spread),
+        target_usd_percentage,
+    )
+    assert (
+        usd_value_with_spread + asset_value_with_spread <= usd_value + asset_value
+    ) or np.allclose(
+        usd_value_with_spread + asset_value_with_spread, usd_value + asset_value
+    )
+
+    (
+        usd_value_full_case,
+        asset_value_full_case,
+        new_buy_size,
+        buy_size_diffs,
+    ) = utils.get_balanced_usd_and_asset_values(
+        usd_value,
+        asset_value,
+        target_usd_percentage,
+        buy_prices,
+        buy_sizes,
+        sell_price,
+        balance,
+        orderbook_distributions,
+        taxes=True,
+        tax_exemption=tax_exemption,
+    )
+
+    assert usd_value_full_case >= 0.0
+    assert asset_value_full_case >= 0.0
+    np.testing.assert_almost_equal(
+        usd_value_full_case / (usd_value_full_case + asset_value_full_case),
+        target_usd_percentage,
+    )
+    if not tax_exemption:
+        assert (
+            usd_value_full_case + asset_value_full_case
+            <= usd_value_with_spread + asset_value_with_spread
+        )
 
 
 # @given(logit=st.floats(-20, 20))
