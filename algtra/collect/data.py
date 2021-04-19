@@ -152,7 +152,18 @@ def split_price_data(price_data):
     return price_data_splits
 
 
-def load_data_for_coin(data_dir, coin, discard_half_leverage=True):
+def load_data_for_symbol(data_dir, symbol, split_data=False):
+    market = symbol + "/USD"
+    price_data = load_price_data(data_dir, market, return_price_data_only=True)
+    if split_data:
+        symbol_price_data = split_price_data(symbol_price_data)
+
+    spread_data = load_spread_distributions(data_dir, symbol, stack=True)
+
+    return price_data, spread_data
+
+
+def load_data_for_coin(data_dir, coin, discard_half_leverage=False, split_data=False):
     coin_dir = os.path.abspath(os.path.join(data_dir, coin))
     coin_spread_dir = os.path.abspath(os.path.join(data_dir, "spreads", coin))
 
@@ -171,14 +182,11 @@ def load_data_for_coin(data_dir, coin, discard_half_leverage=True):
             spread_file
         ), f"A corresponding spread file should exist for {symbol}."
 
-        market = symbol + "/USD"
-        symbol_price_data = load_price_data(
-            data_dir, market, return_price_data_only=True
+        symbol_price_data, symbol_spread_data = load_data_for_symbol(
+            data_dir, symbol, split_data=split_data
         )
-        symbol_price_data_splits = split_price_data(symbol_price_data)
-        price_data[leverage] = symbol_price_data_splits
 
-        symbol_spread_data = load_spread_distributions(data_dir, symbol, stack=True)
+        price_data[leverage] = symbol_price_data
         spread_data[leverage] = symbol_spread_data
 
     return price_data, spread_data

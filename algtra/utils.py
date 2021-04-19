@@ -694,7 +694,6 @@ def aggregate_from_displacement_naive(
     assert len(closes) == len(times)
     assert len(closes) == len(displacements)
 
-    # aggregate_N *= 60
     new_N = int(times[-1] - times[0]) // 3600  # times should be in seconds
 
     aggregated_closes = np.zeros(new_N)
@@ -868,18 +867,18 @@ def stochastic_oscillator(X, window_size=3 * 14, k=1):
     return res
 
 
-def heikin_ashi(X):
-    res = np.zeros((X.shape[0] - 1, 4))
-    for i in range(X.shape[0] - 1):
-        ha_close = 0.25 * np.sum(X[i + 1, :4])
-        if i == 0:
-            ha_open = 0.5 * (X[0, 0] + X[0, 3])
-        else:
-            ha_open = 0.5 * np.sum(res[i - 1, :2])
-        ha_high = np.max([X[i + 1, 1], ha_close, ha_open])
-        ha_low = np.min([X[i + 1, 2], ha_close, ha_open])
-        res[i, :] = [ha_close, ha_open, ha_high, ha_low]
-    return res
+# def heikin_ashi(X):
+#     res = np.zeros((X.shape[0] - 1, 4))
+#     for i in range(X.shape[0] - 1):
+#         ha_close = 0.25 * np.sum(X[i + 1, :4])
+#         if i == 0:
+#             ha_open = 0.5 * (X[0, 0] + X[0, 3])
+#         else:
+#             ha_open = 0.5 * np.sum(res[i - 1, :2])
+#         ha_high = np.max([X[i + 1, 1], ha_close, ha_open])
+#         ha_low = np.min([X[i + 1, 2], ha_close, ha_open])
+#         res[i, :] = [ha_close, ha_open, ha_high, ha_low]
+#     return res
 
 
 def round_to_n(x, n=3):
@@ -908,66 +907,66 @@ def ceil_to_n(x, n=3):
     return res
 
 
-def get_time(filename):
-    split1 = filename.split("/")
-    split2 = split1[2].split(".")
-    return int(split2[0])
+# def get_time(filename):
+#     split1 = filename.split("/")
+#     split2 = split1[2].split(".")
+#     return int(split2[0])
+#
+#
+# # TODO: test that with m = 1, X doesn't change
+# def get_multiplied_X(X, multiplier=1):
+#     if X.shape[1] > 1:
+#         returns = X[1:, 3] / X[:-1, 3] - 1
+#         returns = multiplier * returns
+#         assert np.all(returns > -1.0)
+#
+#         X_res = np.zeros_like(X)
+#         X_res[:, 3] = np.concatenate([[1.0], np.cumprod(returns + 1)])
+#
+#         other_returns = X[:, :3] / X[:, 3].reshape((-1, 1)) - 1
+#         other_returns = multiplier * other_returns
+#         assert np.all(other_returns > -1.0)
+#         X_res[:, :3] = X_res[:, 3].reshape((-1, 1)) * (other_returns + 1)
+#
+#         if multiplier < 0:
+#             X_res[:, [1, 2]] = X_res[:, [2, 1]]
+#
+#         X_res[:, 4:] = X[:, 4:]
+#     else:
+#         returns = X[1:, 0] / X[:-1, 0] - 1
+#         returns = multiplier * returns
+#         assert np.all(returns > -1.0)
+#
+#         X_res = np.zeros_like(X)
+#         X_res[:, 0] = np.concatenate([[1.0], np.cumprod(returns + 1)])
+#
+#     return X_res
 
 
-# TODO: test that with m = 1, X doesn't change
-def get_multiplied_X(X, multiplier=1):
-    if X.shape[1] > 1:
-        returns = X[1:, 3] / X[:-1, 3] - 1
-        returns = multiplier * returns
-        assert np.all(returns > -1.0)
-
-        X_res = np.zeros_like(X)
-        X_res[:, 3] = np.concatenate([[1.0], np.cumprod(returns + 1)])
-
-        other_returns = X[:, :3] / X[:, 3].reshape((-1, 1)) - 1
-        other_returns = multiplier * other_returns
-        assert np.all(other_returns > -1.0)
-        X_res[:, :3] = X_res[:, 3].reshape((-1, 1)) * (other_returns + 1)
-
-        if multiplier < 0:
-            X_res[:, [1, 2]] = X_res[:, [2, 1]]
-
-        X_res[:, 4:] = X[:, 4:]
-    else:
-        returns = X[1:, 0] / X[:-1, 0] - 1
-        returns = multiplier * returns
-        assert np.all(returns > -1.0)
-
-        X_res = np.zeros_like(X)
-        X_res[:, 0] = np.concatenate([[1.0], np.cumprod(returns + 1)])
-
-    return X_res
-
-
-def get_max_dropdown(wealths, return_indices=False):
-    res = np.Inf
-    I = -1
-    J = -1
-
-    for i in range(len(wealths)):
-        j = np.argmin(wealths[i:]) + i
-        dropdown = wealths[j] / wealths[i]
-        if dropdown < res:
-            res = dropdown
-            I = i
-            J = j
-
-    if return_indices:
-        return res, I, J
-
-    return res
-
-
-def get_or_create(d, k, create_func, *args):
-    if not k in d:
-        d[k] = create_func(k, *args)
-
-    return d[k]
+# def get_max_dropdown(wealths, return_indices=False):
+#     res = np.Inf
+#     I = -1
+#     J = -1
+#
+#     for i in range(len(wealths)):
+#         j = np.argmin(wealths[i:]) + i
+#         dropdown = wealths[j] / wealths[i]
+#         if dropdown < res:
+#             res = dropdown
+#             I = i
+#             J = j
+#
+#     if return_indices:
+#         return res, I, J
+#
+#     return res
+#
+#
+# def get_or_create(d, k, create_func, *args):
+#     if not k in d:
+#         d[k] = create_func(k, *args)
+#
+#     return d[k]
 
 
 def get_entry_and_exit_idx(entries, exits, N):
@@ -988,7 +987,7 @@ def get_buys_and_sells_ma(X, aggregate_N, w, as_boolean=False, from_minute=True)
     if from_minute:
         w *= 60
 
-    diff = X[w:, 0] - X[:-w, 0]
+    diff = X[w:] - X[:-w]
     N = diff.shape[0]
 
     # Calculating buys and sells from "diff" is equivalent to
@@ -1022,8 +1021,8 @@ def get_buys_and_sells_macross(
 
     assert w_max > w_min
 
-    ma_max = sma(X[1:, 0] / X[0, 0], w_max)
-    ma_min = sma(X[(w_max - w_min + 1) :, 0] / X[0, 0], w_min)
+    ma_max = sma(X[1:] / X[0], w_max)
+    ma_min = sma(X[(w_max - w_min + 1) :] / X[0], w_min)
 
     N = ma_max.shape[0]
     assert N == len(X) - w_max
@@ -1046,30 +1045,30 @@ def get_buys_and_sells_macross(
     return (buys, sells) + return_tuple
 
 
-def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean=False, from_minute=True):
-    w = aggregate_N * w
-    if from_minute:
-        w *= 60
-
-    # start from index 1 so that N is the same as in the previous get_buys_and_sells function
-    stoch = stochastic_oscillator(X[1:, :], w)
-    N = stoch.shape[0]
-
-    diff = np.diff(X[:, 0])
-    diff = diff[-N:]
-
-    buys = (stoch <= th) & (diff > 0)
-    sells = (stoch >= 1 - th) & (diff < 0)
-
-    return_tuple = (N,)
-
-    if as_boolean:
-        if N == 1:
-            return (buys[0], sells[0]) + return_tuple
-        else:
-            return (buys, sells) + return_tuple
-
-    buys = buys.astype(float)
-    sells = sells.astype(float)
-
-    return (buys, sells) + return_tuple
+# def get_buys_and_sells_stoch(X, aggregate_N, w, th, as_boolean=False, from_minute=True):
+#     w = aggregate_N * w
+#     if from_minute:
+#         w *= 60
+#
+#     # start from index 1 so that N is the same as in the previous get_buys_and_sells function
+#     stoch = stochastic_oscillator(X[1:, :], w)
+#     N = stoch.shape[0]
+#
+#     diff = np.diff(X[:, 0])
+#     diff = diff[-N:]
+#
+#     buys = (stoch <= th) & (diff > 0)
+#     sells = (stoch >= 1 - th) & (diff < 0)
+#
+#     return_tuple = (N,)
+#
+#     if as_boolean:
+#         if N == 1:
+#             return (buys[0], sells[0]) + return_tuple
+#         else:
+#             return (buys, sells) + return_tuple
+#
+#     buys = buys.astype(float)
+#     sells = sells.astype(float)
+#
+#     return (buys, sells) + return_tuple

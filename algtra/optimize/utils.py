@@ -22,6 +22,7 @@ from functools import reduce
 import glob
 from numba import njit
 import json
+from bayes_opt import BayesianOptimization
 
 
 def get_symbols_for_optimization(k=None, min_length=None, verbose=False):
@@ -70,7 +71,7 @@ def get_N_iter_and_init_args(fname, n_params, max_N_iter=50):
         N_iter = max_N_iter
 
     # Scale N_iter exponentially by dimensionality
-    if len(bounds) > 2:
+    if n_params > 2:
         N_iter *= 2 ** (n_params - 2)
 
     N_iter = max(N_iter, 1)
@@ -91,7 +92,18 @@ def get_rounded_args(args, resolutions, parameter_names):
     return res
 
 
-def get_suitable_objective_function_for_bayes_opt():
+def get_suitable_objective_function_for_bayes_opt(
+    objective_dict,
+    strategy_type,
+    resolutions,
+    parameter_names,
+    price_data,
+    spread_data,
+    balance,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
+):
     if strategy_type == "ma":
 
         def objective_fn(aggregate_N, w):
@@ -99,7 +111,16 @@ def get_suitable_objective_function_for_bayes_opt():
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_objective_function()
+                objective_dict[args] = get_objective_function(
+                    args,
+                    strategy_type,
+                    price_data,
+                    spread_data,
+                    balance,
+                    use_all_start_times=use_all_start_times,
+                    quantile=quantile,
+                    min_avg_monthly_return=min_avg_monthly_return,
+                )
 
             return objective_dict[args]["objective"]
 
@@ -110,7 +131,16 @@ def get_suitable_objective_function_for_bayes_opt():
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_objective_function()
+                objective_dict[args] = get_objective_function(
+                    args,
+                    strategy_type,
+                    price_data,
+                    spread_data,
+                    balance,
+                    use_all_start_times=use_all_start_times,
+                    quantile=quantile,
+                    min_avg_monthly_return=min_avg_monthly_return,
+                )
 
             return objective_dict[args]["objective"]
 
@@ -121,22 +151,37 @@ def get_suitable_objective_function_for_bayes_opt():
             args = get_rounded_args(args, resolutions, parameter_names)
 
             if args not in objective_dict:
-                objective_dict[args] = get_objective_function()
+                objective_dict[args] = get_objective_function(
+                    args,
+                    strategy_type,
+                    price_data,
+                    spread_data,
+                    balance,
+                    use_all_start_times=use_all_start_times,
+                    quantile=quantile,
+                    min_avg_monthly_return=min_avg_monthly_return,
+                )
 
             return objective_dict[args]["objective"]
 
     return objective_fn
 
 
-def get_objective_function(args, strategy_type):
+def get_objective_function(
+    args,
+    strategy_type,
+    price_data,
+    spread_data,
+    balance,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
+):
     skip_cond, conflict_value = skip_condition(strategy_type, args)
     if skip_cond:
         return {"objective": conflict_value}
 
     get_buys_and_sells_fn = utils.choose_get_buys_and_sells_fn(strategy_type)
-    params_dict = {}
-
-    aggregate_N, w = args[:2]
 
     sub_optim_results_dir = "optim_results/sub_optim_results/"
     if not os.path.exists(sub_optim_results_dir):
@@ -144,7 +189,7 @@ def get_objective_function(args, strategy_type):
 
     joined_str_args = "_".join(str(arg) for arg in args)
 
-    filename = sltp_results_dir + f"{strategy_type}_{joined_str_args}.json"
+    filename = sub_optim_results_dir + f"{strategy_type}_{joined_str_args}.json"
 
     if os.path.exists(filename):
         with open(filename, "r") as file:
@@ -155,60 +200,151 @@ def get_objective_function(args, strategy_type):
         init_sub_args = None
         init_points = 100
 
-    optimized_params, objective = optimize_sltp_and_balancing_params()
+    optimized_params, objective, stats = optimize_sltp_and_balancing_params(
+        init_sub_args,
+        init_points,
+        args,
+        price_data,
+        get_buys_and_sells_fn,
+        spread_data,
+        balance,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+        debug=False,
+    )
 
     with open(filename, "w") as file:
         json.dump(optimized_params, file)
 
+    params_dict = {
+        "params": optimized_params,
+        "objective": objective,
+        "stats": stats,
+    }
+
     return params_dict
 
 
-def optimize_sltp_and_balancing_params(init_sub_args):
+def optimize_sltp_and_balancing_params(
+    init_sub_args,
+    init_points,
+    args,
+    price_data,
+    get_buys_and_sells_fn,
+    spread_data,
+    balance,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.05,
+    debug=False,
+):
     pbounds = {
-        "take_profit": (1.01, 100),
         "stop_loss": (0.0, 0.99),
-        "usd_percentage": (0.0, 0.99),
+        "take_profit": (1.01, 100.0),
+        "target_usd_percentage": (0.0, 0.99),
         "balancing_period": (1, 7 * 24),
         "displacement": (0, 59),
     }
 
+    stats = {}
+
     def sltp_and_balancing_objective_function(
-        take_profit, stop_loss, usd_percentage, balancing_period
+        stop_loss, take_profit, target_usd_percentage, balancing_period, displacement
     ):
         balancing_period = int(round(balancing_period))
         displacement = int(round(displacement))
 
-        return get_sltp_and_balancing_objective_function()
+        (
+            objective,
+            median,
+            mean,
+            fraction_of_positives,
+        ) = get_sltp_and_balancing_objective_function(
+            args,
+            price_data,
+            stop_loss,
+            take_profit,
+            target_usd_percentage,
+            balancing_period,
+            displacement,
+            get_buys_and_sells_fn,
+            spread_data,
+            balance,
+            use_all_start_times=use_all_start_times,
+            quantile=quantile,
+            min_avg_monthly_return=min_avg_monthly_return,
+        )
+
+        stats[
+            (
+                stop_loss,
+                take_profit,
+                target_usd_percentage,
+                balancing_period,
+                displacement,
+            )
+        ] = {
+            "median": median,
+            "mean": mean,
+            "fraction_of_positives": fraction_of_positives,
+        }
+
+        return objective
 
     optimizer = BayesianOptimization(
-        f=sltp_objective_function, pbounds=pbounds, verbose=1 if debug else 0
+        f=sltp_and_balancing_objective_function,
+        pbounds=pbounds,
+        verbose=1 if debug else 0,
     )
 
     if init_sub_args is not None:
-        optimizer.probe(params=prev_best_sltp_args, lazy=True)
+        optimizer.probe(params=init_sub_args, lazy=True)
 
     optimizer.maximize(
         init_points=init_points,
         n_iter=5,
     )
 
-    # take_profit = optimizer.max["params"]["take_profit"]
-    # stop_loss = optimizer.max["params"]["stop_loss"]
-    # stop_loss_type = stop_loss_types[
-    #     int(round(optimizer.max["params"]["stop_loss_type"]))
-    # ]
-
     optimized_params = optimizer.max["params"]
     optimized_params["balancing_period"] = int(
         round(optimized_params["balancing_period"])
     )
     optimized_params["displacement"] = int(round(optimized_params["displacement"]))
+    stats = stats[
+        (
+            optimized_params["stop_loss"],
+            optimized_params["take_profit"],
+            optimized_params["target_usd_percentage"],
+            optimized_params["balancing_period"],
+            optimized_params["displacement"],
+        )
+    ]
+
     objective = optimizer.max["target"]
 
-    return optimized_params, objective
+    return optimized_params, objective, stats
 
 
-def get_sltp_and_balancing_objective_function():
+def get_sltp_and_balancing_objective_function(
+    args,
+    price_data,
+    stop_loss,
+    take_profit,
+    target_usd_percentage,
+    balancing_period,
+    displacement,
+    get_buys_and_sells_fn,
+    spread_data,
+    balance,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.05,
+):
+    aggregate_N, w = args[:2]
+
+    sampled_log_profits_list = []
+
     for symbol in price_data.keys():
         closes = price_data[symbol]["close"].values
         lows = price_data[symbol]["low"].values
@@ -216,55 +352,157 @@ def get_sltp_and_balancing_objective_function():
         times = price_data[symbol]["time"].values
         displacements = utils.get_displacements(price_data[symbol])
 
+        # TODO: cache these results?
         (
             aggregated_closes,
             aggregated_lows,
             aggregated_highs,
             split_indices,
-            aggregate_indices,
+            _,
         ) = utils.aggregate_from_displacement(
             closes, lows, highs, times, displacements, displacement
         )
 
-    return objective
+        for i in range(len(split_indices) - 1):
+            aggregated_closes_part = aggregated_closes[
+                split_indices[i] : split_indices[i + 1]
+            ]
+            aggregated_lows_part = aggregated_lows[
+                split_indices[i] : split_indices[i + 1]
+            ]
+            aggregated_highs_part = aggregated_highs[
+                split_indices[i] : split_indices[i + 1]
+            ]
+
+            if len(aggregated_closes_part) > aggregate_N * w:
+                buys, sells, _ = get_buys_and_sells_fn(
+                    aggregated_closes_part, *args, from_minute=False
+                )
+
+                trade_starts, trade_ends = get_trades(
+                    buys, sells, aggregate_N, use_all_start_times
+                )
+
+                # TODO: parallelize this?
+                for trade_start, trade_end in zip(trade_starts, trade_ends):
+                    trade_closes = (
+                        aggregated_closes_part[trade_start + 1 : trade_end + 1]
+                        / aggregated_closes_part[trade_start]
+                    )
+                    trade_lows = (
+                        aggregated_lows_part[trade_start + 1 : trade_end + 1]
+                        / aggregated_closes_part[trade_start]
+                    )
+                    trade_highs = (
+                        aggregated_highs_part[trade_start + 1 : trade_end + 1]
+                        / aggregated_closes_part[trade_start]
+                    )
+
+                    sampled_log_profits = sample_log_profits(
+                        symbol,
+                        trade_closes,
+                        trade_lows,
+                        trade_highs,
+                        stop_loss,
+                        take_profit,
+                        target_usd_percentage,
+                        balancing_period,
+                        spread_data[symbol],
+                        balance,
+                    )
+
+                    sampled_log_profits_list.append(sampled_log_profits)
+
+    sampled_log_profits = np.concatenate(sampled_log_profits_list)
+    objective = np.quantile(sampled_log_profits, quantile)
+    median = np.median(sampled_log_profits)
+    mean = np.mean(sampled_log_profits)
+    n_positives = np.sum(sampled_log_profits > 0.0)
+    n_negatives = np.sum(sampled_log_profits < 0.0)
+
+    # make objective and median more readable
+    objective *= 24 * 30
+    objective = np.exp(objective)
+    median *= 24 * 30
+    median = np.exp(median)
+    mean *= 24 * 30
+    mean = np.exp(mean)
+    fraction_of_positives = n_positives / (n_positives + n_negatives)
+
+    # probability of profitability should be at least 50% and average profit shoud
+    # be positive (i.e. greater than 1.0)
+    if median < 1.0 or mean <= min_avg_monthly_return:
+        objective -= 1
+
+    return objective, median, mean, fraction_of_positives
 
 
-def get_trades():
-    pass
+def get_trades(buys, sells, aggregate_N, use_all_start_times):
+    n = aggregate_N if use_all_start_times else 1
+
+    trade_starts_list = []
+    trade_ends_list = []
+
+    for i in range(n):
+        trade_starts, trade_ends = utils.get_entry_and_exit_idx(
+            buys[i::aggregate_N], sells[i::aggregate_N], len(buys[i::aggregate_N])
+        )
+        trade_starts *= aggregate_N
+        trade_ends *= aggregate_N
+
+        trade_starts += i
+        trade_ends += i
+
+        trade_starts_list.append(trade_starts)
+        trade_ends_list.append(trade_ends)
+
+    trade_starts = np.concatenate(trade_starts_list)
+    trade_ends = np.concatenate(trade_ends_list)
+
+    return trade_starts, trade_ends
 
 
-def transform_trade(
-    closes,
-    lows,
-    highs,
+def sample_log_profits(
+    symbol,
+    trade_closes,
+    trade_lows,
+    trade_highs,
     stop_loss,
     take_profit,
-    aggregate_N,
-    usd_percentage,
+    target_usd_percentage,
     balancing_period,
     orderbook_distributions,
     balance,
-    tax_exemption=True,
 ):
-    stop_loss_indices = get_stop_loss_indices(closes, lows, stop_loss, aggregate_N)
-    take_profit_indices = get_take_profit_indices(
-        closes, highs, take_profit, aggregate_N
+    tax_exemption = utils.get_leverage_from_symbol(symbol) == 1
+
+    stop_loss_index = get_stop_loss_index(trade_lows, stop_loss)
+    take_profit_index = get_take_profit_index(trade_highs, take_profit)
+
+    usd_values, asset_values, _ = get_balanced_trade(
+        trade_closes,
+        stop_loss_index,
+        take_profit_index,
+        stop_loss,
+        take_profit,
+        target_usd_percentage,
+        balancing_period,
+        orderbook_distributions,
+        balance,
+        taxes=True,
+        tax_exemption=tax_exemption,
+        from_minute=False,
     )
 
-    assert len(stop_loss_indices) == len(take_profit_indices)
+    trigger_i = min(stop_loss_index, take_profit_index)
 
-    res = np.zeros(len(stop_loss_indices), len(closes))
+    log_profits = np.log(usd_values + asset_values)
+    log_profits = log_profits[: trigger_i + 1]
+    log_profits = np.concatenate([np.array([0.0]), log_profits])
 
-    for i in range(len(stop_loss_indices)):
-        normalized_closes = closes[i:] / closes[i - 1] if i > 0 else closes
+    sampled_log_profits = np.diff(log_profits)
 
-        balanced_trade = get_balanced_trade(
-            normalized_closes, stop_loss_indices[i], take_profit_indices[i]
-        )
-
-        res[i, : len(balanced_trade)] = balanced_trade
-
-    return res
+    return sampled_log_profits
 
 
 def get_stop_loss_index_naive(lows, stop_loss: float):
@@ -312,7 +550,7 @@ def get_stop_loss_indices_naive(
     for i in range(aggregate_N):
         # renormalize lows
         normalized_lows = lows[i:] / closes[i - 1] if i > 0 else lows
-        stop_loss_indices[i] = get_stop_loss_index_naive(normalized_lows, stop_loss) + i
+        stop_loss_indices[i] = get_stop_loss_index_naive(normalized_lows, stop_loss)
 
     return stop_loss_indices
 
@@ -334,7 +572,7 @@ def get_stop_loss_indices(
     for i in range(aggregate_N):
         prev_close = current_close
         if i > 0:
-            prev_stop_loss_index = stop_loss_indices[i - 1]
+            prev_stop_loss_index = stop_loss_indices[i - 1] + i - 1
             current_close = closes[i - 1]
         else:
             prev_stop_loss_index = 0
@@ -346,7 +584,7 @@ def get_stop_loss_indices(
             # only up to the previous stop loss index
             # exception: when previous stop loss was triggered before current close
             normalized_lows = lows[i:prev_stop_loss_index] / current_close
-            stop_loss_indices[i] = get_stop_loss_index(normalized_lows, stop_loss) + i
+            stop_loss_indices[i] = get_stop_loss_index(normalized_lows, stop_loss)
 
         else:
             # if the current close is less than the previous close, then it suffices to
@@ -354,7 +592,7 @@ def get_stop_loss_indices(
             i_start = max(i, prev_stop_loss_index)
             normalized_lows = lows[i_start:] / current_close
             stop_loss_indices[i] = (
-                get_stop_loss_index(normalized_lows, stop_loss) + i_start
+                get_stop_loss_index(normalized_lows, stop_loss) + i_start - i
             )
 
     return stop_loss_indices
@@ -375,8 +613,8 @@ def get_take_profit_indices_naive(
     for i in range(aggregate_N):
         # renormalize highs
         normalized_highs = highs[i:] / closes[i - 1] if i > 0 else highs
-        take_profit_indices[i] = (
-            get_take_profit_index_naive(normalized_highs, take_profit) + i
+        take_profit_indices[i] = get_take_profit_index_naive(
+            normalized_highs, take_profit
         )
 
     return take_profit_indices
@@ -399,7 +637,7 @@ def get_take_profit_indices(
     for i in range(aggregate_N):
         prev_close = current_close
         if i > 0:
-            prev_take_profit_index = take_profit_indices[i - 1]
+            prev_take_profit_index = take_profit_indices[i - 1] + i - 1
             current_close = closes[i - 1]
         else:
             prev_take_profit_index = 0
@@ -411,8 +649,8 @@ def get_take_profit_indices(
             # only up to the previous take profit index
             # exception: when previous take profit was triggered before current close
             normalized_highs = highs[i:prev_take_profit_index] / current_close
-            take_profit_indices[i] = (
-                get_take_profit_index(normalized_highs, take_profit) + i
+            take_profit_indices[i] = get_take_profit_index(
+                normalized_highs, take_profit
             )
 
         else:
@@ -421,7 +659,7 @@ def get_take_profit_indices(
             i_start = max(i, prev_take_profit_index)
             normalized_highs = highs[i_start:] / current_close
             take_profit_indices[i] = (
-                get_take_profit_index(normalized_highs, take_profit) + i_start
+                get_take_profit_index(normalized_highs, take_profit) + i_start - i
             )
 
     return take_profit_indices
@@ -530,8 +768,7 @@ def get_balanced_trade_naive(
     stop_loss_is_before_take_profit = stop_loss_index <= take_profit_index
 
     assert prices[-1] == 1.0
-    buy_sizes_index = i // balancing_period + 1
-    assert buy_sizes_index == len(buy_sizes) - 1
+    buy_sizes_index = len(buy_sizes) - 1
 
     if triggered:
         trigger_value = stop_loss if stop_loss_is_before_take_profit else take_profit
@@ -604,15 +841,6 @@ def calculate_corr_matrix(data_dir, coins):
     common_time = combined_series["startTime"]
 
     print(combined_series)
-
-
-if __name__ == "__main__":
-    res = get_symbols_for_optimization(k=10, verbose=True)
-
-    print(res)
-
-    # data_dir = os.path.join(os.getcwd(), "data")
-    # calculate_corr_matrix(data_dir, res.index.values)
 
 
 def get_trade_wealths_dicts(

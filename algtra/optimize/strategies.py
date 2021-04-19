@@ -8,7 +8,8 @@ if __name__ == "__main__":
         sys.path.insert(0, PROJECT_ROOT)
 
 import algtra.optimize.utils as opt
-from algtra import utils
+from algtra.collect import data
+from algtra import utils, constants
 import numpy as np
 import pandas as pd
 import glob
@@ -41,54 +42,153 @@ import warnings
 # )
 
 
-def optimize_single_strategies(
-    client,
+def save_optimized_strategy(
     all_bounds,
     all_resolutions,
-    k=10,
+    balance,
+    k=20,
+    min_length=None,
     strategy_type="macross",
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
     N_iter=None,
+    fname="optim_results/params.json",
     verbose=False,
 ):
-    coins = opt.choose_coins_to_optimize(k)
+    symbols = opt.get_symbols_for_optimization(k=k, min_length=min_length)
 
-    total_balance = utils.get_total_balance(client, False)
-    total_balance = max(total_balance, 1)
+    if verbose:
+        print("Symbols to be used for optimization:")
+        print(symbols)
+        print()
 
     parameter_names = utils.get_parameter_names(strategy_type)
     bounds = dict([(k, all_bounds[k]) for k in parameter_names])
     resolutions = dict([(k, all_resolutions[k]) for k in parameter_names])
 
-    for coin in coins:
-        fname = f"optim_results/{coin}.json"
-        N_iter1, init_args = opt.get_N_iter_and_init_args(fname, len(bounds))
+    N_iter1, init_args = opt.get_N_iter_and_init_args(fname, len(bounds))
 
-        if N_iter is None:
-            N_iter = N_iter1
+    if N_iter is None:
+        N_iter = N_iter1
 
-        params_dict = optimize_single_strategy()
+    params_dict = optimize_strategy(
+        symbols,
+        bounds,
+        resolutions,
+        balance,
+        strategy_type,
+        N_iter,
+        init_args,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+        verbose=verbose,
+    )
 
-        with open(fname, "w") as file:
-            json.dump(params_dict, file)
-
-
-def optimize_single_strategy(
-    coin, bounds, resolutions, strategy_type, search_method, N_iter, init_args
-):
-    parameter_names = utils.get_parameter_names(strategy_type)
-
-    price_data, spread_data = data.load_data_for_coin(data_dir, coin)
+    with open(fname, "w") as file:
+        json.dump(params_dict, file)
 
     if verbose:
-        print("Bayesian Optimization...")
+        print(f"Saved results in file '{fname}'")
 
-    args, objective_dict = bayesian_optimization()
-    args, objective_dict = pseudo_gradient_descent()
+
+def optimize_strategy(
+    symbols,
+    bounds,
+    resolutions,
+    balance,
+    strategy_type,
+    N_iter,
+    init_args,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
+    verbose=False,
+):
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+    parameter_names = utils.get_parameter_names(strategy_type)
+
+    price_data = {}
+    spread_data = {}
+
+    if verbose:
+        print("Loading data...")
+
+    for symbol in tqdm(symbols, disable=not verbose):
+        symbol_price_data, symbol_spread_data = data.load_data_for_symbol(
+            data_dir, symbol, split_data=False
+        )
+
+        price_data[symbol] = symbol_price_data
+        spread_data[symbol] = symbol_spread_data
+
+    if verbose:
+        print("Done.")
+        print()
+        print("Bayesian Optimization...")
+        t0 = time.perf_counter()
+
+    args, objective_dict = bayesian_optimization(
+        price_data,
+        spread_data,
+        bounds,
+        resolutions,
+        parameter_names,
+        balance,
+        strategy_type,
+        N_iter,
+        init_args=init_args,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+        verbose=verbose,
+    )
+
+    if verbose:
+        t1 = time.perf_counter()
+        print(f"Done (took {utils.round_to_n((t1 - t0) / 60)} minutes).")
+        print()
+        print("Gradient Descent...")
+
+    args, objective_dict = pseudo_gradient_descent(
+        objective_dict,
+        args,
+        parameter_names,
+        bounds,
+        resolutions,
+        strategy_type,
+        price_data,
+        spread_data,
+        balance,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+        verbose=verbose,
+    )
+    if verbose:
+        print("Done.")
 
     return objective_dict[args]
 
 
-def bayesian_optimization():
+def bayesian_optimization(
+    price_data,
+    spread_data,
+    bounds,
+    resolutions,
+    parameter_names,
+    balance,
+    strategy_type,
+    N_iter,
+    init_args=None,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
+    verbose=False,
+):
     if verbose:
         print(
             "Total N_iter:",
@@ -100,7 +200,18 @@ def bayesian_optimization():
 
     objective_dict = {}
 
-    objective_fn = opt.get_suitable_objective_function_for_bayes_opt()
+    objective_fn = opt.get_suitable_objective_function_for_bayes_opt(
+        objective_dict,
+        strategy_type,
+        resolutions,
+        parameter_names,
+        price_data,
+        spread_data,
+        balance,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+    )
 
     optimizer = BayesianOptimization(f=objective_fn, pbounds=bounds, verbose=2)
 
@@ -116,12 +227,26 @@ def bayesian_optimization():
     )
 
     args = tuple(v for v in optimizer.max["params"].values())
-    args = get_rounded_args(args, resolutions, parameter_names)
+    args = opt.get_rounded_args(args, resolutions, parameter_names)
 
     return args, objective_dict
 
 
-def pseudo_gradient_descent(init_args, parameter_names, bounds, resolutions):
+def pseudo_gradient_descent(
+    objective_dict,
+    init_args,
+    parameter_names,
+    bounds,
+    resolutions,
+    strategy_type,
+    price_data,
+    spread_data,
+    balance,
+    use_all_start_times=False,
+    quantile=0.45,
+    min_avg_monthly_return=1.10,
+    verbose=False,
+):
     prev_args = None
     if init_args is None:
         init_args = ()
@@ -162,29 +287,15 @@ def pseudo_gradient_descent(init_args, parameter_names, bounds, resolutions):
         for c_args in candidate_args:
             c_args = tuple(c_args)
             if c_args not in objective_dict:
-                objective_dict[c_args] = get_single_strategy_objective_function(
+                objective_dict[c_args] = opt.get_objective_function(
                     c_args,
                     strategy_type,
-                    frequency,
-                    coin,
-                    m,
-                    m_bear,
-                    N_repeat_inp,
-                    sides,
-                    X_origs,
-                    Xs,
-                    X_bears,
-                    short,
-                    step,
-                    stop_loss_take_profit_types,
-                    total_balance,
-                    potential_balances,
-                    potential_spreads,
-                    place_take_profit_and_stop_loss_simultaneously=place_take_profit_and_stop_loss_simultaneously,
-                    trail_value_recalc_period=trail_value_recalc_period,
-                    workers=None,
-                    debug=False,
-                    taxes=taxes,
+                    price_data,
+                    spread_data,
+                    balance,
+                    use_all_start_times=use_all_start_times,
+                    quantile=quantile,
+                    min_avg_monthly_return=min_avg_monthly_return,
                 )
 
             if objective_dict[c_args]["objective"] > best_objective:
@@ -2170,7 +2281,7 @@ def save_displacements_and_last_signal_change_time(
 
 def main():
     all_bounds = {
-        "aggregate_N": (2, 12),
+        "aggregate_N": (2, 24),
         "w": (1, 60),
         "w2": (1, 25),
     }
@@ -2180,13 +2291,31 @@ def main():
         "w2": 1,
     }
 
-    optimize_single_strategies(
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    balance = utils.get_total_balance(client, False)
+    k = 20
+    min_length = constants.MINUTES_IN_A_YEAR // 2
+    strategy_type = "macross"
+    use_all_start_times = False
+    quantile = 0.45
+    min_avg_monthly_return = 1.10
+    N_iter = None
+    fname = "optim_results/params.json"
+    verbose = True
+
+    save_optimized_strategy(
         all_bounds,
         all_resolutions,
-        k=10,
-        strategy_type="macross",
-        N_iter=None,
-        verbose=True,
+        balance,
+        k=k,
+        min_length=min_length,
+        strategy_type=strategy_type,
+        use_all_start_times=use_all_start_times,
+        quantile=quantile,
+        min_avg_monthly_return=min_avg_monthly_return,
+        N_iter=N_iter,
+        fname=fname,
+        verbose=verbose,
     )
 
     # coins = ["ETH", "BTC"]

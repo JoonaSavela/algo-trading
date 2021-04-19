@@ -56,6 +56,48 @@ def test_get_symbols_for_optimization(k, min_length):
         assert data_length >= min_length
 
 
+class Test_quantile_objective_function:
+    @given(
+        log_profits=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(-1e1, 1e1, width=64),
+        ),
+        shift=st.floats(0.0, 10.0),
+        quantile=st.floats(0.0, 1.0),
+    )
+    def test_distribution_shift(self, log_profits, shift, quantile):
+        assume(shift > 0.0)
+        assert np.quantile(log_profits + shift, quantile) > np.quantile(
+            log_profits, quantile
+        )
+
+    @given(
+        log_profits=arrays(
+            np.float64,
+            st.integers(1, 100),
+            elements=st.floats(-1e1, 1e1, width=64),
+        ),
+        scale=st.floats(0.01, 1.0),
+        quantile=st.floats(0.0, 1.0),
+    )
+    def test_distribution_scale(self, log_profits, scale, quantile):
+        log_profits_median = np.median(log_profits)
+
+        scaled_log_profits = log_profits - log_profits_median
+        scaled_log_profits *= scale
+        scaled_log_profits += log_profits_median
+
+        scaled_q = np.quantile(scaled_log_profits, quantile)
+        q = np.quantile(log_profits, quantile)
+
+        atol = 1e-7
+        if quantile <= 0.5:
+            assert scaled_q >= q or np.abs(scaled_q - q) < atol
+        else:
+            assert scaled_q <= q or np.abs(scaled_q - q) < atol
+
+
 @given(
     lows=arrays(
         np.float64,
@@ -83,13 +125,14 @@ def test_get_stop_loss_indices_naive(N, aggregate_N, stop_loss, probe_N):
 
     closes = np.ones(N)
     lows = np.ones(N)
+    idx = np.arange(min(aggregate_N, N))
 
     stop_loss_indices = opt.get_stop_loss_indices_naive(
         closes, lows, stop_loss, aggregate_N
     )
 
     np.testing.assert_array_equal(
-        stop_loss_indices, np.ones(len(stop_loss_indices)) * N
+        stop_loss_indices, np.ones(len(stop_loss_indices)) * N - idx
     )
 
     if N > 0:
@@ -100,13 +143,14 @@ def test_get_stop_loss_indices_naive(N, aggregate_N, stop_loss, probe_N):
             closes, lows, stop_loss, aggregate_N
         )
 
-        idx = np.arange(len(stop_loss_indices))
         li = idx <= probe_N
 
         np.testing.assert_array_equal(
-            stop_loss_indices[li], np.ones(np.sum(li)) * probe_N
+            stop_loss_indices[li], np.ones(np.sum(li)) * probe_N - idx[li]
         )
-        np.testing.assert_array_equal(stop_loss_indices[~li], np.ones(np.sum(~li)) * N)
+        np.testing.assert_array_equal(
+            stop_loss_indices[~li], np.ones(np.sum(~li)) * N - idx[~li]
+        )
 
     lows = np.zeros(N)
 
@@ -114,7 +158,7 @@ def test_get_stop_loss_indices_naive(N, aggregate_N, stop_loss, probe_N):
         closes, lows, stop_loss, aggregate_N
     )
 
-    np.testing.assert_array_equal(stop_loss_indices, np.arange(len(stop_loss_indices)))
+    np.testing.assert_array_equal(stop_loss_indices, np.zeros(len(stop_loss_indices)))
 
 
 @pytest.mark.slow
@@ -175,13 +219,14 @@ def test_get_take_profit_indices_naive(N, aggregate_N, take_profit, probe_N):
 
     closes = np.ones(N)
     highs = np.ones(N)
+    idx = np.arange(min(aggregate_N, N))
 
     take_profit_indices = opt.get_take_profit_indices_naive(
         closes, highs, take_profit, aggregate_N
     )
 
     np.testing.assert_array_equal(
-        take_profit_indices, np.ones(len(take_profit_indices)) * N
+        take_profit_indices, np.ones(len(take_profit_indices)) * N - idx
     )
 
     if N > 0:
@@ -192,14 +237,13 @@ def test_get_take_profit_indices_naive(N, aggregate_N, take_profit, probe_N):
             closes, highs, take_profit, aggregate_N
         )
 
-        idx = np.arange(len(take_profit_indices))
         li = idx <= probe_N
 
         np.testing.assert_array_equal(
-            take_profit_indices[li], np.ones(np.sum(li)) * probe_N
+            take_profit_indices[li], np.ones(np.sum(li)) * probe_N - idx[li]
         )
         np.testing.assert_array_equal(
-            take_profit_indices[~li], np.ones(np.sum(~li)) * N
+            take_profit_indices[~li], np.ones(np.sum(~li)) * N - idx[~li]
         )
 
     highs = np.ones(N) * np.Inf
@@ -209,7 +253,7 @@ def test_get_take_profit_indices_naive(N, aggregate_N, take_profit, probe_N):
     )
 
     np.testing.assert_array_equal(
-        take_profit_indices, np.arange(len(take_profit_indices))
+        take_profit_indices, np.zeros(len(take_profit_indices))
     )
 
 
@@ -247,6 +291,7 @@ def test_get_take_profit_indices_against_naive(
 
 
 class Test_get_balanced_trade:
+    @pytest.mark.slow
     @given(
         closes=arrays(
             np.float64,
@@ -282,6 +327,7 @@ class Test_get_balanced_trade:
                 closes[i] * (1.0 - target_usd_percentage) + target_usd_percentage,
             )
 
+    @pytest.mark.slow
     @given(
         closes=arrays(
             np.float64,
@@ -331,7 +377,7 @@ class Test_get_balanced_trade:
                 trigger_value * (1.0 - target_usd_percentage) + target_usd_percentage,
             )
 
-    # @pytest.mark.slow
+    @pytest.mark.slow
     @given(
         closes=arrays(
             np.float64,
