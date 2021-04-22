@@ -24,9 +24,10 @@ from pathlib import Path
 from loguru import logger
 import matplotlib.pyplot as plt
 from numba import njit
+from functools import lru_cache
 
 
-def get_filtered_markets(client, filter_volume=False):
+def get_filtered_markets(client, filter_volume=True):
     markets = pd.DataFrame(client.list_markets())
     time.sleep(0.05)
 
@@ -61,44 +62,46 @@ def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False
     res.extend(X)
     count = 1
 
-    start_time = min(parse_datetime(x["startTime"]) for x in X)
-    if verbose:
-        print(count, len(X), start_time)
-    start_time = start_time.timestamp()
-
-    while (
-        # count <= 10 and
-        len(X) > 1
-        and (limit is None or limit > 0)
-        and (prev_end_time is None or prev_end_time < start_time)
-    ):
-        X = client.get_historical_prices(
-            market=market,
-            resolution=60,
-            limit=5000 if limit is None else min(limit, 5000),
-            end_time=start_time,
-        )
-        time.sleep(0.05)
-        if limit is not None:
-            limit -= len(X)
-        res.extend(X)
-        count += 1
-
+    if len(X) > 0:
         start_time = min(parse_datetime(x["startTime"]) for x in X)
         if verbose:
             print(count, len(X), start_time)
         start_time = start_time.timestamp()
 
-    res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
-    if prev_end_time is not None:
-        res = res[
-            res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
-            > prev_end_time
-        ]
+        while (
+            # count <= 10 and
+            len(X) > 1
+            and (limit is None or limit > 0)
+            and (prev_end_time is None or prev_end_time < start_time)
+        ):
+            X = client.get_historical_prices(
+                market=market,
+                resolution=60,
+                limit=5000 if limit is None else min(limit, 5000),
+                end_time=start_time,
+            )
+            time.sleep(0.05)
+            if limit is not None:
+                limit -= len(X)
+            res.extend(X)
+            count += 1
+
+            start_time = min(parse_datetime(x["startTime"]) for x in X)
+            if verbose:
+                print(count, len(X), start_time)
+            start_time = start_time.timestamp()
+
+        res = pd.DataFrame(res).drop_duplicates("startTime").sort_values("startTime")
+        if prev_end_time is not None:
+            res = res[
+                res["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
+                > prev_end_time
+            ]
 
     return res
 
 
+@lru_cache(maxsize=constants.LRU_CACHE_MAX_SIZE)
 def load_price_data(
     data_dir, market, return_price_data=True, return_price_data_only=False
 ):
@@ -195,7 +198,7 @@ def load_data_for_coin(data_dir, coin, discard_half_leverage=False, split_data=F
 def save_price_data(data_dir):
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
 
-    markets = get_filtered_markets(client)
+    markets = get_filtered_markets(client, filter_volume=True)
 
     datapoints_added = 0
 
@@ -222,41 +225,43 @@ def save_price_data(data_dir):
                 verbose=False,
             )
 
-            symbol = market.split("/")[0]
+            if len(new_price_data) > 0:
+                symbol = market.split("/")[0]
 
-            price_data = new_price_data.drop_duplicates("startTime").sort_values(
-                "startTime"
-            )
-            end_time = (
-                price_data["startTime"]
-                .map(lambda x: datetime.timestamp(parse_datetime(x)))
-                .max()
-            )
-
-            datapoints_added += len(price_data)
-            data_length = prev_data_length + len(price_data)
-
-            if data_length > max_data_length:
-                max_data_length = data_length
-                max_symbol = symbol
-
-            data_file_exists = prev_end_time is not None
-            if data_file_exists:
-                prev_data_file = os.path.join(
-                    coin_dir, symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv"
+                price_data = new_price_data.drop_duplicates("startTime").sort_values(
+                    "startTime"
                 )
-                assert os.path.exists(prev_data_file)
+                end_time = (
+                    price_data["startTime"]
+                    .map(lambda x: datetime.timestamp(parse_datetime(x)))
+                    .max()
+                )
 
-            new_data_file = os.path.join(
-                coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
-            )
-            price_data.to_csv(
-                prev_data_file if data_file_exists else new_data_file,
-                mode="a" if data_file_exists else "w",
-                header=not data_file_exists,
-            )
-            if data_file_exists:
-                os.rename(prev_data_file, new_data_file)
+                datapoints_added += len(price_data)
+                data_length = prev_data_length + len(price_data)
+
+                if data_length > max_data_length:
+                    max_data_length = data_length
+                    max_symbol = symbol
+
+                data_file_exists = prev_end_time is not None
+                if data_file_exists:
+                    prev_data_file = os.path.join(
+                        coin_dir,
+                        symbol + f"_{int(prev_end_time)}_{prev_data_length}.csv",
+                    )
+                    assert os.path.exists(prev_data_file)
+
+                new_data_file = os.path.join(
+                    coin_dir, symbol + f"_{int(end_time)}_{data_length}.csv"
+                )
+                price_data.to_csv(
+                    prev_data_file if data_file_exists else new_data_file,
+                    mode="a" if data_file_exists else "w",
+                    header=not data_file_exists,
+                )
+                if data_file_exists:
+                    os.rename(prev_data_file, new_data_file)
 
     print(f"Saved {datapoints_added} price data points")
     print(f"Max. data length: {max_data_length} (symbol {max_symbol})")
@@ -329,6 +334,7 @@ def get_spread_distributions(client, market):
     return distributions
 
 
+@lru_cache(maxsize=constants.LRU_CACHE_MAX_SIZE)
 def load_spread_distributions(data_dir, symbol, stack=False):
     coin = utils.get_coin(symbol)
     coin_dir = os.path.join(data_dir, "spreads", coin)
@@ -486,6 +492,7 @@ def get_timestamps(time_string_series, time_string_format="%Y-%m-%dT%H:%M:%S"):
     return timestamps
 
 
+# TODO: use parse_datetime instead of get_timestamps
 def get_trade_history(client, get_order_history_f, max_time=None):
     if max_time is None:
         max_time = -1
@@ -581,7 +588,7 @@ def save_average_volumes(data_dir):
     print("Saving average volumes...")
 
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-    markets = get_filtered_markets(client)
+    markets = get_filtered_markets(client, filter_volume=True)
 
     volumes = {}
 
@@ -607,18 +614,57 @@ def save_average_volumes(data_dir):
     print()
 
 
-def experiments():
-    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-    X = get_price_data(client, "PERP/USD", limit=None, prev_end_time=None, verbose=True)
+def save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_spread=1.10):
+    print("Saving whitelist...")
 
-    print(X)
-    print(len(X))
-    X["t"] = X["startTime"].map(lambda x: datetime.timestamp(parse_datetime(x)))
-    print(np.unique(np.diff(X["t"])) / 60)
+    spreads_dir = os.path.join(data_dir, "spreads")
+
+    client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+    markets = get_filtered_markets(client, filter_volume=True)
+    balance = utils.get_total_balance(client, False)
+    # simulate spread of symbol if its share of the balance was to increase significantly
+    balance *= constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
+
+    whitelist = {}
+
+    for market in tqdm(markets["name"]):
+        symbol = market.split("/")[0]
+
+        distributions = load_spread_distributions(data_dir, symbol, stack=True)
+
+        spread = utils.calculate_max_average_spread(distributions, balance)
+
+        # 0.25 is the price limit for spot and leveraged tokens market; see
+        # https://help.ftx.com/hc/en-us/articles/360031896592-Advanced-Order-Types
+        if spread > max_spread or np.all(balance > 0.25 * np.sum(distributions, axis=0)):
+            whitelist[symbol] = False
+        else:
+            whitelist[symbol] = True
+
+    if not os.path.exists(optim_results_dir):
+        os.mkdir(optim_results_dir)
+
+    whitelist_fname = os.path.join(optim_results_dir, "whitelist.json")
+
+    with open(whitelist_fname, "w") as file:
+        json.dump(whitelist, file)
+
+    n_whitelisted = np.sum([v for v in whitelist.values()])
+    print(f"Whitelisted symbols: {n_whitelisted}/{len(whitelist)}")
+    print()
+
+def experiments():
+    data_dir = os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+
+    save_average_volumes(data_dir)
+    save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_spread=1.10)
 
 
 # TODO: remove HALF symbols
 # TODO: remove "startTimestamp" and "index" columns
+# TODO: remove files/folders which haven't been touched in a while?
 def clean(data_dir):
     pass
 
@@ -636,10 +682,8 @@ def main():
     save_trade_history(data_dir)
     save_total_balance(data_dir)
     save_average_volumes(data_dir)
+    save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_spread=1.10)
     clean(data_dir)
-
-    # get_and_save_all(data_dir)
-    # save_orderbook_data(data_dir)
 
 
 # TODO: save deposits/withdrawals?

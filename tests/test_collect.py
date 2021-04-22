@@ -73,6 +73,7 @@ def test_glob_paths():
         assert "balances" not in path_end
         assert "trades" not in path_end
         assert "conditional_trades" not in path_end
+        assert "volumes" not in path_end
 
 
 class Test_load_price_data:
