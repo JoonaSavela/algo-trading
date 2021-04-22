@@ -23,7 +23,7 @@ except ImportError as e:
 
 
 def calculate_max_average_spread_naive(
-    distributions, balance, include_commissions=True
+    distributions, balance
 ):
     res = []
 
@@ -41,16 +41,13 @@ def calculate_max_average_spread_naive(
         average_spread = np.dot(log_percentage, weights)
         res.append(average_spread)
 
-    spread = np.exp(np.max(res)) - 1
-
-    if include_commissions:
-        spread += constants.COMMISSIONS
+    spread = np.exp(np.max(res))
 
     return spread
 
 
 @njit(fastmath=True)
-def calculate_max_average_spread(distributions, balance, include_commissions=True):
+def calculate_max_average_spread(distributions, balance):
     res = np.zeros(2)  # .astype(np.float32)
 
     for i in range(2):
@@ -76,12 +73,20 @@ def calculate_max_average_spread(distributions, balance, include_commissions=Tru
         average_spread = np.dot(log_percentage, weights)
         res[i] = average_spread
 
-    spread = np.exp(np.max(res)) - 1
-
-    if include_commissions:
-        spread += constants.COMMISSIONS
+    spread = np.exp(np.max(res))
 
     return spread
+
+
+def combine_time_series_by_common_time(timeseries, na_replace=0.0):
+    if na_replace is None:
+        res = reduce(lambda x, y: pd.merge(x, y, on=["startTime"]).dropna(), timeseries)
+    else:
+        res = reduce(
+            lambda x, y: pd.merge(x, y, on=["startTime"]).fillna(na_replace), timeseries
+        )
+
+    return res
 
 
 def get_average_buy_price_naive(buy_prices, buy_sizes, sell_size):
@@ -117,7 +122,7 @@ def apply_spread_commissions_and_taxes_to_value_change_naive(
     asset_value,
     buy_prices,
     buy_sizes,
-    sell_price,
+    price,
     balance,
     orderbook_distributions,
     taxes,
@@ -130,54 +135,92 @@ def apply_spread_commissions_and_taxes_to_value_change_naive(
     if value_change == 0.0:
         return usd_value, asset_value, new_buy_size, buy_size_diffs
 
-    if taxes and value_change > 0.0:
-        # value_change > 0, then profit was made (with respect to previous usd and asset values)
-        # and some of the asset needs to be sold
-        buy_price, buy_size_diffs = get_average_buy_price(
-            buy_prices, buy_sizes, value_change / sell_price
-        )
-
-        if sell_price > buy_price or tax_exemption:
-            taxes_to_pay = (
-                value_change * constants.TAX_RATE * (1.0 - buy_price / sell_price)
-            )
-
-    spread_and_commission_to_usd_value = 0.0
-    spread_and_commission_to_asset_value = 0.0
-
-    # even if balance == 0.0, then commissions must be paid; however, in parctice
-    # balance must be greater than 0.0, so this provides a way to disable spread
-    # and commissions calculations
+    # spread decreases sell price when selling and increases buy price when buying;
+    # i.e. it decreases value (USD) when selling and decreases size when buying
+    # - when selling, calculating applying spread is easy since it is applied
+    #   straight to the resulting usd value (through sell price)
+    # - when buying, some care is needed. If there were no spread (and no commissions),
+    #   then it would hold that value_change / price = new_buy_size. However, since spread
+    #   increases buy price, then it holds that value_change / buy_price = new_buy_size,
+    #   where buy_price = price * spread. Moreover, this function does not return
+    #   the spread-affected buy price (since modeling the resulting price changes
+    #   would be tedious), but it doesn't need to: in future calls the arrays
+    #   buy_prices and buy_sizes contain the current values for price and
+    #   new_buy_size, respectively, so for each correspondent buy_price and buy_size
+    #   in buy_prices and buy_sizes, it holds that buy_price * buy_size
+    #   = value_change / spread (value_change and spread are from previous call
+    #   corresponding to buy_price and buy_size), which is exactly the desired
+    #   value change with spread taken into account.
     if balance > 0.0:
         spread = calculate_max_average_spread(
             orderbook_distributions,
             balance * np.abs(value_change),
-            include_commissions=True,
+        )
+    else:
+        spread = 1.0
+
+    if taxes and value_change > 0.0:
+        # value_change > 0, then profit was made (with respect to previous usd and asset values)
+        # and some of the asset needs to be sold
+        sell_price = price / spread
+
+        # - value_change with spread taken into account = value_change / spread
+        # - sell_price = price / spread
+        # => value_change with spread taken into account / sell_price = value_change / price
+        buy_price, buy_size_diffs = get_average_buy_price(
+            buy_prices, buy_sizes, value_change / price
         )
 
+        if sell_price > buy_price or tax_exemption:
+            taxes_to_pay = (
+                value_change
+                / spread
+                * constants.TAX_RATE
+                * (1.0 - buy_price / sell_price)
+            )
+
+    commission_to_usd_value = 0.0
+    commission_to_asset_value = 0.0
+
+    # even if balance == 0.0, then commissions must be paid; however, in parctice
+    # balance must be greater than 0.0, so this provides a way to disable
+    # commissions calculations
+    if balance > 0.0:
         if value_change > 0.0:
             # balancing action is sell => commissions and spread is taken from
             # usd value
-            spread_and_commission_to_usd_value = spread * np.abs(value_change)
+            commission_to_usd_value = constants.COMMISSIONS * value_change / spread
         else:
             # balancing action is buy => commissions and spread is taken from
             # asset value
-            spread_and_commission_to_asset_value = spread * np.abs(value_change)
+            commission_to_asset_value = (
+                constants.COMMISSIONS * np.abs(value_change) / spread
+            )
 
     if value_change < 0.0:
+        buy_price = price * spread
+        # spread is already taken into account in commission_to_asset_value
         new_buy_size = (
-            np.abs(value_change) - spread_and_commission_to_asset_value
-        ) / sell_price
+            np.abs(value_change) / buy_price - commission_to_asset_value / price
+        )
 
-    new_usd_value = (
-        usd_value + value_change - taxes_to_pay - spread_and_commission_to_usd_value
-    )
-    new_asset_value = asset_value - value_change - spread_and_commission_to_asset_value
+    if value_change > 0.0:
+        new_usd_value = (
+            usd_value + value_change / spread - taxes_to_pay - commission_to_usd_value
+        )
+        new_asset_value = asset_value - value_change - commission_to_asset_value
+    else:
+        new_usd_value = (
+            usd_value + value_change - taxes_to_pay - commission_to_usd_value
+        )
+        new_asset_value = (
+            asset_value - value_change / spread - commission_to_asset_value
+        )
 
     return new_usd_value, new_asset_value, new_buy_size, buy_size_diffs
 
 
-apply_spread_commissions_and_taxes_to_value_change = njit()(
+apply_spread_commissions_and_taxes_to_value_change = njit(fastmath=True)(
     apply_spread_commissions_and_taxes_to_value_change_naive
 )
 
@@ -189,7 +232,7 @@ def get_usd_percentage_for_value_change(
     asset_value,
     buy_prices,
     buy_sizes,
-    sell_price,
+    price,
     balance,
     orderbook_distributions,
     taxes,
@@ -206,7 +249,7 @@ def get_usd_percentage_for_value_change(
         asset_value,
         buy_prices,
         buy_sizes,
-        sell_price,
+        price,
         balance,
         orderbook_distributions,
         taxes,
@@ -224,14 +267,14 @@ def find_value_change_naive(
     target_usd_percentage,
     buy_prices,
     buy_sizes,
-    sell_price,
+    price,
     balance,
     orderbook_distributions,
     taxes,
     tax_exemption,
 ):
     if target_usd_percentage == 1.0:
-        return min(np.sum(buy_sizes) * sell_price, asset_value)
+        return min(np.sum(buy_sizes) * price, asset_value)
     elif target_usd_percentage == 0.0:
         return -usd_value
 
@@ -241,7 +284,7 @@ def find_value_change_naive(
         asset_value,
         buy_prices,
         buy_sizes,
-        sell_price,
+        price,
         balance,
         orderbook_distributions,
         taxes,
@@ -255,7 +298,7 @@ def find_value_change_naive(
 
     start = 0.0 if balancing_action_is_sell else -usd_value
     end = (
-        min(np.sum(buy_sizes) * sell_price, asset_value)
+        min(np.sum(buy_sizes) * price, asset_value)
         if balancing_action_is_sell
         else 0.0
     )
@@ -268,7 +311,7 @@ def find_value_change_naive(
         asset_value,
         buy_prices,
         buy_sizes,
-        sell_price,
+        price,
         balance,
         orderbook_distributions,
         taxes,
@@ -292,7 +335,7 @@ def find_value_change_naive(
             asset_value,
             buy_prices,
             buy_sizes,
-            sell_price,
+            price,
             balance,
             orderbook_distributions,
             taxes,
@@ -313,7 +356,7 @@ def get_balanced_usd_and_asset_values(
     target_usd_percentage,
     buy_prices,
     buy_sizes,
-    sell_price,
+    price,
     balance,
     orderbook_distributions,
     taxes=False,
@@ -325,7 +368,7 @@ def get_balanced_usd_and_asset_values(
         target_usd_percentage,
         buy_prices,
         buy_sizes,
-        sell_price,
+        price,
         balance,
         orderbook_distributions,
         taxes,
@@ -343,7 +386,7 @@ def get_balanced_usd_and_asset_values(
         asset_value,
         buy_prices,
         buy_sizes,
-        sell_price,
+        price,
         balance,
         orderbook_distributions,
         taxes,
@@ -501,55 +544,55 @@ def choose_get_buys_and_sells_fn(strategy_type):
         raise ValueError("strategy_type")
 
 
-def get_filtered_strategies_and_weights(
-    coins=["ETH", "BTC"],
-    freqs=["low", "high"],
-    strategy_types=["ma", "macross"],
-    ms=[1, 3],
-    m_bears=[0, 3],
-    normalize=True,
-    filter=True,
-):
-
-    strategies = {}
-
-    for coin, freq, strategy_type, m, m_bear in product(
-        coins, freqs, strategy_types, ms, m_bears
-    ):
-        strategy_key = "_".join([coin, freq, strategy_type, str(m), str(m_bear)])
-        filename = f"optim_results/{strategy_key}.json"
-        if os.path.exists(filename):
-            with open(filename, "r") as file:
-                strategies[strategy_key] = json.load(file)
-
-    if os.path.exists("optim_results/weights.json") and filter:
-        with open("optim_results/weights.json", "r") as file:
-            weights = json.load(file)
-
-        filtered_strategies = {}
-        filtered_weights = {}
-
-        for k in strategies.keys():
-            if k in weights and weights[k] > 0:
-                filtered_strategies[k] = strategies[k]
-                filtered_weights[k] = weights[k]
-
-        strategies = filtered_strategies
-        weights = filtered_weights
-    else:
-        weights = {}
-
-    if len(weights) > 0:
-        if normalize:
-            weight_values = np.array(list(weights.values()))
-            weight_values /= np.sum(weight_values)
-            weights = dict(list(zip(weights.keys(), weight_values)))
-    else:
-        weights = dict(
-            list(zip(strategies.keys(), np.ones((len(strategies),)) / len(strategies)))
-        )
-
-    return strategies, weights
+# def get_filtered_strategies_and_weights(
+#     coins=["ETH", "BTC"],
+#     freqs=["low", "high"],
+#     strategy_types=["ma", "macross"],
+#     ms=[1, 3],
+#     m_bears=[0, 3],
+#     normalize=True,
+#     filter=True,
+# ):
+#
+#     strategies = {}
+#
+#     for coin, freq, strategy_type, m, m_bear in product(
+#         coins, freqs, strategy_types, ms, m_bears
+#     ):
+#         strategy_key = "_".join([coin, freq, strategy_type, str(m), str(m_bear)])
+#         filename = f"optim_results/{strategy_key}.json"
+#         if os.path.exists(filename):
+#             with open(filename, "r") as file:
+#                 strategies[strategy_key] = json.load(file)
+#
+#     if os.path.exists("optim_results/weights.json") and filter:
+#         with open("optim_results/weights.json", "r") as file:
+#             weights = json.load(file)
+#
+#         filtered_strategies = {}
+#         filtered_weights = {}
+#
+#         for k in strategies.keys():
+#             if k in weights and weights[k] > 0:
+#                 filtered_strategies[k] = strategies[k]
+#                 filtered_weights[k] = weights[k]
+#
+#         strategies = filtered_strategies
+#         weights = filtered_weights
+#     else:
+#         weights = {}
+#
+#     if len(weights) > 0:
+#         if normalize:
+#             weight_values = np.array(list(weights.values()))
+#             weight_values /= np.sum(weight_values)
+#             weights = dict(list(zip(weights.keys(), weight_values)))
+#     else:
+#         weights = dict(
+#             list(zip(strategies.keys(), np.ones((len(strategies),)) / len(strategies)))
+#         )
+#
+#     return strategies, weights
 
 
 # This function computes GCD (Greatest Common Divisor)
@@ -670,8 +713,11 @@ def rolling_min(X, w):
 #     return signed_volumes
 
 
-def get_displacements(price_data):
-    return price_data["startTime"].map(lambda x: parse_datetime(x).minute).values
+@njit
+def get_displacements(timestamps, first_timestamp, first_displacement):
+    timestamp_diffs_as_minutes = ((timestamps - first_timestamp) / 60).astype(np.int32)
+
+    return (timestamp_diffs_as_minutes + first_displacement) % 60
 
 
 def get_next_displacement_index_naive(displacements, start, displacement):
@@ -686,7 +732,7 @@ def get_next_displacement_index_naive(displacements, start, displacement):
 get_next_displacement_index = njit()(get_next_displacement_index_naive)
 
 
-def aggregate_from_displacement_naive(
+def aggregate_price_data_from_displacement_naive(
     closes, lows, highs, times, displacements, displacement
 ):
     assert len(closes) == len(lows)
@@ -742,7 +788,61 @@ def aggregate_from_displacement_naive(
     )
 
 
-aggregate_from_displacement = njit()(aggregate_from_displacement_naive)
+aggregate_price_data_from_displacement = njit()(
+    aggregate_price_data_from_displacement_naive
+)
+
+
+# TODO: tests
+def aggregate_volume_data_from_displacement_naive(
+    volumes, times, displacements, displacement
+):
+    assert len(volumes) == len(times)
+    assert len(volumes) == len(displacements)
+
+    new_N = int(times[-1] - times[0]) // 3600
+
+    aggregated_volumes = np.zeros(new_N)
+    aggregate_indices = np.zeros((new_N, 2), dtype=np.int32)
+    split_indices = np.zeros(new_N, dtype=np.int32)
+
+    aggregate_i = 0
+    split_i = 1
+    start = get_next_displacement_index(displacements, 0, displacement)
+    split_start = start
+    end = get_next_displacement_index(displacements, start + 1, displacement)
+
+    # find next displacement index, (split if necessary) and aggregate
+    while end < len(volumes):
+        if np.abs(times[end - 1] - times[start] - 59.0 * 60.0) > 1e-4:
+            split_indices[split_i] = aggregate_i
+            split_i += 1
+
+        else:
+            aggregated_volumes[aggregate_i] = np.sum(volumes[start:end])
+            aggregate_indices[aggregate_i, :] = (start, end)
+            aggregate_i += 1
+
+        start = end
+        end = get_next_displacement_index(displacements, start + 1, displacement)
+
+    split_indices[split_i] = aggregate_i
+    split_i += 1
+
+    aggregated_volumes = aggregated_volumes[:aggregate_i]
+    split_indices = split_indices[:split_i]
+    aggregate_indices = aggregate_indices[:aggregate_i, :]
+
+    return (
+        aggregated_volumes,
+        split_indices,
+        aggregate_indices,
+    )
+
+
+aggregate_volume_data_from_displacement = njit()(
+    aggregate_volume_data_from_displacement_naive
+)
 
 
 def aggregate(X, n=5, from_minute=True):
@@ -825,29 +925,30 @@ def aggregate(X, n=5, from_minute=True):
 #     return pd.Series(X[:, 0]).rolling(window_size).std().dropna().values
 
 
-# def sma_old(X, window_size):
-#     if len(X.shape) == 1:
-#         X = X.reshape(-1, 1)
-#     return np.convolve(X[:, 0], np.ones((window_size,)) / window_size, mode="valid")
+def moving_sum_naive(X, window_size):
+    return np.convolve(X, np.ones(window_size), mode="valid")
 
 
-# TODO: write this with numba
-def sma(X, window_size):
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
-
-    S = np.sum(X[:window_size, 0])
-    res = [S]
+@njit
+def moving_sum(X, window_size):
+    S = np.sum(X[:window_size])
+    res = np.zeros(len(X) - window_size + 1)
+    res[0] = S
 
     for i in range(len(X) - window_size):
-        S += X[i + window_size, 0] - X[i, 0]
-        res.append(S)
-
-    res = np.array(res) / window_size
-
-    # assert(np.allclose(res, sma_old(X, window_size)))
+        S += X[i + window_size] - X[i]
+        res[i + 1] = S
 
     return res
+
+
+def sma_naive(X, window_size):
+    return moving_sum_naive(X, window_size) / window_size
+
+
+@njit
+def sma(X, window_size):
+    return moving_sum(X, window_size) / window_size
 
 
 # TODO: make this faster with concurrent.futures!
@@ -969,14 +1070,34 @@ def ceil_to_n(x, n=3):
 #     return d[k]
 
 
-def get_entry_and_exit_idx(entries, exits, N):
+@njit
+def get_first_larger_than(iterable, value, default_value):
+    for x in iterable:
+        if x > value:
+            return x
+
+    return default_value
+
+
+@njit
+def get_entry_and_exit_idx(entries, exits, exits_from_entries=False):
+    N = len(entries)
     idx = np.arange(N)
 
-    entries_li = np.diff(np.concatenate((np.array([0]), entries))) == 1
+    entries_li = np.diff(np.concatenate((np.zeros(1), entries))) == 1
     entries_idx = idx[entries_li]
 
-    exits_li = np.diff(np.concatenate((np.array([0]), exits))) == 1
-    exits_idx = idx[exits_li]
+    if exits_from_entries:
+        exits_li = np.diff(np.concatenate((np.zeros(1), entries))) == -1
+    else:
+        exits_li = np.diff(np.concatenate((np.zeros(1), exits))) == 1
+
+    original_exits_idx = idx[exits_li]
+
+    exits_idx = np.zeros_like(entries_idx)
+
+    for i in range(len(entries_idx)):
+        exits_idx[i] = get_first_larger_than(original_exits_idx, entries_idx[i], N)
 
     return entries_idx, exits_idx
 

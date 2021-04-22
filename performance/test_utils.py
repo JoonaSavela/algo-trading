@@ -11,6 +11,8 @@ from algtra.collect import data
 from algtra import constants
 import time
 import numpy as np
+from datetime import datetime, timedelta
+from ciso8601 import parse_datetime
 
 
 def test_calculate_max_average_spread_performance():
@@ -237,7 +239,7 @@ def test_get_next_displacement_index_performance():
     assert elapsed <= elapsed_naive
 
 
-def test_aggregate_from_displacement_performance():
+def test_aggregate_price_data_from_displacement_performance():
     data_dir = os.path.abspath(
         os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
     )
@@ -248,32 +250,41 @@ def test_aggregate_from_displacement_performance():
     lows = price_data["low"].values
     highs = price_data["high"].values
     times = price_data["time"].values
-    displacements = utils.get_displacements(price_data)
+
+    first_time = price_data["startTime"][0]
+    assert first_time == price_data["startTime"].min()
+
+    first_timestamp = datetime.timestamp(parse_datetime(first_time))
+    first_displacement = parse_datetime(first_time).minute
+
+    displacements = utils.get_displacements(
+        price_data["time"].values, first_timestamp, first_displacement
+    )
     displacement = 55
 
     start = time.perf_counter()
-    return_tuple1 = utils.aggregate_from_displacement_naive(
+    return_tuple1 = utils.aggregate_price_data_from_displacement_naive(
         closes, lows, highs, times, displacements, displacement
     )
     end = time.perf_counter()
     elapsed_naive = end - start
 
     start = time.perf_counter()
-    return_tuple2 = utils.aggregate_from_displacement(
+    return_tuple2 = utils.aggregate_price_data_from_displacement(
         closes, lows, highs, times, displacements, displacement
     )
     end = time.perf_counter()
     elapsed_compilation = end - start
 
     start = time.perf_counter()
-    return_tuple2 = utils.aggregate_from_displacement(
+    return_tuple2 = utils.aggregate_price_data_from_displacement(
         closes, lows, highs, times, displacements, displacement
     )
     end = time.perf_counter()
     elapsed = end - start
 
     utils.print_times(
-        f"aggregate_from_displacement",
+        f"aggregate_price_data_from_displacement",
         ["Benchmark", "Compilation", "Target"],
         [elapsed_naive, elapsed_compilation, elapsed],
     )
@@ -283,3 +294,32 @@ def test_aggregate_from_displacement_performance():
     for i in range(len(return_tuple1)):
         np.testing.assert_allclose(return_tuple1[i], return_tuple2[i])
     assert elapsed <= elapsed_naive
+
+
+def test_moving_sum_performance():
+    N = 10000
+    X = np.random.lognormal(size=N)
+    window_size = 24 * 60
+
+    start = time.perf_counter()
+    ms1 = utils.moving_sum_naive(X, window_size)
+    end = time.perf_counter()
+    elapsed_naive = end - start
+
+    start = time.perf_counter()
+    ms2 = utils.moving_sum(X, window_size)
+    end = time.perf_counter()
+    elapsed_compilation = end - start
+
+    start = time.perf_counter()
+    ms2 = utils.moving_sum(X, window_size)
+    end = time.perf_counter()
+    elapsed = end - start
+
+    utils.print_times(
+        f"moving_sum",
+        ["Benchmark", "Compilation", "Target"],
+        [elapsed_naive, elapsed_compilation, elapsed],
+    )
+
+    np.testing.assert_allclose(ms1, ms2)

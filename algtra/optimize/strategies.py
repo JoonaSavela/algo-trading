@@ -13,6 +13,7 @@ from algtra import utils, constants
 import numpy as np
 import pandas as pd
 import glob
+import json
 
 # from utils import *
 # from data import load_all_data
@@ -52,6 +53,7 @@ def save_optimized_strategy(
     use_all_start_times=False,
     quantile=0.45,
     min_avg_monthly_return=1.10,
+    fine_tune=False,
     N_iter=None,
     fname="optim_results/params.json",
     verbose=False,
@@ -83,6 +85,7 @@ def save_optimized_strategy(
         use_all_start_times=use_all_start_times,
         quantile=quantile,
         min_avg_monthly_return=min_avg_monthly_return,
+        fine_tune=fine_tune,
         verbose=verbose,
     )
 
@@ -91,6 +94,9 @@ def save_optimized_strategy(
 
     if verbose:
         print(f"Saved results in file '{fname}'")
+        print()
+        print("Optimized params:")
+        utils.print_dict(params_dict)
 
 
 def optimize_strategy(
@@ -104,6 +110,7 @@ def optimize_strategy(
     use_all_start_times=False,
     quantile=0.45,
     min_avg_monthly_return=1.10,
+    fine_tune=False,
     verbose=False,
 ):
     data_dir = os.path.abspath(
@@ -151,25 +158,28 @@ def optimize_strategy(
         t1 = time.perf_counter()
         print(f"Done (took {utils.round_to_n((t1 - t0) / 60)} minutes).")
         print()
-        print("Gradient Descent...")
 
-    args, objective_dict = pseudo_gradient_descent(
-        objective_dict,
-        args,
-        parameter_names,
-        bounds,
-        resolutions,
-        strategy_type,
-        price_data,
-        spread_data,
-        balance,
-        use_all_start_times=use_all_start_times,
-        quantile=quantile,
-        min_avg_monthly_return=min_avg_monthly_return,
-        verbose=verbose,
-    )
-    if verbose:
-        print("Done.")
+    if fine_tune:
+        if verbose:
+            print("Gradient Descent...")
+
+        args, objective_dict = pseudo_gradient_descent(
+            objective_dict,
+            args,
+            parameter_names,
+            bounds,
+            resolutions,
+            strategy_type,
+            price_data,
+            spread_data,
+            balance,
+            use_all_start_times=use_all_start_times,
+            quantile=quantile,
+            min_avg_monthly_return=min_avg_monthly_return,
+            verbose=verbose,
+        )
+        if verbose:
+            print("Done.")
 
     return objective_dict[args]
 
@@ -222,8 +232,8 @@ def bayesian_optimization(
         )
 
     optimizer.maximize(
-        init_points=N_iter,
-        n_iter=np.sqrt(N_iter).astype(int),
+        init_points=np.sqrt(N_iter).astype(int),
+        n_iter=N_iter,
     )
 
     args = tuple(v for v in optimizer.max["params"].values())
@@ -2293,13 +2303,15 @@ def main():
 
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     balance = utils.get_total_balance(client, False)
-    k = 20
+    balance *= constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
+    k = 25
     min_length = constants.MINUTES_IN_A_YEAR // 2
     strategy_type = "macross"
-    use_all_start_times = False
-    quantile = 0.45
+    use_all_start_times = True
+    quantile = 0.3
     min_avg_monthly_return = 1.10
-    N_iter = None
+    fine_tune = False
+    N_iter = 25
     fname = "optim_results/params.json"
     verbose = True
 
@@ -2313,6 +2325,7 @@ def main():
         use_all_start_times=use_all_start_times,
         quantile=quantile,
         min_avg_monthly_return=min_avg_monthly_return,
+        fine_tune=fine_tune,
         N_iter=N_iter,
         fname=fname,
         verbose=verbose,

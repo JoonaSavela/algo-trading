@@ -319,6 +319,8 @@ class Test_get_balanced_trade:
             taxes=False,
         )
 
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
         trade = usd_values + asset_values
 
         for i in range(len(closes)):
@@ -360,6 +362,9 @@ class Test_get_balanced_trade:
             balance=0.0,
             taxes=False,
         )
+
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
 
         trigger_i = min(stop_loss_index, take_profit_index)
         triggered = trigger_i < len(closes)
@@ -456,6 +461,8 @@ class Test_get_balanced_trade:
             tax_exemption=tax_exemption,
         )
 
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
         trade = usd_values + asset_values
 
         rtol = 1e-7
@@ -508,6 +515,8 @@ class Test_get_balanced_trade:
             tax_exemption=tax_exemption,
         )
 
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
         trade = usd_values + asset_values
 
         # should be trade[-1] <= trade_without_balancing[-1]
@@ -583,6 +592,8 @@ class Test_get_balanced_trade:
             taxes=False,
         )
 
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
         trade = usd_values + asset_values
 
         assert np.all(trade <= trade_without_spread)
@@ -656,6 +667,8 @@ class Test_get_balanced_trade:
             tax_exemption=tax_exemption,
         )
 
+        assert np.all(usd_values >= 0.0)
+        assert np.all(asset_values >= 0.0)
         trade = usd_values + asset_values
 
         assert np.all(buy_sizes >= 0.0)

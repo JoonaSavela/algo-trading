@@ -13,7 +13,8 @@ from ftx.rest.client import FtxClient
 import keys
 from hypothesis import given, assume, example, strategies as st, settings
 from hypothesis.extra.numpy import arrays, floating_dtypes, from_dtype
-from datetime import timedelta
+from datetime import datetime, timedelta
+from ciso8601 import parse_datetime
 import pytest
 import glob
 
@@ -40,6 +41,7 @@ class Test_calculate_max_average_spread:
         max_avg_spread1 = utils.calculate_max_average_spread_naive(
             distributions1, balance
         )
+        assert np.all(max_avg_spread1 >= 1.0)
 
         distributions2 = np.stack([distribution, distribution], axis=1)
 
@@ -583,7 +585,7 @@ class Test_get_symbol_and_get_coin:
         assert s1 == s
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @given(
     fname=st.sampled_from(
         glob.glob(
@@ -605,10 +607,22 @@ def test_get_displacements(fname):
 
     price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
 
-    displacements = utils.get_displacements(price_data)
+    first_time = price_data["startTime"][0]
+    assert first_time == price_data["startTime"].min()
+
+    first_timestamp = datetime.timestamp(parse_datetime(first_time))
+    first_displacement = parse_datetime(first_time).minute
+
+    displacements = utils.get_displacements(
+        price_data["time"].values, first_timestamp, first_displacement
+    )
 
     assert np.issubdtype(displacements[0].dtype, np.integer)
     assert np.all(0 <= displacements) and np.all(displacements < 60)
+    np.testing.assert_array_equal(
+        displacements,
+        price_data["startTime"].map(lambda x: parse_datetime(x).minute).values,
+    )
 
 
 class Test_get_next_displacement_index:
@@ -649,7 +663,8 @@ class Test_get_next_displacement_index:
         assert i1 == i2
 
 
-class Test_aggregate_from_displacement:
+class Test_aggregate_price_data_from_displacement:
+    @pytest.mark.slow
     @given(
         fname=st.sampled_from(
             glob.glob(
@@ -676,7 +691,14 @@ class Test_aggregate_from_displacement:
         lows = price_data["low"].values
         highs = price_data["high"].values
         times = price_data["time"].values
-        displacements = utils.get_displacements(price_data)
+
+        first_time = price_data["startTime"][0]
+        first_timestamp = datetime.timestamp(parse_datetime(first_time))
+        first_displacement = parse_datetime(first_time).minute
+
+        displacements = utils.get_displacements(
+            price_data["time"].values, first_timestamp, first_displacement
+        )
 
         (
             aggregated_closes,
@@ -684,7 +706,7 @@ class Test_aggregate_from_displacement:
             aggregated_highs,
             split_indices,
             aggregate_indices,
-        ) = utils.aggregate_from_displacement_naive(
+        ) = utils.aggregate_price_data_from_displacement_naive(
             closes, lows, highs, times, displacements, displacement
         )
 
@@ -717,6 +739,7 @@ class Test_aggregate_from_displacement:
                 next_start = aggregate_indices[split_indices[i + 1], 0]
                 assert next_start > end
 
+    @pytest.mark.slow
     @given(
         fname=st.sampled_from(
             glob.glob(
@@ -743,12 +766,19 @@ class Test_aggregate_from_displacement:
         lows = price_data["low"].values
         highs = price_data["high"].values
         times = price_data["time"].values
-        displacements = utils.get_displacements(price_data)
 
-        return_tuple1 = utils.aggregate_from_displacement_naive(
+        first_time = price_data["startTime"][0]
+        first_timestamp = datetime.timestamp(parse_datetime(first_time))
+        first_displacement = parse_datetime(first_time).minute
+
+        displacements = utils.get_displacements(
+            price_data["time"].values, first_timestamp, first_displacement
+        )
+
+        return_tuple1 = utils.aggregate_price_data_from_displacement_naive(
             closes, lows, highs, times, displacements, displacement
         )
-        return_tuple2 = utils.aggregate_from_displacement(
+        return_tuple2 = utils.aggregate_price_data_from_displacement(
             closes, lows, highs, times, displacements, displacement
         )
 
@@ -756,3 +786,58 @@ class Test_aggregate_from_displacement:
 
         for i in range(len(return_tuple1)):
             np.testing.assert_allclose(return_tuple1[i], return_tuple2[i])
+
+
+@given(
+    entries=arrays(
+        np.float64,
+        st.integers(1, 1000),
+        elements=st.booleans(),
+    ),
+    exits_from_entries=st.booleans(),
+)
+@settings(deadline=timedelta(milliseconds=2000))
+def test_get_entry_and_exit_idx(entries, exits_from_entries):
+    exits = 1 - entries
+
+    entries_idx, exits_idx = utils.get_entry_and_exit_idx(
+        entries, exits, exits_from_entries
+    )
+
+    assert len(exits_idx) == len(entries_idx)
+    np.testing.assert_array_less(entries_idx, exits_idx)
+
+
+class Test_moving_sum:
+    @given(
+        X=arrays(
+            np.float64,
+            st.integers(1, 1000),
+            elements=st.floats(-1e4, 1e4, width=64),
+        ),
+        window_size=st.integers(1, 1000),
+    )
+    def test_naive(self, X, window_size):
+        window_size = min(window_size, len(X))
+
+        ms = utils.moving_sum_naive(X, window_size)
+
+        for i in range(len(X) - window_size + 1):
+            np.testing.assert_allclose(ms[i], np.sum(X[i : i + window_size]))
+
+    @given(
+        X=arrays(
+            np.float64,
+            st.integers(1, 1000),
+            elements=st.floats(-1e4, 1e4, width=64),
+        ),
+        window_size=st.integers(1, 1000),
+    )
+    @settings(deadline=timedelta(milliseconds=2000))
+    def test_against_naive(self, X, window_size):
+        window_size = min(window_size, len(X))
+
+        ms1 = utils.moving_sum_naive(X, window_size)
+        ms2 = utils.moving_sum(X, window_size)
+
+        np.testing.assert_allclose(ms1, ms2)

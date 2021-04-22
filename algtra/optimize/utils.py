@@ -1,8 +1,11 @@
-if __name__ == "__main__":
-    raise ValueError("algtra/optimize/utils.py should not be run as main.")
-
 import os
 import sys
+
+if __name__ == "__main__":
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
 
 from algtra.collect import data
 import numpy as np
@@ -25,7 +28,7 @@ import json
 from bayes_opt import BayesianOptimization
 
 
-def get_symbols_for_optimization(k=None, min_length=None, verbose=False):
+def get_symbols_for_optimization(k=None, min_length=None, optim_results_dir="optim_results", verbose=False):
     data_dir = os.path.abspath(
         os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
     )
@@ -43,6 +46,15 @@ def get_symbols_for_optimization(k=None, min_length=None, verbose=False):
         )
 
         volumes = volumes[data_lengths >= min_length]
+
+    whitelist_fname = os.path.join(optim_results_dir, "whitelist.json")
+    with open(whitelist_fname, "r") as file:
+        whitelist = json.load(file)
+
+    li = volumes.index.map(
+        lambda x: whitelist[x]
+    )
+    volumes = volumes[li]
 
     volumes = volumes.sort_values(ascending=False)
 
@@ -218,7 +230,8 @@ def get_objective_function(
         json.dump(optimized_params, file)
 
     params_dict = {
-        "params": optimized_params,
+        "params": args,
+        "secondary_params": optimized_params,
         "objective": objective,
         "stats": stats,
     }
@@ -241,7 +254,7 @@ def optimize_sltp_and_balancing_params(
 ):
     pbounds = {
         "stop_loss": (0.0, 0.99),
-        "take_profit": (1.01, 100.0),
+        "take_profit": (1.01, constants.MAX_TAKE_PROFIT),
         "target_usd_percentage": (0.0, 0.99),
         "balancing_period": (1, 7 * 24),
         "displacement": (0, 59),
@@ -295,7 +308,7 @@ def optimize_sltp_and_balancing_params(
     optimizer = BayesianOptimization(
         f=sltp_and_balancing_objective_function,
         pbounds=pbounds,
-        verbose=1 if debug else 0,
+        verbose=2 if debug else 0,
     )
 
     if init_sub_args is not None:
@@ -305,6 +318,11 @@ def optimize_sltp_and_balancing_params(
         init_points=init_points,
         n_iter=5,
     )
+
+    # print(optimizer.space.params)
+    # print(optimizer.space.target)
+    # print(optimizer.res)
+    # print()
 
     optimized_params = optimizer.max["params"]
     optimized_params["balancing_period"] = int(
@@ -326,6 +344,7 @@ def optimize_sltp_and_balancing_params(
     return optimized_params, objective, stats
 
 
+# @profile
 def get_sltp_and_balancing_objective_function(
     args,
     price_data,
@@ -340,17 +359,28 @@ def get_sltp_and_balancing_objective_function(
     use_all_start_times=False,
     quantile=0.45,
     min_avg_monthly_return=1.05,
+    min_n_samples=10,
 ):
     aggregate_N, w = args[:2]
 
-    sampled_log_profits_list = []
+    monthly_log_profits_list = []
 
+    # TODO: parallelize this?
     for symbol in price_data.keys():
         closes = price_data[symbol]["close"].values
         lows = price_data[symbol]["low"].values
         highs = price_data[symbol]["high"].values
         times = price_data[symbol]["time"].values
-        displacements = utils.get_displacements(price_data[symbol])
+
+        first_time = price_data[symbol]["startTime"][0]
+        first_timestamp = datetime.timestamp(parse_datetime(first_time))
+        first_displacement = parse_datetime(first_time).minute
+
+        displacements = utils.get_displacements(
+            price_data[symbol]["time"].values, first_timestamp, first_displacement
+        )
+
+        tax_exemption = utils.get_leverage_from_symbol(symbol) == 1
 
         # TODO: cache these results?
         (
@@ -359,7 +389,7 @@ def get_sltp_and_balancing_objective_function(
             aggregated_highs,
             split_indices,
             _,
-        ) = utils.aggregate_from_displacement(
+        ) = utils.aggregate_price_data_from_displacement(
             closes, lows, highs, times, displacements, displacement
         )
 
@@ -375,64 +405,89 @@ def get_sltp_and_balancing_objective_function(
             ]
 
             if len(aggregated_closes_part) > aggregate_N * w:
-                buys, sells, _ = get_buys_and_sells_fn(
+                buys, sells, N = get_buys_and_sells_fn(
                     aggregated_closes_part, *args, from_minute=False
                 )
+                aggregated_closes_part = aggregated_closes_part[-N:]
+                aggregated_lows_part = aggregated_lows_part[-N:]
+                aggregated_highs_part = aggregated_highs_part[-N:]
 
-                trade_starts, trade_ends = get_trades(
-                    buys, sells, aggregate_N, use_all_start_times
-                )
-
-                # TODO: parallelize this?
-                for trade_start, trade_end in zip(trade_starts, trade_ends):
-                    trade_closes = (
-                        aggregated_closes_part[trade_start + 1 : trade_end + 1]
-                        / aggregated_closes_part[trade_start]
+                if np.any(buys > 0.0):
+                    trade_starts, trade_ends = get_trades(
+                        buys, sells, aggregate_N, use_all_start_times
                     )
-                    trade_lows = (
-                        aggregated_lows_part[trade_start + 1 : trade_end + 1]
-                        / aggregated_closes_part[trade_start]
-                    )
-                    trade_highs = (
-                        aggregated_highs_part[trade_start + 1 : trade_end + 1]
-                        / aggregated_closes_part[trade_start]
-                    )
+                    prev_remaining_log_profit = 0.0
+                    prev_remaining_log_profits_len = 0
 
-                    sampled_log_profits = sample_log_profits(
-                        symbol,
-                        trade_closes,
-                        trade_lows,
-                        trade_highs,
-                        stop_loss,
-                        take_profit,
-                        target_usd_percentage,
-                        balancing_period,
-                        spread_data[symbol],
-                        balance,
-                    )
+                    for trade_start, trade_end in zip(trade_starts, trade_ends):
+                        trade_closes = (
+                            aggregated_closes_part[trade_start + 1 : trade_end + 1]
+                            / aggregated_closes_part[trade_start]
+                        )
+                        trade_lows = (
+                            aggregated_lows_part[trade_start + 1 : trade_end + 1]
+                            / aggregated_closes_part[trade_start]
+                        )
+                        trade_highs = (
+                            aggregated_highs_part[trade_start + 1 : trade_end + 1]
+                            / aggregated_closes_part[trade_start]
+                        )
 
-                    sampled_log_profits_list.append(sampled_log_profits)
+                        (
+                            monthly_log_profits,
+                            prev_remaining_log_profit,
+                            prev_remaining_log_profits_len,
+                        ) = sample_log_profits(
+                            symbol,
+                            trade_closes,
+                            trade_lows,
+                            trade_highs,
+                            stop_loss,
+                            take_profit,
+                            target_usd_percentage,
+                            balancing_period,
+                            spread_data[symbol],
+                            balance,
+                            prev_remaining_log_profit,
+                            prev_remaining_log_profits_len,
+                            tax_exemption=tax_exemption,
+                        )
 
-    sampled_log_profits = np.concatenate(sampled_log_profits_list)
-    objective = np.quantile(sampled_log_profits, quantile)
-    median = np.median(sampled_log_profits)
-    mean = np.mean(sampled_log_profits)
-    n_positives = np.sum(sampled_log_profits > 0.0)
-    n_negatives = np.sum(sampled_log_profits < 0.0)
+                        monthly_log_profits_list.append(monthly_log_profits)
 
-    # make objective and median more readable
-    objective *= 24 * 30
-    objective = np.exp(objective)
-    median *= 24 * 30
-    median = np.exp(median)
-    mean *= 24 * 30
-    mean = np.exp(mean)
+    if len(monthly_log_profits_list) == 0:
+        return -1.0, 0.0, 0.0, 0.0
+
+    monthly_log_profits = np.concatenate(monthly_log_profits_list)
+
+    if len(monthly_log_profits) < min_n_samples:
+        return -1.0, 0.0, 0.0, 0.0
+
+    objective = np.exp(np.quantile(monthly_log_profits, quantile))
+    median = np.exp(np.median(monthly_log_profits))
+    mean = np.exp(np.mean(monthly_log_profits))
+
+    n_positives = np.sum(monthly_log_profits > 0.0)
+    n_negatives = np.sum(monthly_log_profits < 0.0)
     fraction_of_positives = n_positives / (n_positives + n_negatives)
 
     # probability of profitability should be at least 50% and average profit shoud
     # be positive (i.e. greater than 1.0)
     if median < 1.0 or mean <= min_avg_monthly_return:
         objective -= 1
+
+    if np.isnan(objective):
+        print(args)
+        print(
+            stop_loss,
+            take_profit,
+            target_usd_percentage,
+            balancing_period,
+            displacement,
+        )
+        # import ipdb; ipdb.set_trace()
+
+        raise ValueError("Objective should not be NaN.")
 
     return objective, median, mean, fraction_of_positives
 
@@ -445,8 +500,9 @@ def get_trades(buys, sells, aggregate_N, use_all_start_times):
 
     for i in range(n):
         trade_starts, trade_ends = utils.get_entry_and_exit_idx(
-            buys[i::aggregate_N], sells[i::aggregate_N], len(buys[i::aggregate_N])
+            buys[i::aggregate_N], sells[i::aggregate_N]
         )
+
         trade_starts *= aggregate_N
         trade_ends *= aggregate_N
 
@@ -456,12 +512,22 @@ def get_trades(buys, sells, aggregate_N, use_all_start_times):
         trade_starts_list.append(trade_starts)
         trade_ends_list.append(trade_ends)
 
-    trade_starts = np.concatenate(trade_starts_list)
-    trade_ends = np.concatenate(trade_ends_list)
+        # for trade_start, trade_end in zip(trade_starts, trade_ends):
+        #     possible_trade_starts = np.arange(trade_start, trade_end, aggregate_N)
+        #     trade_starts_list.append(possible_trade_starts)
+        #     trade_ends_list.append(np.repeat(trade_end, len(possible_trade_starts)))
+
+    if len(trade_starts_list) > 0:
+        trade_starts = np.concatenate(trade_starts_list)
+        trade_ends = np.concatenate(trade_ends_list)
+    else:
+        trade_starts = np.empty(0)
+        trade_ends = np.empty(0)
 
     return trade_starts, trade_ends
 
 
+@njit
 def sample_log_profits(
     symbol,
     trade_closes,
@@ -473,8 +539,11 @@ def sample_log_profits(
     balancing_period,
     orderbook_distributions,
     balance,
+    prev_remaining_log_profit,
+    prev_remaining_log_profits_len,
+    tax_exemption=False,
+    eps=1e-7,
 ):
-    tax_exemption = utils.get_leverage_from_symbol(symbol) == 1
 
     stop_loss_index = get_stop_loss_index(trade_lows, stop_loss)
     take_profit_index = get_take_profit_index(trade_highs, take_profit)
@@ -496,13 +565,31 @@ def sample_log_profits(
 
     trigger_i = min(stop_loss_index, take_profit_index)
 
-    log_profits = np.log(usd_values + asset_values)
-    log_profits = log_profits[: trigger_i + 1]
-    log_profits = np.concatenate([np.array([0.0]), log_profits])
+    log_profits = np.log(usd_values + asset_values + eps)
+    log_profits = np.concatenate((np.zeros(1), log_profits[: trigger_i + 1]))
 
-    sampled_log_profits = np.diff(log_profits)
+    idx = np.arange(24 * 30 - prev_remaining_log_profits_len, len(log_profits), 24 * 30)
 
-    return sampled_log_profits
+    if len(idx) > 0:
+        idx = np.concatenate((np.zeros(1, dtype=np.int32), idx))
+        monthly_log_profits = np.diff(log_profits[idx])
+        monthly_log_profits[0] += prev_remaining_log_profit
+
+        remaining_log_profits = log_profits[idx[-1] :]
+        remaining_log_profit = 0.0
+        remaining_log_profits_len = 0
+
+    else:
+        monthly_log_profits = np.zeros(0)
+
+        remaining_log_profits = log_profits
+        remaining_log_profit = prev_remaining_log_profit
+        remaining_log_profits_len = prev_remaining_log_profits_len
+
+    remaining_log_profit += remaining_log_profits[-1] - remaining_log_profits[0]
+    remaining_log_profits_len += len(remaining_log_profits)
+
+    return monthly_log_profits, remaining_log_profit, remaining_log_profits_len
 
 
 def get_stop_loss_index_naive(lows, stop_loss: float):
@@ -708,7 +795,7 @@ def get_balanced_trade_naive(
         target_usd_percentage,
         buy_prices=prices[:buy_sizes_index],
         buy_sizes=buy_sizes[:buy_sizes_index],
-        sell_price=prices[buy_sizes_index],
+        price=prices[buy_sizes_index],
         balance=balance,
         orderbook_distributions=orderbook_distributions,
         taxes=taxes,
@@ -742,7 +829,7 @@ def get_balanced_trade_naive(
             target_usd_percentage,
             buy_prices=prices[:buy_sizes_index],
             buy_sizes=buy_sizes[:buy_sizes_index],
-            sell_price=prices[buy_sizes_index],
+            price=prices[buy_sizes_index],
             balance=balance,
             orderbook_distributions=orderbook_distributions,
             taxes=taxes,
@@ -789,7 +876,7 @@ def get_balanced_trade_naive(
         1.0,
         buy_prices=prices[:buy_sizes_index],
         buy_sizes=buy_sizes[:buy_sizes_index],
-        sell_price=prices[buy_sizes_index],
+        price=prices[buy_sizes_index],
         balance=balance,
         orderbook_distributions=orderbook_distributions,
         taxes=taxes,
@@ -809,10 +896,6 @@ get_balanced_trade = njit()(get_balanced_trade_naive)
 
 def combine_trade_chunks():
     pass
-
-
-def combine_time_series_by_common_time(timeseries):
-    return reduce(lambda x, y: pd.merge(x, y, on=["startTime"]).dropna(), timeseries)
 
 
 def calculate_corr_matrix(data_dir, coins):

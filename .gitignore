@@ -8,3 +8,4 @@ ftx/
 optim_results/sltp_results/
 .hypothesis
 .pytest_cache
+*.lprof
