@@ -704,6 +704,7 @@ class Test_aggregate_price_data_from_displacement:
             aggregated_closes,
             aggregated_lows,
             aggregated_highs,
+            aggregated_times,
             split_indices,
             aggregate_indices,
         ) = utils.aggregate_price_data_from_displacement_naive(
@@ -712,6 +713,7 @@ class Test_aggregate_price_data_from_displacement:
 
         assert len(aggregated_closes) == len(aggregated_lows)
         assert len(aggregated_closes) == len(aggregated_highs)
+        assert len(aggregated_closes) == len(aggregated_times)
         assert len(aggregated_closes) == len(aggregate_indices)
 
         assert (

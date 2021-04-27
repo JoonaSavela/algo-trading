@@ -40,6 +40,9 @@ collect:
 optimize:
 	python3 algtra/optimize/strategies.py
 
+evaluate:
+	python3 algtra/evaluate/strategies.py
+
 run:
 	python3 algtra/run/algorithm.py
 

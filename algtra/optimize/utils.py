@@ -21,14 +21,15 @@ import keys
 from ftx.rest.client import FtxClient
 from datetime import date, timedelta, datetime
 from ciso8601 import parse_datetime
-from functools import reduce
 import glob
 from numba import njit
 import json
 from bayes_opt import BayesianOptimization
 
 
-def get_symbols_for_optimization(k=None, min_length=None, optim_results_dir="optim_results", verbose=False):
+def get_symbols_for_optimization(
+    k=None, min_length=None, optim_results_dir="optim_results", verbose=False
+):
     data_dir = os.path.abspath(
         os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
     )
@@ -51,9 +52,7 @@ def get_symbols_for_optimization(k=None, min_length=None, optim_results_dir="opt
     with open(whitelist_fname, "r") as file:
         whitelist = json.load(file)
 
-    li = volumes.index.map(
-        lambda x: whitelist[x]
-    )
+    li = volumes.index.map(lambda x: whitelist[x])
     volumes = volumes[li]
 
     volumes = volumes.sort_values(ascending=False)
@@ -255,8 +254,8 @@ def optimize_sltp_and_balancing_params(
     pbounds = {
         "stop_loss": (0.0, 0.99),
         "take_profit": (1.01, constants.MAX_TAKE_PROFIT),
-        "target_usd_percentage": (0.0, 0.99),
-        "balancing_period": (1, 7 * 24),
+        "target_usd_percentage": (0.05, 0.99),
+        "balancing_period": (1, 2 * 24),
         "displacement": (0, 59),
     }
 
@@ -377,7 +376,7 @@ def get_sltp_and_balancing_objective_function(
         first_displacement = parse_datetime(first_time).minute
 
         displacements = utils.get_displacements(
-            price_data[symbol]["time"].values, first_timestamp, first_displacement
+            times, first_timestamp, first_displacement
         )
 
         tax_exemption = utils.get_leverage_from_symbol(symbol) == 1
@@ -387,73 +386,68 @@ def get_sltp_and_balancing_objective_function(
             aggregated_closes,
             aggregated_lows,
             aggregated_highs,
-            split_indices,
+            _,
+            _,
             _,
         ) = utils.aggregate_price_data_from_displacement(
             closes, lows, highs, times, displacements, displacement
         )
 
-        for i in range(len(split_indices) - 1):
-            aggregated_closes_part = aggregated_closes[
-                split_indices[i] : split_indices[i + 1]
-            ]
-            aggregated_lows_part = aggregated_lows[
-                split_indices[i] : split_indices[i + 1]
-            ]
-            aggregated_highs_part = aggregated_highs[
-                split_indices[i] : split_indices[i + 1]
-            ]
+        if len(aggregated_closes) <= aggregate_N * w:
+            continue
 
-            if len(aggregated_closes_part) > aggregate_N * w:
-                buys, sells, N = get_buys_and_sells_fn(
-                    aggregated_closes_part, *args, from_minute=False
-                )
-                aggregated_closes_part = aggregated_closes_part[-N:]
-                aggregated_lows_part = aggregated_lows_part[-N:]
-                aggregated_highs_part = aggregated_highs_part[-N:]
+        # ignore possible gaps
+        buys, sells, N = get_buys_and_sells_fn(
+            aggregated_closes, *args, from_minute=False
+        )
+        aggregated_closes = aggregated_closes[-(N + 1):]
+        aggregated_lows = aggregated_lows[-(N + 1):]
+        aggregated_highs = aggregated_highs[-(N + 1):]
 
-                if np.any(buys > 0.0):
-                    trade_starts, trade_ends = get_trades(
-                        buys, sells, aggregate_N, use_all_start_times
-                    )
-                    prev_remaining_log_profit = 0.0
-                    prev_remaining_log_profits_len = 0
+        if not np.any(buys > 0.0):
+            continue
 
-                    for trade_start, trade_end in zip(trade_starts, trade_ends):
-                        trade_closes = (
-                            aggregated_closes_part[trade_start + 1 : trade_end + 1]
-                            / aggregated_closes_part[trade_start]
-                        )
-                        trade_lows = (
-                            aggregated_lows_part[trade_start + 1 : trade_end + 1]
-                            / aggregated_closes_part[trade_start]
-                        )
-                        trade_highs = (
-                            aggregated_highs_part[trade_start + 1 : trade_end + 1]
-                            / aggregated_closes_part[trade_start]
-                        )
+        trade_starts, trade_ends = get_trades(
+            buys, sells, aggregate_N, use_all_start_times
+        )
+        prev_remaining_log_profit = 0.0
+        prev_remaining_log_profits_len = 0
 
-                        (
-                            monthly_log_profits,
-                            prev_remaining_log_profit,
-                            prev_remaining_log_profits_len,
-                        ) = sample_log_profits(
-                            symbol,
-                            trade_closes,
-                            trade_lows,
-                            trade_highs,
-                            stop_loss,
-                            take_profit,
-                            target_usd_percentage,
-                            balancing_period,
-                            spread_data[symbol],
-                            balance,
-                            prev_remaining_log_profit,
-                            prev_remaining_log_profits_len,
-                            tax_exemption=tax_exemption,
-                        )
+        for trade_start, trade_end in zip(trade_starts, trade_ends):
+            trade_closes = (
+                aggregated_closes[trade_start + 1 : trade_end + 1]
+                / aggregated_closes[trade_start]
+            )
+            trade_lows = (
+                aggregated_lows[trade_start + 1 : trade_end + 1]
+                / aggregated_closes[trade_start]
+            )
+            trade_highs = (
+                aggregated_highs[trade_start + 1 : trade_end + 1]
+                / aggregated_closes[trade_start]
+            )
 
-                        monthly_log_profits_list.append(monthly_log_profits)
+            (
+                monthly_log_profits,
+                prev_remaining_log_profit,
+                prev_remaining_log_profits_len,
+            ) = sample_log_profits(
+                symbol,
+                trade_closes,
+                trade_lows,
+                trade_highs,
+                stop_loss,
+                take_profit,
+                target_usd_percentage,
+                balancing_period,
+                spread_data[symbol],
+                balance,
+                prev_remaining_log_profit,
+                prev_remaining_log_profits_len,
+                tax_exemption=tax_exemption,
+            )
+
+            monthly_log_profits_list.append(monthly_log_profits)
 
     if len(monthly_log_profits_list) == 0:
         return -1.0, 0.0, 0.0, 0.0
@@ -464,6 +458,7 @@ def get_sltp_and_balancing_objective_function(
         return -1.0, 0.0, 0.0, 0.0
 
     objective = np.exp(np.quantile(monthly_log_profits, quantile))
+    # objective = 1.0 / (np.std(monthly_log_profits) + 1e-6)
     median = np.exp(np.median(monthly_log_profits))
     mean = np.exp(np.mean(monthly_log_profits))
 
@@ -474,7 +469,7 @@ def get_sltp_and_balancing_objective_function(
     # probability of profitability should be at least 50% and average profit shoud
     # be positive (i.e. greater than 1.0)
     if median < 1.0 or mean <= min_avg_monthly_return:
-        objective -= 1
+        objective *= 1e-4
 
     if np.isnan(objective):
         print(args)
@@ -492,7 +487,7 @@ def get_sltp_and_balancing_objective_function(
     return objective, median, mean, fraction_of_positives
 
 
-def get_trades(buys, sells, aggregate_N, use_all_start_times):
+def get_trades(buys, sells, aggregate_N, use_all_start_times, randomize=True):
     n = aggregate_N if use_all_start_times else 1
 
     trade_starts_list = []
@@ -509,13 +504,15 @@ def get_trades(buys, sells, aggregate_N, use_all_start_times):
         trade_starts += i
         trade_ends += i
 
-        trade_starts_list.append(trade_starts)
-        trade_ends_list.append(trade_ends)
+        if randomize:
+            for trade_start, trade_end in zip(trade_starts, trade_ends):
+                possible_trade_starts = np.random.choice(np.arange(trade_start, trade_end, aggregate_N), 10)
+                trade_starts_list.append(possible_trade_starts)
+                trade_ends_list.append(np.repeat(trade_end, len(possible_trade_starts)))
+        else:
+            trade_starts_list.append(trade_starts)
+            trade_ends_list.append(trade_ends)
 
-        # for trade_start, trade_end in zip(trade_starts, trade_ends):
-        #     possible_trade_starts = np.arange(trade_start, trade_end, aggregate_N)
-        #     trade_starts_list.append(possible_trade_starts)
-        #     trade_ends_list.append(np.repeat(trade_end, len(possible_trade_starts)))
 
     if len(trade_starts_list) > 0:
         trade_starts = np.concatenate(trade_starts_list)

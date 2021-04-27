@@ -10,7 +10,7 @@ from datetime import datetime
 from ciso8601 import parse_datetime
 import time
 from tqdm import tqdm
-import matplotlib.pyplot as plt
+import pandas as pd
 
 
 def main():
@@ -19,36 +19,60 @@ def main():
     )
 
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
-    markets = data.get_filtered_markets(client)
+    markets = data.get_filtered_markets(client, filter_volume=True)
     markets = markets["name"]
 
-    volumes_dict = {}
+    volumes_list = []
     displacement = 55
 
     for market in tqdm(markets):
         price_data = data.load_price_data(data_dir, market, return_price_data_only=True)
-        symbol = market.split("/")[0]
+        if price_data is not None:
+            symbol = market.split("/")[0]
 
-        times = price_data["time"].values
-        volumes = price_data["volume"].values
+            times = price_data["time"].values
+            volumes = price_data["volume"].values
 
-        first_time = price_data["startTime"][0]
-        first_timestamp = datetime.timestamp(parse_datetime(first_time))
-        first_displacement = parse_datetime(first_time).minute
+            first_time = price_data["startTime"][0]
+            first_timestamp = datetime.timestamp(parse_datetime(first_time))
+            first_displacement = parse_datetime(first_time).minute
 
-        displacements = utils.get_displacements(
-            price_data["time"].values, first_timestamp, first_displacement
-        )
+            displacements = utils.get_displacements(
+                price_data["time"].values, first_timestamp, first_displacement
+            )
 
-        (
-            aggregated_volumes,
-            split_indices,
-            aggregate_indices,
-        ) = utils.aggregate_volume_data_from_displacement(
-            volumes, times, displacements, displacement
-        )
+            (
+                aggregated_volumes,
+                aggregated_times,
+                _,
+                _,
+            ) = utils.aggregate_volume_data_from_displacement(
+                volumes, times, displacements, displacement
+            )
 
-        volumes_dict[symbol] = aggregated_volumes
+            if len(aggregated_volumes) >= 24:
+                moving_daily_volumes, times = utils.gap_aware_moving_sum(
+                    aggregated_volumes, aggregated_times, window_size=24
+                )
+
+                # print(int(times[0]), int(times[-1]), int(times[-1] - times[0]) // 3600)
+
+                volumes_list.append(
+                    pd.DataFrame(
+                        {
+                            symbol: moving_daily_volumes,
+                            "time": times,
+                        }
+                    )
+                )
+
+    moving_daily_volumes = utils.combine_time_series_by_common_time(
+        volumes_list, "time", na_replace=0.0
+    )
+
+    print(moving_daily_volumes.columns)
+    print(moving_daily_volumes.index)
+    # print((moving_daily_volumes == 0.0).sum())
 
 
 def main2():
@@ -165,4 +189,4 @@ def main2():
 
 
 if __name__ == "__main__":
-    main2()
+    main()

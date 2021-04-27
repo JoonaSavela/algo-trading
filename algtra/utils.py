@@ -14,6 +14,7 @@ from algtra import constants
 from algtra.collect import data
 from numba import njit, vectorize, float64
 from ciso8601 import parse_datetime
+from functools import reduce
 
 # matplotlib is not installed in cloud since it is not needed
 try:
@@ -21,10 +22,22 @@ try:
 except ImportError as e:
     print(e)
 
+# TODO: test
+@njit
+def get_smallest_divisible_larger_than(x: int, n: int) -> int:
+    """
+    returns an integer that is:
+      - larger than x
+      - divisible by n
 
-def calculate_max_average_spread_naive(
-    distributions, balance
-):
+    example:
+    >>> get_smallest_divisible_larger_than(x=13, n=8) == 16
+    >>> get_smallest_divisible_larger_than(x=7, n=7) == 7
+    """
+    return x + (n - x) % n
+
+
+def calculate_max_average_spread_naive(distributions, balance):
     res = []
 
     for side in constants.ASKS_AND_BIDS:
@@ -78,13 +91,20 @@ def calculate_max_average_spread(distributions, balance):
     return spread
 
 
-def combine_time_series_by_common_time(timeseries, na_replace=0.0):
+def combine_time_series_by_common_time(timeseries_list, time_col, na_replace=0.0):
     if na_replace is None:
-        res = reduce(lambda x, y: pd.merge(x, y, on=["startTime"]).dropna(), timeseries)
+        res = reduce(
+            lambda x, y: pd.merge(x, y, how="outer", on=[time_col]).dropna(),
+            timeseries_list,
+        )
     else:
         res = reduce(
-            lambda x, y: pd.merge(x, y, on=["startTime"]).fillna(na_replace), timeseries
+            lambda x, y: pd.merge(x, y, how="outer", on=[time_col]).fillna(na_replace),
+            timeseries_list,
         )
+
+    res = res.sort_values(time_col)
+    res = res.set_index(time_col)
 
     return res
 
@@ -298,9 +318,7 @@ def find_value_change_naive(
 
     start = 0.0 if balancing_action_is_sell else -usd_value
     end = (
-        min(np.sum(buy_sizes) * price, asset_value)
-        if balancing_action_is_sell
-        else 0.0
+        min(np.sum(buy_sizes) * price, asset_value) if balancing_action_is_sell else 0.0
     )
 
     value_change = (start + end) / 2.0
@@ -745,6 +763,7 @@ def aggregate_price_data_from_displacement_naive(
     aggregated_closes = np.zeros(new_N)
     aggregated_lows = np.zeros(new_N)
     aggregated_highs = np.zeros(new_N)
+    aggregated_times = np.zeros(new_N)
     aggregate_indices = np.zeros((new_N, 2), dtype=np.int32)
     split_indices = np.zeros(new_N, dtype=np.int32)
 
@@ -764,6 +783,7 @@ def aggregate_price_data_from_displacement_naive(
             aggregated_closes[aggregate_i] = closes[end - 1]
             aggregated_lows[aggregate_i] = np.min(lows[start:end])
             aggregated_highs[aggregate_i] = np.max(highs[start:end])
+            aggregated_times[aggregate_i] = times[end - 1]
             aggregate_indices[aggregate_i, :] = (start, end)
             aggregate_i += 1
 
@@ -776,6 +796,7 @@ def aggregate_price_data_from_displacement_naive(
     aggregated_closes = aggregated_closes[:aggregate_i]
     aggregated_lows = aggregated_lows[:aggregate_i]
     aggregated_highs = aggregated_highs[:aggregate_i]
+    aggregated_times = aggregated_times[:aggregate_i]
     split_indices = split_indices[:split_i]
     aggregate_indices = aggregate_indices[:aggregate_i, :]
 
@@ -783,6 +804,7 @@ def aggregate_price_data_from_displacement_naive(
         aggregated_closes,
         aggregated_lows,
         aggregated_highs,
+        aggregated_times,
         split_indices,
         aggregate_indices,
     )
@@ -800,9 +822,10 @@ def aggregate_volume_data_from_displacement_naive(
     assert len(volumes) == len(times)
     assert len(volumes) == len(displacements)
 
-    new_N = int(times[-1] - times[0]) // 3600
+    new_N = int(times[-1] - times[0]) // 3600  # times should be in seconds
 
     aggregated_volumes = np.zeros(new_N)
+    aggregated_times = np.zeros(new_N)
     aggregate_indices = np.zeros((new_N, 2), dtype=np.int32)
     split_indices = np.zeros(new_N, dtype=np.int32)
 
@@ -820,6 +843,7 @@ def aggregate_volume_data_from_displacement_naive(
 
         else:
             aggregated_volumes[aggregate_i] = np.sum(volumes[start:end])
+            aggregated_times[aggregate_i] = times[end - 1]
             aggregate_indices[aggregate_i, :] = (start, end)
             aggregate_i += 1
 
@@ -830,11 +854,13 @@ def aggregate_volume_data_from_displacement_naive(
     split_i += 1
 
     aggregated_volumes = aggregated_volumes[:aggregate_i]
+    aggregated_times = aggregated_times[:aggregate_i]
     split_indices = split_indices[:split_i]
     aggregate_indices = aggregate_indices[:aggregate_i, :]
 
     return (
         aggregated_volumes,
+        aggregated_times,
         split_indices,
         aggregate_indices,
     )
@@ -942,6 +968,94 @@ def moving_sum(X, window_size):
     return res
 
 
+# the unit of window_size should be hours
+# the units of times and start_time should be seconds
+# two adjacent times should be at least one hour apart (i.e. 3600 seconds)
+def get_next_time_index_naive(times, start, start_time, window_size):
+    end = start
+
+    while (
+        end < len(times) and times[end] - start_time < window_size * 60.0 * 60.0 - 1e-4
+    ):
+        end += 1
+
+    return end
+
+
+get_next_time_index = njit()(get_next_time_index_naive)
+
+
+# TODO: tests
+def gap_aware_moving_sum_naive(X, times, window_size=24):
+    assert len(X) == len(times)
+
+    new_N = int(times[-1] - times[0]) // 3600 - window_size + 1
+    assert new_N > 0
+    res = np.zeros(new_N)
+    new_times = np.zeros(new_N)
+    i = 0
+
+    start = 0
+    start_time = times[start]
+    end = get_next_time_index(times, start, start_time, window_size)
+
+    S = np.sum(X[start:end])
+    res[i] = S
+    new_times[i] = start_time + (window_size - 1) * 60.0 * 60.0
+
+    while end < len(X):
+        i += 1
+        start_time += 60.0 * 60.0
+
+        start = get_next_time_index(times, start, start_time, 0)
+        end = get_next_time_index(times, start, start_time, window_size)
+
+        S = np.sum(X[start:end])
+        res[i] = S
+        new_times[i] = start_time + (window_size - 1) * 60.0 * 60.0
+
+    res = res[: i + 1]
+    new_times = new_times[: i + 1]
+
+    return res, new_times
+
+
+@njit
+def gap_aware_moving_sum(X, times, window_size=24):
+    assert len(X) == len(times)
+
+    new_N = int(times[-1] - times[0]) // 3600 - window_size + 1
+    assert new_N > 0
+    res = np.zeros(new_N)
+    new_times = np.zeros(new_N)
+    i = 0
+
+    start = 0
+    start_time = times[start]
+    end = get_next_time_index(times, start, start_time, window_size)
+
+    S = np.sum(X[start:end])
+    res[i] = S
+    new_times[i] = start_time + (window_size - 1) * 60.0 * 60.0
+
+    while end < len(X):
+        i += 1
+        start_time += 60.0 * 60.0
+
+        prev_start, prev_end = start, end
+        start = get_next_time_index(times, start, start_time, 0)
+        end = get_next_time_index(times, end, start_time, window_size)
+
+        S += np.sum(X[prev_end:end]) - np.sum(X[prev_start:start])
+        res[i] = S
+        new_times[i] = start_time + (window_size - 1) * 60.0 * 60.0
+
+    res = res[: i + 1]
+    new_times = new_times[: i + 1]
+
+    return res, new_times
+
+
 def sma_naive(X, window_size):
     return moving_sum_naive(X, window_size) / window_size
 
@@ -951,8 +1065,8 @@ def sma(X, window_size):
     return moving_sum(X, window_size) / window_size
 
 
-# TODO: make this faster with concurrent.futures!
-def stochastic_oscillator(X, window_size=3 * 14, k=1):
+# TODO: make this faster (with concurrent.futures)
+def stochastic_oscillator(X, window_size, k=1):
     if len(X.shape) == 1:
         X = np.repeat(X.reshape((-1, 1)), 4, axis=1)
     res = []
@@ -1068,6 +1182,24 @@ def ceil_to_n(x, n=3):
 #         d[k] = create_func(k, *args)
 #
 #     return d[k]
+
+
+# TODO: test
+#   - e.g. if this gives the same results as "get_first_larger_than"
+@njit
+def binary_search(l, value):
+    start, end = 0, len(l)
+
+    while start < end:
+        middle = (start + end) // 2
+        if l[middle] > value:
+            end = middle
+        elif l[middle] < value:
+            start = middle + 1
+        else:
+            return middle + 1
+
+    return end
 
 
 @njit

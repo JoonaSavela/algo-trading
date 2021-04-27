@@ -101,7 +101,6 @@ def get_price_data(client, market, limit=None, prev_end_time=None, verbose=False
     return res
 
 
-@lru_cache(maxsize=constants.LRU_CACHE_MAX_SIZE)
 def load_price_data(
     data_dir, market, return_price_data=True, return_price_data_only=False
 ):
@@ -154,14 +153,48 @@ def split_price_data(price_data):
 
     return price_data_splits
 
-
-def load_data_for_symbol(data_dir, symbol, split_data=False):
+@lru_cache(maxsize=constants.LRU_CACHE_MAX_SIZE)
+def load_data_for_symbol(data_dir, symbol, split_data=False, displacement=None):
     market = symbol + "/USD"
     price_data = load_price_data(data_dir, market, return_price_data_only=True)
-    if split_data:
+
+    if split_data and displacement is None:
         symbol_price_data = split_price_data(symbol_price_data)
 
     spread_data = load_spread_distributions(data_dir, symbol, stack=True)
+
+    if displacement is not None:
+        first_time = price_data["startTime"][0]
+        first_timestamp = datetime.timestamp(parse_datetime(first_time))
+        first_displacement = parse_datetime(first_time).minute
+
+        closes = price_data["close"].values
+        lows = price_data["low"].values
+        highs = price_data["high"].values
+        times = price_data["time"].values
+
+        displacements = utils.get_displacements(
+            times, first_timestamp, first_displacement
+        )
+
+        (
+            aggregated_closes,
+            aggregated_lows,
+            aggregated_highs,
+            aggregated_times,
+            _,
+            _,
+        ) = utils.aggregate_price_data_from_displacement(
+            closes, lows, highs, times, displacements, displacement
+        )
+
+        return (
+            aggregated_closes,
+            aggregated_lows,
+            aggregated_highs,
+            aggregated_times,
+            spread_data,
+        )
 
     return price_data, spread_data
 
@@ -334,7 +367,6 @@ def get_spread_distributions(client, market):
     return distributions
 
 
-@lru_cache(maxsize=constants.LRU_CACHE_MAX_SIZE)
 def load_spread_distributions(data_dir, symbol, stack=False):
     coin = utils.get_coin(symbol)
     coin_dir = os.path.join(data_dir, "spreads", coin)
@@ -623,7 +655,9 @@ def save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_sprea
     markets = get_filtered_markets(client, filter_volume=True)
     balance = utils.get_total_balance(client, False)
     # simulate spread of symbol if its share of the balance was to increase significantly
-    balance *= constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
+    balance *= (
+        constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
+    )
 
     whitelist = {}
 
@@ -636,7 +670,9 @@ def save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_sprea
 
         # 0.25 is the price limit for spot and leveraged tokens market; see
         # https://help.ftx.com/hc/en-us/articles/360031896592-Advanced-Order-Types
-        if spread > max_spread or np.all(balance > 0.25 * np.sum(distributions, axis=0)):
+        if spread > max_spread or np.all(
+            balance > 0.25 * np.sum(distributions, axis=0)
+        ):
             whitelist[symbol] = False
         else:
             whitelist[symbol] = True
@@ -652,6 +688,7 @@ def save_symbol_whitelist(data_dir, optim_results_dir="optim_results", max_sprea
     n_whitelisted = np.sum([v for v in whitelist.values()])
     print(f"Whitelisted symbols: {n_whitelisted}/{len(whitelist)}")
     print()
+
 
 def experiments():
     data_dir = os.path.abspath(

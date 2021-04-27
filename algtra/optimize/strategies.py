@@ -14,33 +14,17 @@ import numpy as np
 import pandas as pd
 import glob
 import json
-
-# from utils import *
-# from data import load_all_data
-# from data_utils import get_average_spread
 import time
-import os
 from tqdm import tqdm
-
-# from optimize_utils import *
 from itertools import product
-
-# from parameters import commissions, minutes_in_a_year
-# from keys import ftx_api_key, ftx_secret_key
 import keys
 from ftx.rest.client import FtxClient
-from pypfopt.efficient_frontier import EfficientFrontier
-from pypfopt import risk_models, expected_returns, black_litterman, objective_functions
-from pypfopt import BlackLittermanModel
-import concurrent.futures
-from bayes_opt import BayesianOptimization
-import warnings
 
-# from utils import (
-#     choose_get_buys_and_sells_fn,
-#     get_filtered_strategies_and_weights,
-#     get_parameter_names,
-# )
+# from pypfopt.efficient_frontier import EfficientFrontier
+# from pypfopt import risk_models, expected_returns, black_litterman, objective_functions
+# from pypfopt import BlackLittermanModel
+# import concurrent.futures
+from bayes_opt import BayesianOptimization
 
 
 def save_optimized_strategy(
@@ -126,7 +110,7 @@ def optimize_strategy(
 
     for symbol in tqdm(symbols, disable=not verbose):
         symbol_price_data, symbol_spread_data = data.load_data_for_symbol(
-            data_dir, symbol, split_data=False
+            data_dir, symbol, split_data=False, displacement=None
         )
 
         price_data[symbol] = symbol_price_data
@@ -2303,15 +2287,17 @@ def main():
 
     client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
     balance = utils.get_total_balance(client, False)
-    balance *= constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
-    k = 25
-    min_length = constants.MINUTES_IN_A_YEAR // 2
+    balance *= (
+        constants.MAX_TAKE_PROFIT / constants.MAX_NUMBER_OF_SIMULTANEOUS_STRATEGIES
+    )
+    k = 20
+    min_length = constants.MINUTES_IN_A_YEAR
     strategy_type = "macross"
-    use_all_start_times = True
-    quantile = 0.3
-    min_avg_monthly_return = 1.10
+    use_all_start_times = False
+    quantile = 0.5
+    min_avg_monthly_return = 1.0
     fine_tune = False
-    N_iter = 25
+    N_iter = 16
     fname = "optim_results/params.json"
     verbose = True
 
