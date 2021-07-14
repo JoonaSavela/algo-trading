@@ -1,15 +1,13 @@
-scipy
-numpy
-pandas
-matplotlib
-pytest
-hypothesis
 black
-requests
+pandas
+numpy
 ciso8601
-hmac
-urllib
-tqdm
-PyPortfolioOpt
-bayesian-optimization
-loguru
+requests
+# scipy
+# matplotlib
+# hmac
+# urllib
+# tqdm
+# PyPortfolioOpt
+# bayesian-optimization
+# loguru

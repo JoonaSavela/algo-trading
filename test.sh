@@ -1,0 +1,1 @@
+python -m pytest --capture=no tests/test_data.py
