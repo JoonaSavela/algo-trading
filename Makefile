@@ -1,37 +1,34 @@
-all: collect format test optimize tax
+all: collect test optimize tax
 
 init:
 	pip3 install -r requirements.txt
 	git clone git@github.com:JoonaSavela/ftx.git
 
-format:
-	black .
-
-test: format
+test:
 	pytest tests
 
-test_fast: format
+test_fast:
 	pytest -m "not slow" tests
 
-test_collect: format
+test_collect:
 	pytest tests/test_collect.py
 
-test_collect_fast: format
+test_collect_fast:
 	pytest -m "not slow" tests/test_collect.py
 
-test_utils: format
+test_utils:
 	pytest tests/test_utils.py
 
-test_utils_fast: format
+test_utils_fast:
 	pytest -m "not slow" tests/test_utils.py
 
-test_optimize: format
+test_optimize:
 	pytest tests/test_optimize.py
 
-test_optimize_fast: format
+test_optimize_fast:
 	pytest -m "not slow" tests/test_optimize.py
 
-performance: format
+performance:
 	pytest performance -rP
 
 collect:
@@ -51,4 +48,4 @@ tax:
 
 
 
-.PHONY: all init format test test_fast test_collect test_collect_fast test_utils test_utils_fast test_optimize test_optimize_fast performance collect optimize run tax
+.PHONY: all init test test_fast test_collect test_collect_fast test_utils test_utils_fast test_optimize test_optimize_fast performance collect optimize run tax
