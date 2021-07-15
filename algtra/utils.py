@@ -1,26 +1,29 @@
 if __name__ == "__main__":
     raise ValueError("algtra/utils.py should not be run as main.")
 
-import numpy as np
-import pandas as pd
+# import numpy as np
+# import pandas as pd
 import json
-from math import log10, floor, ceil
-from scipy import stats
-from itertools import product
-import os
-import sys
-import time
-from algtra import constants
-from algtra.collect import data
-from numba import njit, vectorize, float64
-from ciso8601 import parse_datetime
-from functools import reduce
 
-# matplotlib is not installed in cloud since it is not needed
-try:
-    import matplotlib.pyplot as plt
-except ImportError as e:
-    print(e)
+# from math import log10, floor, ceil
+# from scipy import stats
+# from itertools import product
+# import os
+# import sys
+# import time
+from . import constants
+
+# from algtra.collect import data
+from numba import njit, vectorize, float64
+
+# from ciso8601 import parse_datetime
+# from functools import reduce
+
+# # matplotlib is not installed in cloud since it is not needed
+# try:
+#     import matplotlib.pyplot as plt
+# except ImportError as e:
+#     print(e)
 
 # TODO: test
 @njit
@@ -463,7 +466,7 @@ def append_to_dict_of_collections(d, k, v, collection_type="list"):
     return d
 
 
-def get_coin(symbol):
+def get_coin_from_symbol(symbol):
     for partial_leveraged_symbol in constants.PARTIAL_LEVERAGED_SYMBOLS:
         symbol = symbol.replace(partial_leveraged_symbol, "")
 
