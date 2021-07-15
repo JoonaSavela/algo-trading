@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from ftx.rest.client import FtxClient
@@ -10,9 +11,18 @@ def datetime_to_timestamp(dt):
     return parse_datetime(dt).timestamp()
 
 
+def get_data_dir():
+    return os.path.abspath(
+        os.path.join(constants.DATA_STORAGE_LOCATION, constants.LOCAL_DATA_DIR)
+    )
+
+
 class DataProcessor:
     def __init__(self) -> None:
         self.client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+
+    def get_markets(self):
+        return pd.DataFrame(self.client.list_markets())
 
     def filter_markets(self, markets):
         markets = markets[markets["name"].str.contains("/USD")]
@@ -26,14 +36,16 @@ class DataProcessor:
         return markets
 
     def get_filtered_markets(self):
-        markets = pd.DataFrame(self.client.list_markets())
+        markets = self.get_markets()
         markets = self.filter_markets(markets)
 
         return markets
 
     def get_coins(self):
         markets = self.get_filtered_markets()
-        coins = list(markets["baseCurrency"].map(lambda x: utils.get_coin(x)))
+        coins = list(
+            markets["baseCurrency"].map(lambda x: utils.get_coin_from_symbol(x))
+        )
 
         return coins
 
@@ -64,6 +76,7 @@ class PriceDataProcessor(DataProcessor):
 
         return start_time
 
+    # TODO: add option for hourly data
     def fetch(self, coin: str, limit=None, stop_at_timestamp=None):
         if coin not in self.get_coins():
             raise ValueError(
