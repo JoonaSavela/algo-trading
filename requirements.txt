@@ -3,6 +3,7 @@ pandas
 numpy
 ciso8601
 requests
+numba
 # scipy
 # matplotlib
 # hmac
