@@ -1,1 +1,1 @@
-python -m pytest --capture=no tests/test_data.py
+python -m pytest --capture=no tests/test_data

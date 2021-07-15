@@ -1,8 +1,8 @@
 from algtra import data
 from algtra import constants
-import pytest
 import pandas as pd
 from hypothesis import given, assume, example, strategies as st, settings
+import pytest
 
 # import os
 # import sys
@@ -13,45 +13,12 @@ from hypothesis import given, assume, example, strategies as st, settings
 #     sys.path.insert(0, PROJECT_ROOT)
 
 # from algtra import utils
-# from algtra import constants
-# from ftx.rest.client import FtxClient
-# import keys
 # import numpy as np
 # import time
 # from datetime import datetime, timedelta
 # from ciso8601 import parse_datetime
 # from hypothesis.extra.numpy import arrays, floating_dtypes, from_dtype
 # import glob
-
-
-@pytest.fixture
-def pdp():
-    return data.PriceDataProcessor()
-
-
-def test_get_coins_returns_a_list():
-    assert isinstance(data.get_coins(), list)
-
-
-def test_get_coins_length_is_at_least_1():
-    assert len(data.get_coins()) >= 1
-
-
-def test_coins_in_get_coins_do_not_contain_fiat_currencies():
-    coins = data.get_coins()
-
-    for curr in constants.NON_USD_FIAT_CURRENCIES:
-        assert all(curr != coin for coin in coins)
-
-
-def test_get_coins_is_a_list_of_uppercase_strings():
-    for coin in data.get_coins():
-        assert isinstance(coin, str)
-        assert coin == coin.upper()
-
-
-def test_PriceDataProcessor_should_be_defined(pdp):
-    pass
 
 
 def test_PriceDataProcessor_fetch_with_invalid_input_should_fail(pdp):

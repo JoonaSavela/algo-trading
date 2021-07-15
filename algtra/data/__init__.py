@@ -3,19 +3,44 @@ import numpy as np
 from ftx.rest.client import FtxClient
 import keys
 from ciso8601 import parse_datetime
-
-
-def get_coins():
-    return ["BTC", "ETH"]
+from .. import constants, utils
 
 
 def datetime_to_timestamp(dt):
     return parse_datetime(dt).timestamp()
 
 
-class PriceDataProcessor:
+class DataProcessor:
     def __init__(self) -> None:
         self.client = FtxClient(keys.ftx_api_key, keys.ftx_secret_key)
+
+    def filter_markets(self, markets):
+        markets = markets[markets["name"].str.contains("/USD")]
+        markets = markets[markets["quoteCurrency"] == "USD"]
+        markets = markets[~markets["name"].str.contains("USDT")]
+        for curr in constants.NON_USD_FIAT_CURRENCIES:
+            markets = markets[~markets["name"].str.contains(curr)]
+        markets = markets[markets["tokenizedEquity"].isna()]
+        markets = markets[markets["volumeUsd24h"] > 0]
+
+        return markets
+
+    def get_filtered_markets(self):
+        markets = pd.DataFrame(self.client.list_markets())
+        markets = self.filter_markets(markets)
+
+        return markets
+
+    def get_coins(self):
+        markets = self.get_filtered_markets()
+        coins = list(markets["baseCurrency"].map(lambda x: utils.get_coin(x)))
+
+        return coins
+
+
+class PriceDataProcessor(DataProcessor):
+    def __init__(self) -> None:
+        super().__init__()
 
     def _get_price_data_and_subtract_its_length_from_limit(
         self, coin, limit, start_time=None
@@ -40,7 +65,7 @@ class PriceDataProcessor:
         return start_time
 
     def fetch(self, coin: str, limit=None, stop_at_timestamp=None):
-        if coin not in get_coins():
+        if coin not in self.get_coins():
             raise ValueError(
                 f"Invalid input for parameter 'coin' (value {coin} was given)."
             )
